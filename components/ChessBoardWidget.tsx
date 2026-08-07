@@ -33,7 +33,8 @@ export default function ChessBoardWidget({ initialFen, pieceSet = "cburnett", on
     return {
       free: false,
       dests,
-      color: calcTurnColor()
+      color: calcTurnColor(),
+      showDests: true,
     };
   };
 
@@ -57,13 +58,24 @@ export default function ChessBoardWidget({ initialFen, pieceSet = "cburnett", on
       <Chessground
         width="100%"
         height="100%"
-        turnColor={calcTurnColor()}
-        movable={calcMovable()}
-        lastMove={lastMove}
-        fen={fen}
-        coordinates={true}
-        onMove={handleMove}
-        animation={{ enabled: true, duration: 200 }}
+        config={{
+          fen: fen,
+          turnColor: calcTurnColor(),
+          lastMove: lastMove,
+          highlight: { lastMove: true, check: true },
+          drawable: { enabled: true, visible: true },
+          coordinates: true,
+          animation: { enabled: true, duration: 200 },
+          movable: {
+            free: false,
+            color: calcTurnColor(),
+            dests: calcMovable().dests,
+            showDests: true,
+            events: {
+              after: handleMove,
+            },
+          },
+        }}
       />
     </div>
   );

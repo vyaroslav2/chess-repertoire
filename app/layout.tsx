@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import "chessground/assets/chessground.base.css";
+import "chessground/assets/chessground.brown.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
