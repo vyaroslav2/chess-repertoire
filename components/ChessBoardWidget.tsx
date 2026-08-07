@@ -7,21 +7,78 @@ import { Chess } from "chess.js";
 
 interface ChessBoardWidgetProps {
   initialFen?: string;
+  pgn?: string;
   pieceSet?: "cburnett" | "staunty" | "alpha" | "merida";
   onMove?: (move: string, fen: string) => void;
 }
 
-export default function ChessBoardWidget({ initialFen, pieceSet = "merida", onMove }: ChessBoardWidgetProps) {
-  const [chess] = useState(initialFen ? new Chess(initialFen) : new Chess());
+export default function ChessBoardWidget({ initialFen, pgn, pieceSet = "merida", onMove }: ChessBoardWidgetProps) {
+  const [chess] = useState(new Chess());
   const [fen, setFen] = useState(chess.fen());
   const [lastMove, setLastMove] = useState<[string, string] | undefined>();
+  
+  // State for PGN navigation
+  const [moveHistory, setMoveHistory] = useState<any[]>([]);
+  const [currentMoveIndex, setCurrentMoveIndex] = useState(0);
 
   useEffect(() => {
-    if (initialFen) {
+    if (pgn) {
+      // Load the PGN to extract the sequence of moves
+      chess.loadPgn(pgn);
+      const history = chess.history({ verbose: true });
+      setMoveHistory(history);
+      
+      // Reset to starting position to allow stepping forward
+      chess.reset();
+      setFen(chess.fen());
+      setLastMove(undefined);
+      setCurrentMoveIndex(0);
+    } else if (initialFen) {
       chess.load(initialFen);
       setFen(chess.fen());
+      setMoveHistory([]);
+      setCurrentMoveIndex(0);
+      setLastMove(undefined);
     }
-  }, [initialFen, chess]);
+  }, [initialFen, pgn, chess]);
+
+  // Keyboard navigation handler
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "ArrowRight") {
+        setCurrentMoveIndex((prev) => {
+          if (prev < moveHistory.length) {
+            const nextMove = moveHistory[prev];
+            chess.move(nextMove);
+            setFen(chess.fen());
+            setLastMove([nextMove.from, nextMove.to]);
+            return prev + 1;
+          }
+          return prev;
+        });
+      } else if (e.key === "ArrowLeft") {
+        setCurrentMoveIndex((prev) => {
+          if (prev > 0) {
+            const undone = chess.undo();
+            setFen(chess.fen());
+            
+            // Re-calculate last move based on the move before the undone one
+            if (prev > 1) {
+              const prevMove = moveHistory[prev - 2];
+              setLastMove([prevMove.from, prevMove.to]);
+            } else {
+              setLastMove(undefined);
+            }
+            return prev - 1;
+          }
+          return prev;
+        });
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [moveHistory, chess]);
 
   const calcTurnColor = () => (chess.turn() === "w" ? "white" : "black");
   
