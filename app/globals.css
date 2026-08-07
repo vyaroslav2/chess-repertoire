@@ -231,5 +231,6 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
   color: var(--lichess-text-muted) !important;
   font-weight: 700 !important;
   font-size: 13px !important;
+  text-transform: lowercase !important;
 }
 
