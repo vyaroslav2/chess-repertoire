@@ -46,43 +46,37 @@ export default function ChessBoardWidget({ initialFen, pgn, pieceSet = "merida",
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "ArrowRight") {
-        setCurrentMoveIndex((prev) => {
-          if (prev < moveHistory.length) {
-            const nextMove = moveHistory[prev];
-            try {
-              chess.move(nextMove.san);
-              setFen(chess.fen());
-              setLastMove([nextMove.from, nextMove.to]);
-              return prev + 1;
-            } catch (err) {
-              console.error("Move error:", err);
-            }
-          }
-          return prev;
-        });
-      } else if (e.key === "ArrowLeft") {
-        setCurrentMoveIndex((prev) => {
-          if (prev > 0) {
-            const undone = chess.undo();
+        if (currentMoveIndex < moveHistory.length) {
+          const nextMove = moveHistory[currentMoveIndex];
+          try {
+            chess.move(nextMove.san);
             setFen(chess.fen());
-            
-            // Re-calculate last move based on the move before the undone one
-            if (prev > 1) {
-              const prevMove = moveHistory[prev - 2];
-              setLastMove([prevMove.from, prevMove.to]);
-            } else {
-              setLastMove(undefined);
-            }
-            return prev - 1;
+            setLastMove([nextMove.from, nextMove.to]);
+            setCurrentMoveIndex(currentMoveIndex + 1);
+          } catch (err) {
+            console.error("Move error:", err);
           }
-          return prev;
-        });
+        }
+      } else if (e.key === "ArrowLeft") {
+        if (currentMoveIndex > 0) {
+          chess.undo();
+          setFen(chess.fen());
+          
+          // Re-calculate last move based on the move before the undone one
+          if (currentMoveIndex > 1) {
+            const prevMove = moveHistory[currentMoveIndex - 2];
+            setLastMove([prevMove.from, prevMove.to]);
+          } else {
+            setLastMove(undefined);
+          }
+          setCurrentMoveIndex(currentMoveIndex - 1);
+        }
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [moveHistory, chess]);
+  }, [moveHistory, chess, currentMoveIndex]);
 
   const calcTurnColor = () => (chess.turn() === "w" ? "white" : "black");
   
