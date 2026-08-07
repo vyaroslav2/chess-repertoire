@@ -1,0 +1,234 @@
+:root {
+  --lichess-bg: #161512;
+  --lichess-panel-bg: #262421;
+  --lichess-panel-secondary: #1e1c18;
+  --lichess-border: #363431;
+  --lichess-text-primary: #bababa;
+  --lichess-text-bright: #ffffff;
+  --lichess-text-muted: #787674;
+  --lichess-green: #629924;
+  --lichess-green-hover: #75b32c;
+  --lichess-accent: #3692e7;
+  
+  --glass-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--lichess-bg);
+  color: var(--lichess-text-primary);
+  min-height: 100vh;
+  line-height: 1.5;
+}
+
+a {
+  color: var(--lichess-accent);
+  text-decoration: none;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: inherit;
+}
+
+/* Lichess Style Panels */
+.lichess-panel {
+  background: var(--lichess-panel-bg);
+  border: 1px solid var(--lichess-border);
+  border-radius: 4px;
+  box-shadow: var(--glass-shadow);
+  padding: 20px;
+}
+
+/* Lichess Style Header */
+.lichess-header {
+  height: 50px;
+  background: #1e1c18;
+  border-bottom: 1px solid var(--lichess-border);
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  gap: 16px;
+}
+
+.lichess-header h1 {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--lichess-text-bright);
+  letter-spacing: 0.5px;
+}
+
+.lichess-header nav {
+  display: flex;
+  gap: 16px;
+  margin-left: 20px;
+}
+
+.lichess-header nav a {
+  color: var(--lichess-text-primary);
+  font-weight: 600;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.lichess-header nav a:hover, .lichess-header nav a.active {
+  color: var(--lichess-text-bright);
+}
+
+/* Buttons */
+.btn {
+  padding: 10px 18px;
+  border-radius: 3px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  transition: background-color 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--lichess-text-bright);
+}
+
+.btn-lichess-green {
+  background-color: var(--lichess-green);
+  color: white;
+}
+
+.btn-lichess-green:hover {
+  background-color: var(--lichess-green-hover);
+}
+
+.btn-lichess-secondary {
+  background-color: #363431;
+  color: var(--lichess-text-bright);
+}
+
+.btn-lichess-secondary:hover {
+  background-color: #454340;
+}
+
+.btn-lichess-secondary.active {
+  background-color: var(--lichess-green);
+  color: white;
+}
+
+/* Anki SRS Buttons */
+.btn-again { background-color: #c62828; color: white; }
+.btn-hard { background-color: #ef6c00; color: white; }
+.btn-good { background-color: #2e7d32; color: white; }
+.btn-easy { background-color: #1565c0; color: white; }
+
+.btn-again:hover, .btn-hard:hover, .btn-good:hover, .btn-easy:hover {
+  filter: brightness(1.15);
+}
+
+/* Typography */
+h1, h2, h3 {
+  color: var(--lichess-text-bright);
+}
+
+h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
+
+/* Authentic Lichess Newspaper Board SVG */
+.cg-board-newspaper cg-board {
+  background-image: url('https://lichess1.org/assets/images/board/svg/newspaper.svg') !important;
+  background-size: cover !important;
+}
+
+/* Piece Set Classes using Lichess CDN */
+/* cburnett */
+.piece-set-cburnett piece.pawn.white { background-image: url('https://lichess1.org/assets/piece/cburnett/wP.svg') !important; }
+.piece-set-cburnett piece.knight.white { background-image: url('https://lichess1.org/assets/piece/cburnett/wN.svg') !important; }
+.piece-set-cburnett piece.bishop.white { background-image: url('https://lichess1.org/assets/piece/cburnett/wB.svg') !important; }
+.piece-set-cburnett piece.rook.white { background-image: url('https://lichess1.org/assets/piece/cburnett/wR.svg') !important; }
+.piece-set-cburnett piece.queen.white { background-image: url('https://lichess1.org/assets/piece/cburnett/wQ.svg') !important; }
+.piece-set-cburnett piece.king.white { background-image: url('https://lichess1.org/assets/piece/cburnett/wK.svg') !important; }
+
+.piece-set-cburnett piece.pawn.black { background-image: url('https://lichess1.org/assets/piece/cburnett/bP.svg') !important; }
+.piece-set-cburnett piece.knight.black { background-image: url('https://lichess1.org/assets/piece/cburnett/bN.svg') !important; }
+.piece-set-cburnett piece.bishop.black { background-image: url('https://lichess1.org/assets/piece/cburnett/bB.svg') !important; }
+.piece-set-cburnett piece.rook.black { background-image: url('https://lichess1.org/assets/piece/cburnett/bR.svg') !important; }
+.piece-set-cburnett piece.queen.black { background-image: url('https://lichess1.org/assets/piece/cburnett/bQ.svg') !important; }
+.piece-set-cburnett piece.king.black { background-image: url('https://lichess1.org/assets/piece/cburnett/bK.svg') !important; }
+
+/* staunty */
+.piece-set-staunty piece.pawn.white { background-image: url('https://lichess1.org/assets/piece/staunty/wP.svg') !important; }
+.piece-set-staunty piece.knight.white { background-image: url('https://lichess1.org/assets/piece/staunty/wN.svg') !important; }
+.piece-set-staunty piece.bishop.white { background-image: url('https://lichess1.org/assets/piece/staunty/wB.svg') !important; }
+.piece-set-staunty piece.rook.white { background-image: url('https://lichess1.org/assets/piece/staunty/wR.svg') !important; }
+.piece-set-staunty piece.queen.white { background-image: url('https://lichess1.org/assets/piece/staunty/wQ.svg') !important; }
+.piece-set-staunty piece.king.white { background-image: url('https://lichess1.org/assets/piece/staunty/wK.svg') !important; }
+
+.piece-set-staunty piece.pawn.black { background-image: url('https://lichess1.org/assets/piece/staunty/bP.svg') !important; }
+.piece-set-staunty piece.knight.black { background-image: url('https://lichess1.org/assets/piece/staunty/bN.svg') !important; }
+.piece-set-staunty piece.bishop.black { background-image: url('https://lichess1.org/assets/piece/staunty/bB.svg') !important; }
+.piece-set-staunty piece.rook.black { background-image: url('https://lichess1.org/assets/piece/staunty/bR.svg') !important; }
+.piece-set-staunty piece.queen.black { background-image: url('https://lichess1.org/assets/piece/staunty/bQ.svg') !important; }
+.piece-set-staunty piece.king.black { background-image: url('https://lichess1.org/assets/piece/staunty/bK.svg') !important; }
+
+/* alpha */
+.piece-set-alpha piece.pawn.white { background-image: url('https://lichess1.org/assets/piece/alpha/wP.svg') !important; }
+.piece-set-alpha piece.knight.white { background-image: url('https://lichess1.org/assets/piece/alpha/wN.svg') !important; }
+.piece-set-alpha piece.bishop.white { background-image: url('https://lichess1.org/assets/piece/alpha/wB.svg') !important; }
+.piece-set-alpha piece.rook.white { background-image: url('https://lichess1.org/assets/piece/alpha/wR.svg') !important; }
+.piece-set-alpha piece.queen.white { background-image: url('https://lichess1.org/assets/piece/alpha/wQ.svg') !important; }
+.piece-set-alpha piece.king.white { background-image: url('https://lichess1.org/assets/piece/alpha/wK.svg') !important; }
+
+.piece-set-alpha piece.pawn.black { background-image: url('https://lichess1.org/assets/piece/alpha/bP.svg') !important; }
+.piece-set-alpha piece.knight.black { background-image: url('https://lichess1.org/assets/piece/alpha/bN.svg') !important; }
+.piece-set-alpha piece.bishop.black { background-image: url('https://lichess1.org/assets/piece/alpha/bB.svg') !important; }
+.piece-set-alpha piece.rook.black { background-image: url('https://lichess1.org/assets/piece/alpha/bR.svg') !important; }
+.piece-set-alpha piece.queen.black { background-image: url('https://lichess1.org/assets/piece/alpha/bQ.svg') !important; }
+.piece-set-alpha piece.king.black { background-image: url('https://lichess1.org/assets/piece/alpha/bK.svg') !important; }
+
+/* merida */
+.piece-set-merida piece.pawn.white { background-image: url('https://lichess1.org/assets/piece/merida/wP.svg') !important; }
+.piece-set-merida piece.knight.white { background-image: url('https://lichess1.org/assets/piece/merida/wN.svg') !important; }
+.piece-set-merida piece.bishop.white { background-image: url('https://lichess1.org/assets/piece/merida/wB.svg') !important; }
+.piece-set-merida piece.rook.white { background-image: url('https://lichess1.org/assets/piece/merida/wR.svg') !important; }
+.piece-set-merida piece.queen.white { background-image: url('https://lichess1.org/assets/piece/merida/wQ.svg') !important; }
+.piece-set-merida piece.king.white { background-image: url('https://lichess1.org/assets/piece/merida/wK.svg') !important; }
+
+.piece-set-merida piece.pawn.black { background-image: url('https://lichess1.org/assets/piece/merida/bP.svg') !important; }
+.piece-set-merida piece.knight.black { background-image: url('https://lichess1.org/assets/piece/merida/bN.svg') !important; }
+.piece-set-merida piece.bishop.black { background-image: url('https://lichess1.org/assets/piece/merida/bB.svg') !important; }
+.piece-set-merida piece.rook.black { background-image: url('https://lichess1.org/assets/piece/merida/bR.svg') !important; }
+.piece-set-merida piece.queen.black { background-image: url('https://lichess1.org/assets/piece/merida/bQ.svg') !important; }
+.piece-set-merida piece.king.black { background-image: url('https://lichess1.org/assets/piece/merida/bK.svg') !important; }
+
+/* Coordinates (Rank numbers on LEFT, File letters on BOTTOM) */
+.cg-wrap coords.ranks {
+  left: -18px !important;
+  right: auto !important;
+  top: 0 !important;
+  height: 100% !important;
+  display: flex !important;
+  flex-direction: column-reverse !important;
+  justify-content: space-around !important;
+  align-items: flex-end !important;
+}
+
+.cg-wrap coords.files {
+  bottom: -20px !important;
+  left: 0 !important;
+  width: 100% !important;
+  display: flex !important;
+  flex-direction: row !important;
+  justify-content: space-around !important;
+  text-align: center !important;
+}
+
+.cg-wrap coords coord {
+  color: var(--lichess-text-muted) !important;
+  font-weight: 700 !important;
+  font-size: 13px !important;
+}
+
