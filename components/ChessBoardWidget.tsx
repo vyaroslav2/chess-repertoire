@@ -11,7 +11,7 @@ interface ChessBoardWidgetProps {
   onMove?: (move: string, fen: string) => void;
 }
 
-export default function ChessBoardWidget({ initialFen, pieceSet = "cburnett", onMove }: ChessBoardWidgetProps) {
+export default function ChessBoardWidget({ initialFen, pieceSet = "merida", onMove }: ChessBoardWidgetProps) {
   const [chess] = useState(initialFen ? new Chess(initialFen) : new Chess());
   const [fen, setFen] = useState(chess.fen());
   const [lastMove, setLastMove] = useState<[string, string] | undefined>();
