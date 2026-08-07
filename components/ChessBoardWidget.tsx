@@ -49,10 +49,14 @@ export default function ChessBoardWidget({ initialFen, pgn, pieceSet = "merida",
         setCurrentMoveIndex((prev) => {
           if (prev < moveHistory.length) {
             const nextMove = moveHistory[prev];
-            chess.move(nextMove);
-            setFen(chess.fen());
-            setLastMove([nextMove.from, nextMove.to]);
-            return prev + 1;
+            try {
+              chess.move(nextMove.san);
+              setFen(chess.fen());
+              setLastMove([nextMove.from, nextMove.to]);
+              return prev + 1;
+            } catch (err) {
+              console.error("Move error:", err);
+            }
           }
           return prev;
         });
