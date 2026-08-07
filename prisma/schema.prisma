@@ -1,0 +1,71 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Since Docker wasn't running locally, we are using SQLite for the local environment.
+// This is perfect for local testing and can be effortlessly swapped to "postgresql" 
+// in the future if you decide to host the application.
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String       @id @default(uuid())
+  username     String       @unique
+  repertoires  Repertoire[]
+}
+
+model Repertoire {
+  id           String                   @id @default(uuid())
+  title        String
+  color        String                   // "white" or "black"
+  userId       String
+  user         User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stats        RepertoirePositionStat[]
+}
+
+model Position {
+  id           String                   @id @default(uuid())
+  fen          String                   @unique
+  
+  // Relationships for moves where this position is the starting or resulting point
+  outgoingMoves Move[]                  @relation("FromPosition")
+  incomingMoves Move[]                  @relation("ToPosition")
+
+  stats        RepertoirePositionStat[]
+}
+
+model Move {
+  id             String     @id @default(uuid())
+  san            String     // The Standard Algebraic Notation (e.g. "e4")
+  fromPositionId String
+  toPositionId   String
+
+  fromPosition   Position   @relation("FromPosition", fields: [fromPositionId], references: [id], onDelete: Cascade)
+  toPosition     Position   @relation("ToPosition", fields: [toPositionId], references: [id], onDelete: Cascade)
+
+  // One position can have multiple target moves depending on the repertoire, so we link it here
+  stats          RepertoirePositionStat[]
+}
+
+model RepertoirePositionStat {
+  id           String     @id @default(uuid())
+  repertoireId String
+  positionId   String
+  targetMoveId String
+
+  repertoire   Repertoire @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
+  position     Position   @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  targetMove   Move       @relation(fields: [targetMoveId], references: [id], onDelete: Cascade)
+
+  // SRS Data (SuperMemo-2 style)
+  easeFactor   Float      @default(2.5)
+  interval     Int        @default(0)       // Days until next review
+  dueDate      DateTime   @default(now())
+
+  @@unique([repertoireId, positionId]) // Ensure a user has only one set of stats per position per repertoire
+}
