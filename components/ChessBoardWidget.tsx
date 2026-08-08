@@ -21,6 +21,23 @@ export default function ChessBoardWidget({ initialFen, pgn, pieceSet = "merida",
   // State for PGN navigation
   const [moveHistory, setMoveHistory] = useState<any[]>([]);
   const [currentMoveIndex, setCurrentMoveIndex] = useState(0);
+  
+  // State for board orientation
+  const [orientation, setOrientation] = useState<"white" | "black">("white");
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      if (e.key === 'f' || e.key === 'F') {
+        setOrientation(prev => prev === "white" ? "black" : "white");
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   useEffect(() => {
     if (pgn) {
@@ -113,6 +130,7 @@ export default function ChessBoardWidget({ initialFen, pgn, pieceSet = "merida",
           height="100%"
           config={{
             fen: fen,
+            orientation: orientation,
             turnColor: calcTurnColor(),
             lastMove: lastMove,
             highlight: { lastMove: true, check: true },

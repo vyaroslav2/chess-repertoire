@@ -7,8 +7,8 @@ export default async function Home() {
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", 
-    background: "yellow", 
-    /*background: "#161512",*/ 
+    /*background: "yellow",*/ 
+    background: "#161512", 
     gap: "20px", padding: "20px" }}>
       <RepertoireTester database={repertoireData} />
     </div>
