@@ -165,7 +165,7 @@ async function expandNode(
         console.error(`Error processing move ${moveSan}:`, e);
       }
     }
-
+  } else {
     // BLACK'S TURN - ENGINE VERIFICATION + GEMINI API
     console.log(`Fetching Stockfish Cloud Eval for: ${pgn}`);
     
