@@ -39,32 +39,60 @@ async function getEngineEval(fen: string) {
   return null;
 }
 
+// Fetch wrapper with 429 backoff
+async function fetchWithRetry(url: string, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    const response = await fetch(url, { headers: { 'Authorization': `Bearer ${LICHESS_API_TOKEN}`, 'Accept': 'application/json' }});
+    if (response.status === 429) {
+      console.log(`Rate limited by Lichess (429). Retrying in ${3 * (i+1)} seconds...`);
+      await delay(3000 * (i+1));
+      continue;
+    }
+    if (!response.ok) {
+      console.log(`Lichess error ${response.status} on ${url}`);
+      return null;
+    }
+    return await response.json();
+  }
+  return null;
+}
+
 // Phase 1: Data Fetching for White
 async function fetchAllDatabases(fen: string) {
   const strippedFen = fen.split(" ").slice(0, 4).join(" ");
-  let masters = { moves: [], totalGames: 0 };
-  let elite = { moves: [], totalGames: 0 };
-  let amateur = { moves: [], totalGames: 0 };
+  let masters: any = { moves: [], totalGames: 0 };
+  let elite: any = { moves: [], totalGames: 0 };
+  let amateur: any = { moves: [], totalGames: 0 };
 
   try {
     const mastersUrl = `https://explorer.lichess.ovh/masters?fen=${encodeURIComponent(strippedFen)}`;
-    const mastersRes = await fetch(mastersUrl, { headers: { 'Authorization': `Bearer ${LICHESS_API_TOKEN}`, 'Accept': 'application/json' }});
-    masters = await mastersRes.json();
-    masters.totalGames = masters.white + masters.draws + masters.black;
+    const mData = await fetchWithRetry(mastersUrl);
+    if (mData) {
+      masters = mData;
+      masters.totalGames = masters.white + masters.draws + masters.black;
+    }
   } catch (e) {}
+
+  await delay(1000); // Be gentle to API
 
   try {
     const eliteUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(strippedFen)}&speeds=classical,rapid&ratings=2500`;
-    const eliteRes = await fetch(eliteUrl, { headers: { 'Authorization': `Bearer ${LICHESS_API_TOKEN}`, 'Accept': 'application/json' }});
-    elite = await eliteRes.json();
-    elite.totalGames = elite.white + elite.draws + elite.black;
+    const eData = await fetchWithRetry(eliteUrl);
+    if (eData) {
+      elite = eData;
+      elite.totalGames = elite.white + elite.draws + elite.black;
+    }
   } catch (e) {}
+
+  await delay(1000); // Be gentle to API
 
   try {
     const amateurUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(strippedFen)}&speeds=classical,rapid&ratings=1600,1800,2000`;
-    const amateurRes = await fetch(amateurUrl, { headers: { 'Authorization': `Bearer ${LICHESS_API_TOKEN}`, 'Accept': 'application/json' }});
-    amateur = await amateurRes.json();
-    amateur.totalGames = amateur.white + amateur.draws + amateur.black;
+    const aData = await fetchWithRetry(amateurUrl);
+    if (aData) {
+      amateur = aData;
+      amateur.totalGames = amateur.white + amateur.draws + amateur.black;
+    }
   } catch (e) {}
 
   return [masters, elite, amateur];
@@ -77,22 +105,19 @@ function calculateMasterThreatScore(mastersData: any, eliteData: any) {
 
     const mTotal = mastersData ? mastersData.white + mastersData.draws + mastersData.black : 0;
     const mWhite = mastersData ? mastersData.white : 0;
-    const mDraws = mastersData ? mastersData.draws : 0;
 
     const eTotal = eliteData ? eliteData.white + eliteData.draws + eliteData.black : 0;
     const eWhite = eliteData ? eliteData.white : 0;
-    const eDraws = eliteData ? eliteData.draws : 0;
 
     const weightedCount = (mTotal * 5) + eTotal;
     const weightedWhiteWins = (mWhite * 5) + eWhite;
-    const weightedDraws = (mDraws * 5) + eDraws;
 
     if (weightedCount < MIN_GAMES_THRESHOLD) return 0;
 
     const smoothedCount = weightedCount + SKEPTICAL_PRIOR_BLACK_WINS;
-    const whiteScore = (weightedWhiteWins + (0.5 * weightedDraws)) / smoothedCount;
+    const whiteWinRate = weightedWhiteWins / smoothedCount;
     
-    return whiteScore; 
+    return whiteWinRate; 
 }
 
 // Phase 3: Filter White's moves
@@ -120,7 +145,7 @@ function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: number, mast
         return { include: true, reason: "Amateur Trap", isTrap: true, probability };
     }
 
-    if (masterThreatScore >= 0.55) {
+    if (masterThreatScore >= 0.45) {
         return { include: true, reason: "Master Threat", isTrap: true, probability };
     }
 
@@ -160,9 +185,8 @@ Reply ONLY with the exact standard algebraic notation of the single best move (e
   
   try {
     const mastersUrl = `https://explorer.lichess.ovh/masters?fen=${encodeURIComponent(strippedFen)}`;
-    const mastersRes = await fetch(mastersUrl, { headers: { 'Authorization': `Bearer ${LICHESS_API_TOKEN}`, 'Accept': 'application/json' }});
-    const mastersData = await mastersRes.json();
-    if (mastersData.moves) {
+    const mastersData = await fetchWithRetry(mastersUrl);
+    if (mastersData && mastersData.moves) {
       for (const m of mastersData.moves) {
         mergedMoves[m.san] = {
           san: m.san, mastersCount: m.white + m.draws + m.black,
@@ -173,11 +197,12 @@ Reply ONLY with the exact standard algebraic notation of the single best move (e
     }
   } catch (e) {}
 
+  await delay(1000); // Be gentle
+
   try {
     const onlineUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(strippedFen)}&speeds=classical&ratings=2500`;
-    const onlineRes = await fetch(onlineUrl, { headers: { 'Authorization': `Bearer ${LICHESS_API_TOKEN}`, 'Accept': 'application/json' }});
-    const onlineData = await onlineRes.json();
-    if (onlineData.moves) {
+    const onlineData = await fetchWithRetry(onlineUrl);
+    if (onlineData && onlineData.moves) {
       for (const m of onlineData.moves) {
         const totalOnline = m.white + m.draws + m.black;
         if (mergedMoves[m.san]) {
@@ -195,13 +220,17 @@ Reply ONLY with the exact standard algebraic notation of the single best move (e
   } catch (e) {}
 
   const MIN_GAMES_THRESHOLD = 5;
-  const candidateMoves = Object.values(mergedMoves).map(m => {
+    const candidateMoves = Object.values(mergedMoves).map(m => {
     const weightedCount = (m.mastersCount * 5) + m.onlineCount;
     const weightedBlackWins = (m.mastersBlackWin * 5) + m.onlineBlackWin;
     const weightedDraws = (m.mastersDraws * 5) + m.onlineDraws;
-    const smoothedCount = weightedCount + 20;
-    const smoothedDraws = weightedDraws + 20;
-    const score = (weightedBlackWins + (0.5 * smoothedDraws)) / smoothedCount;
+    
+    // THE SKEPTICAL PRIOR: Add 50 dummy White wins to pull flukes down to 0%
+    const smoothedCount = weightedCount + 50;
+    
+    // Calculate score based on actual wins/draws, not "tricks"
+    const score = (weightedBlackWins + (0.5 * weightedDraws)) / smoothedCount;
+    
     return { ...m, weightedCount, score };
   }).filter(m => m.weightedCount >= MIN_GAMES_THRESHOLD);
 
@@ -211,9 +240,8 @@ Reply ONLY with the exact standard algebraic notation of the single best move (e
   let enginePvs: any[] = [];
   try {
     const cloudUrl = `https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(strippedFen)}&multiPv=5`;
-    const cloudRes = await fetch(cloudUrl, { headers: { 'Authorization': `Bearer ${LICHESS_API_TOKEN}`, 'Accept': 'application/json' }});
-    const cloudData = await cloudRes.json();
-    if (!cloudData.error && cloudData.pvs && cloudData.pvs.length > 0) {
+    const cloudData = await fetchWithRetry(cloudUrl);
+    if (cloudData && !cloudData.error && cloudData.pvs && cloudData.pvs.length > 0) {
       enginePvs = cloudData.pvs;
       bestCp = enginePvs[0].cp;
     }
@@ -254,6 +282,12 @@ Reply ONLY with the exact standard algebraic notation of the single best move (e
     } catch(e) {}
   }
 
+  // FALLBACK: If Cloud Eval is missing/fails, just pick the top human move
+  if (!selectedMoveSan && candidateMoves.length > 0) {
+    selectedMoveSan = candidateMoves[0].san;
+    selectedStats = candidateMoves[0];
+  }
+
   return { selectedMoveSan, selectedStats, selectedEngineCp };
 }
 
@@ -271,7 +305,7 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
     });
   }
 
-  const queue = [{ fen: startFen, currentMoveNumber: 1, trapDepth: 0, history: [] as string[] }];
+  const queue = [{ fen: startFen, currentMoveNumber: 1, trapDepth: 0, cumulativeProb: 1.0, history: [] as string[] }];
   
   while (queue.length > 0) {
     const node = queue.shift();
@@ -280,8 +314,19 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
     console.log(`\n--- Queue Size: ${queue.length} | Move: ${node.currentMoveNumber} | Trap Depth: ${node.trapDepth} ---`);
     console.log(`History: ${node.history.join(" ")}`);
 
-    if (node.currentMoveNumber > maxDepth) {
-      console.log(`Hit max depth (${maxDepth}). Stopping branch.`);
+    // Calculate Dynamic Depth Limit based on Cumulative Probability
+    let dynamicMaxDepth = 5; // Default shallow depth for rare stuff (< 0.5%)
+    
+    if (node.cumulativeProb > 0.02) { 
+        dynamicMaxDepth = 15; // Tier 1: > 2% (The absolute mainlines)
+    } else if (node.cumulativeProb > 0.005) {
+        dynamicMaxDepth = 8;  // Tier 2: > 0.5% (Common variations)
+    }
+
+    dynamicMaxDepth = Math.min(dynamicMaxDepth, maxDepth);
+
+    if (node.currentMoveNumber > dynamicMaxDepth) {
+      console.log(`Hit dynamic depth limit (${dynamicMaxDepth} moves) for prob ${(node.cumulativeProb*100).toFixed(2)}%. Stopping branch.`);
       continue;
     }
     if (node.trapDepth >= 3) {
@@ -311,6 +356,34 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
       tempChess.move(whiteMove.san);
       const fenAfterWhite = tempChess.fen();
       const posAfterWhite = await getOrCreatePosition(fenAfterWhite);
+
+      // ==========================================
+      // NEW: SKIP ALREADY GENERATED ENTRIES
+      // ==========================================
+      const existingStat = await prisma.repertoirePositionStat.findUnique({
+        where: { repertoireId_positionId: { repertoireId: repertoire.id, positionId: posAfterWhite.id } }
+      });
+
+      if (existingStat) {
+        const dbBlackMove = await prisma.move.findUnique({ where: { id: existingStat.targetMoveId } });
+        if (dbBlackMove) {
+          console.log(`[SKIPPED API] Already generated in DB! Black responds with: ${dbBlackMove.san} -> ${existingStat.explanation}`);
+          
+          tempChess.move(dbBlackMove.san);
+          const fenAfterBlack = tempChess.fen();
+          
+          queue.push({
+            fen: fenAfterBlack,
+            currentMoveNumber: node.currentMoveNumber + 1,
+            trapDepth: whiteMove.isTrap ? node.trapDepth + 1 : 0,
+            cumulativeProb: node.cumulativeProb * (whiteMove.probability || 1.0),
+            history: [...node.history, whiteMove.san, dbBlackMove.san]
+          });
+          
+          continue; // Instantly move to the next White candidate!
+        }
+      }
+      // ==========================================
       
       let dbWhiteMove = await prisma.move.findFirst({ where: { fromPositionId: posId, toPositionId: posAfterWhite.id, san: whiteMove.san } });
       if (!dbWhiteMove) {
@@ -356,6 +429,7 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
         fen: fenAfterBlack,
         currentMoveNumber: node.currentMoveNumber + 1,
         trapDepth: whiteMove.isTrap ? node.trapDepth + 1 : 0,
+        cumulativeProb: node.cumulativeProb * (whiteMove.probability || 1.0),
         history: [...newHistory, algoResult.selectedMoveSan]
       });
 
@@ -367,4 +441,4 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
 }
 
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-generateRepertoire(START_FEN, 2).catch(console.error).finally(() => prisma.$disconnect());
+generateRepertoire(START_FEN, 3).catch(console.error).finally(() => prisma.$disconnect());
