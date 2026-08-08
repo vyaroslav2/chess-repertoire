@@ -51,7 +51,8 @@ async function expandNode(
   currentDepth: number,
   maxDepth: number,
   repertoireId: string,
-  currentPositionId: string
+  currentPositionId: string,
+  openingName: string = "Caro-Kann Defense"
 ) {
   if (currentDepth >= maxDepth) {
     return;
@@ -101,6 +102,11 @@ async function expandNode(
         await delay(5000);
         retries--;
       }
+    }
+
+    let nextOpeningName = openingName;
+    if (data && data.opening && data.opening.name) {
+      nextOpeningName = data.opening.name;
     }
 
     if (!data || !data.moves) {
@@ -155,7 +161,8 @@ async function expandNode(
           currentDepth + 1,
           maxDepth,
           repertoireId,
-          newPos.id
+          newPos.id,
+          nextOpeningName
         );
 
         // Undo move to process next branch
@@ -166,82 +173,150 @@ async function expandNode(
       }
     }
   } else {
-    // BLACK'S TURN - ENGINE VERIFICATION + GEMINI API
-    console.log(`Fetching Stockfish Cloud Eval for: ${pgn}`);
+    // BLACK'S TURN - HUMAN-FIRST + ENGINE VERIFIED
+    console.log(`Evaluating Black moves for FEN: ${fen}`);
     
     const strippedFen = fen.split(" ").slice(0, 4).join(" ");
-    let candidateMoves: string[] = [];
     
+    // 1. Fetch Masters Data
+    let mergedMoves: Record<string, any> = {};
     try {
-      // 1. Try Lichess Cloud Eval first (cached Stockfish 16.1 depth 30+)
-      const cloudUrl = `https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(strippedFen)}&multiPv=5`;
-      const cloudRes = await fetch(cloudUrl, { headers: { 'Accept': 'application/json' }});
-      const cloudData = await cloudRes.json();
-      
-      if (!cloudData.error && cloudData.pvs && cloudData.pvs.length > 0) {
-        const bestCp = cloudData.pvs[0].cp;
-        // Keep moves within ~0.4 pawns (40 centipawns) of the best move
-        const acceptablePvs = cloudData.pvs.filter((pv: any) => Math.abs(pv.cp - bestCp) <= 40);
-        candidateMoves = acceptablePvs.map((pv: any) => pv.moves.split(" ")[0]);
-        console.log(`Stockfish Candidate Moves: ${candidateMoves.join(", ")}`);
+      const mastersUrl = `https://explorer.lichess.ovh/masters?fen=${encodeURIComponent(strippedFen)}`;
+      const mastersRes = await fetch(mastersUrl, { headers: { 'Authorization': `Bearer ${LICHESS_API_TOKEN}`, 'Accept': 'application/json' }});
+      const mastersData = await mastersRes.json();
+      if (mastersData.moves) {
+        for (const m of mastersData.moves) {
+          mergedMoves[m.san] = {
+            san: m.san,
+            mastersCount: m.white + m.draws + m.black,
+            mastersBlackWin: m.black,
+            mastersDraws: m.draws,
+            onlineCount: 0, onlineBlackWin: 0, onlineDraws: 0
+          };
+        }
       }
     } catch (e) {
-      console.warn("Cloud eval failed, falling back to Masters database.");
+      console.warn("Failed fetching Masters data.");
     }
 
-    if (candidateMoves.length === 0) {
-      // 2. Fallback to Lichess Masters Database
-      try {
-        const mastersUrl = `https://explorer.lichess.ovh/masters?fen=${encodeURIComponent(strippedFen)}`;
-        const mastersRes = await fetch(mastersUrl, { headers: { 'Accept': 'application/json' }});
-        const mastersData = await mastersRes.json();
-        
-        if (mastersData.moves && mastersData.moves.length > 0) {
-          candidateMoves = mastersData.moves.slice(0, 5).map((m: any) => m.san);
-          console.log(`Masters Candidate Moves: ${candidateMoves.join(", ")}`);
+    // 2. Fetch 2500+ Online Data
+    try {
+      const onlineUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(strippedFen)}&speeds=classical,blitz,rapid&ratings=2500`;
+      const onlineRes = await fetch(onlineUrl, { headers: { 'Authorization': `Bearer ${LICHESS_API_TOKEN}`, 'Accept': 'application/json' }});
+      const onlineData = await onlineRes.json();
+      if (onlineData.moves) {
+        for (const m of onlineData.moves) {
+          const totalOnline = m.white + m.draws + m.black;
+          if (mergedMoves[m.san]) {
+            mergedMoves[m.san].onlineCount = totalOnline;
+            mergedMoves[m.san].onlineBlackWin = m.black;
+            mergedMoves[m.san].onlineDraws = m.draws;
+          } else {
+            mergedMoves[m.san] = {
+              san: m.san, mastersCount: 0, mastersBlackWin: 0, mastersDraws: 0,
+              onlineCount: totalOnline, onlineBlackWin: m.black, onlineDraws: m.draws
+            };
+          }
         }
-      } catch (e) {
-        console.warn("Masters fallback failed.");
+      }
+    } catch (e) {
+      console.warn("Failed fetching Online data.");
+    }
+
+    // 3. Apply Laplace Smoothing and 5x Weighting
+    const MIN_GAMES_THRESHOLD = 5; // Minimum weighted volume required to consider a human move
+
+    const candidateMoves = Object.values(mergedMoves).map(m => {
+      const weightedCount = (m.mastersCount * 5) + m.onlineCount;
+      const weightedBlackWins = (m.mastersBlackWin * 5) + m.onlineBlackWin;
+      const weightedDraws = (m.mastersDraws * 5) + m.onlineDraws;
+      
+      // Laplace smoothing (add 20 draws to penalize low volume)
+      const smoothedCount = weightedCount + 20;
+      const smoothedDraws = weightedDraws + 20;
+      
+      const score = (weightedBlackWins + (0.5 * smoothedDraws)) / smoothedCount;
+      return { ...m, weightedCount, score };
+    }).filter(m => m.weightedCount >= MIN_GAMES_THRESHOLD);
+
+    candidateMoves.sort((a, b) => b.score - a.score);
+    
+    if (candidateMoves.length === 0) {
+      console.log("No human moves passed the minimum volume threshold.");
+    }
+
+    // 4. Fetch Stockfish Cloud Eval
+    let bestCp = 0;
+    let enginePvs: any[] = [];
+    try {
+      const cloudUrl = `https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(strippedFen)}&multiPv=5`;
+      const cloudRes = await fetch(cloudUrl, { headers: { 'Authorization': `Bearer ${LICHESS_API_TOKEN}`, 'Accept': 'application/json' }});
+      const cloudData = await cloudRes.json();
+      if (!cloudData.error && cloudData.pvs && cloudData.pvs.length > 0) {
+        enginePvs = cloudData.pvs;
+        bestCp = enginePvs[0].cp;
+      }
+    } catch (e) {
+      console.warn("Cloud eval failed.");
+    }
+
+    // 5. Select move (Golden Threshold: 0.8 pawns / 80 cp)
+    let selectedMoveSan: string | null = null;
+    let selectedStats: any = null;
+    let selectedEngineCp: number | null = null;
+
+    if (enginePvs.length > 0) {
+      for (const candidate of candidateMoves) {
+        try {
+          const moveResult = tempChess.move(candidate.san);
+          tempChess.undo();
+          const lan = moveResult.lan; // e.g. f8e7
+          
+          const enginePv = enginePvs.find(pv => pv.moves.split(" ")[0] === lan);
+          if (enginePv && Math.abs(enginePv.cp - bestCp) <= 80) {
+            selectedMoveSan = candidate.san;
+            selectedStats = candidate;
+            selectedEngineCp = enginePv.cp;
+            break;
+          }
+        } catch(e) {}
+      }
+      
+      if (!selectedMoveSan) {
+         console.log("All top human moves were refuted by Stockfish (or none existed). Defaulting to absolute best engine move.");
+         try {
+           const lan = enginePvs[0].moves.split(" ")[0];
+           const fromSq = lan.substring(0, 2);
+           const toSq = lan.substring(2, 4);
+           const promotion = lan.length === 5 ? lan[4] : undefined;
+           
+           const moveResult = tempChess.move({ from: fromSq, to: toSq, promotion } as any);
+           tempChess.undo();
+           selectedMoveSan = moveResult.san;
+           selectedEngineCp = bestCp;
+           selectedStats = candidateMoves.find(m => m.san === selectedMoveSan) || { weightedCount: 0, score: 0 };
+         } catch(e) {}
+      }
+    } else {
+      if (candidateMoves.length > 0) {
+        selectedMoveSan = candidateMoves[0].san;
+        selectedStats = candidateMoves[0];
       }
     }
 
-    // 3. Prompt Gemini to pick and explain
-    console.log(`Asking Gemini to select best human response from candidates...`);
-    
-    const prompt = `You are an expert chess coach and Grandmaster. I am building a highly practical opening repertoire for Black in the Caro-Kann Defense.
-The current position FEN is: ${fen}
-The game so far is: ${pgn}
-It is Black's turn to move. 
+    if (!selectedMoveSan) {
+      console.log("No valid move found. Stopping branch.");
+      return;
+    }
 
-Stockfish 16.1 has verified that the following moves are mathematically sound and equal: [${candidateMoves.join(", ")}]
-
-Out of these candidate moves, select the single most practical, solid, and logical response for a human player (avoid overly complex engine lines).
-Provide a detailed strategic explanation of the main plan and IDEAS behind this chosen move so a human can memorize the logic, not just the move.
-If you are not 100% confident in the specific theoretical plan for this exact position, DO NOT make things up. Instead, simply state the fundamental opening principles this move achieves (e.g., controlling the center, developing a piece).
-
-You must return a JSON object strictly matching this format:
-{
-  "san": "The chosen move in standard algebraic notation (e.g. d5, Nf6, cxd4)",
-  "explanation": "Your strategic explanation of the idea/plan here. Do not leave this null or empty."
-}`;
-
-    try {
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json"
-        }
-      });
-      
-      const responseText = response.text;
-      if (!responseText) throw new Error("Empty response from Gemini");
-      
-      const parsed = JSON.parse(responseText);
-      const moveSan = parsed.san;
-      const explanation = parsed.explanation;
-
-      console.log(`Gemini suggested: ${moveSan}`);
+    let explanation;
+    if (selectedStats.weightedCount === 0) {
+       explanation = `Engine Fallback | Eval: ${selectedEngineCp !== null ? (selectedEngineCp/100).toFixed(2) : "N/A"}`;
+    } else {
+       explanation = `Score: ${(selectedStats.score * 100).toFixed(1)}% | Weighted Vol: ${selectedStats.weightedCount} | Eval: ${selectedEngineCp !== null ? (selectedEngineCp/100).toFixed(2) : "N/A"}`;
+    }
+    console.log(`Algorithm Selected: ${selectedMoveSan} -> ${explanation}`);
+    const moveSan = selectedMoveSan;
 
       const moveResult = tempChess.move(moveSan);
       if (!moveResult) {
@@ -296,7 +371,8 @@ You must return a JSON object strictly matching this format:
         currentDepth + 1,
         maxDepth,
         repertoireId,
-        newPos.id
+        newPos.id,
+        openingName
       );
 
       tempChess.undo();
