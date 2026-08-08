@@ -6,7 +6,10 @@ export default async function Home() {
   const repertoireData = await getDatabaseRepertoire();
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", background: "#161512", gap: "20px", padding: "20px" }}>
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", 
+    background: "yellow", 
+    /*background: "#161512",*/ 
+    gap: "20px", padding: "20px" }}>
       <RepertoireTester database={repertoireData} />
     </div>
   );

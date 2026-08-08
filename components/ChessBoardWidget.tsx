@@ -98,7 +98,15 @@ export default function ChessBoardWidget({ initialFen, pgn, pieceSet = "merida",
   };
 
   return (
-    <div style={{ display: "flex", gap: "0px", alignItems: "flex-start", justifyContent: "center", width: "100%" }}>
+    <div style={{ 
+      display: "flex", 
+      alignItems: "flex-start", 
+      justifyContent: "center", 
+      width: "max-content",
+      height: "560px",
+      margin: "0 auto",
+      backgroundColor: "var(--lichess-panel-bg)"
+    }}>
       <div className={`cg-board-newspaper piece-set-${pieceSet}`} style={{ width: "560px", height: "560px" }}>
         <Chessground
           width="100%"
@@ -125,14 +133,7 @@ export default function ChessBoardWidget({ initialFen, pgn, pieceSet = "merida",
       </div>
 
       {pgn && (
-        <div style={{ 
-          width: "188px", 
-          height: "560px", 
-          overflow: "hidden", 
-          borderRadius: "0px", 
-          /*border: "1px solid var(--lichess-border)",*/ 
-          borderLeft: "none"
-        }}>
+        <div style={{ width: "188px", height: "560px", overflow: "hidden" }}>
           <LichessMoveList 
             moves={moveHistory.map(m => m.san)} 
             currentPlyIndex={currentMoveIndex - 1} 

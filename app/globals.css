@@ -210,6 +210,12 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
 .piece-set-merida piece.queen.black { background-image: url('https://lichess1.org/assets/piece/merida/bQ.svg') !important; }
 .piece-set-merida piece.king.black { background-image: url('https://lichess1.org/assets/piece/merida/bK.svg') !important; }
 
+/* Force exactly 560px scaling to absolutely prevent Windows DPI sub-pixel gaps */
+.cg-wrap, cg-container, cg-board {
+  width: 560px !important;
+  height: 560px !important;
+}
+
 /* Coordinates (Rank numbers on LEFT, File letters on BOTTOM) */
 .cg-wrap coords.ranks {
   left: -18px !important;
