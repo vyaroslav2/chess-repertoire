@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import Chessground from "@react-chess/chessground";
 import "chessground/assets/chessground.base.css";
 import { Chess } from "chess.js";
+import LichessMoveList from "./LichessMoveList";
 
 interface ChessBoardWidgetProps {
   initialFen?: string;
@@ -42,41 +43,29 @@ export default function ChessBoardWidget({ initialFen, pgn, pieceSet = "merida",
     }
   }, [initialFen, pgn, chess]);
 
-  // Keyboard navigation handler
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "ArrowRight") {
-        if (currentMoveIndex < moveHistory.length) {
-          const nextMove = moveHistory[currentMoveIndex];
-          try {
-            chess.move(nextMove.san);
-            setFen(chess.fen());
-            setLastMove([nextMove.from, nextMove.to]);
-            setCurrentMoveIndex(currentMoveIndex + 1);
-          } catch (err) {
-            console.error("Move error:", err);
-          }
-        }
-      } else if (e.key === "ArrowLeft") {
-        if (currentMoveIndex > 0) {
-          chess.undo();
-          setFen(chess.fen());
-          
-          // Re-calculate last move based on the move before the undone one
-          if (currentMoveIndex > 1) {
-            const prevMove = moveHistory[currentMoveIndex - 2];
-            setLastMove([prevMove.from, prevMove.to]);
-          } else {
-            setLastMove(undefined);
-          }
-          setCurrentMoveIndex(currentMoveIndex - 1);
-        }
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [moveHistory, chess, currentMoveIndex]);
+  const handleMoveClick = (index: number) => {
+    if (index === -1) {
+       chess.reset();
+       setFen(chess.fen());
+       setLastMove(undefined);
+       setCurrentMoveIndex(0);
+       return;
+    }
+    
+    // Replay moves up to the desired index
+    chess.reset();
+    let lastM: [string, string] | undefined = undefined;
+    for (let i = 0; i <= index; i++) {
+       const m = moveHistory[i];
+       if (m) {
+         chess.move(m.san);
+         lastM = [m.from, m.to];
+       }
+    }
+    setFen(chess.fen());
+    setLastMove(lastM);
+    setCurrentMoveIndex(index + 1);
+  };
 
   const calcTurnColor = () => (chess.turn() === "w" ? "white" : "black");
   
@@ -109,29 +98,48 @@ export default function ChessBoardWidget({ initialFen, pgn, pieceSet = "merida",
   };
 
   return (
-    <div className={`cg-board-newspaper piece-set-${pieceSet}`} style={{ width: "560px", height: "560px", margin: "0 auto" }}>
-      <Chessground
-        width="100%"
-        height="100%"
-        config={{
-          fen: fen,
-          turnColor: calcTurnColor(),
-          lastMove: lastMove,
-          highlight: { lastMove: true, check: true },
-          drawable: { enabled: true, visible: true },
-          coordinates: true,
-          animation: { enabled: true, duration: 200 },
-          movable: {
-            free: false,
-            color: calcTurnColor(),
-            dests: calcMovable().dests,
-            showDests: true,
-            events: {
-              after: handleMove,
+    <div style={{ display: "flex", gap: "20px", alignItems: "flex-start", justifyContent: "center", width: "100%" }}>
+      <div className={`cg-board-newspaper piece-set-${pieceSet}`} style={{ width: "560px", height: "560px" }}>
+        <Chessground
+          width="100%"
+          height="100%"
+          config={{
+            fen: fen,
+            turnColor: calcTurnColor(),
+            lastMove: lastMove,
+            highlight: { lastMove: true, check: true },
+            drawable: { enabled: true, visible: true },
+            coordinates: true,
+            animation: { enabled: true, duration: 200 },
+            movable: {
+              free: false,
+              color: calcTurnColor(),
+              dests: calcMovable().dests,
+              showDests: true,
+              events: {
+                after: handleMove,
+              },
             },
-          },
-        }}
-      />
+          }}
+        />
+      </div>
+
+      {pgn && (
+        <div style={{ 
+          width: "300px", 
+          height: "560px", 
+          overflow: "hidden", 
+          borderRadius: "4px", 
+          border: "1px solid var(--lichess-border)", 
+          boxShadow: "var(--glass-shadow)" 
+        }}>
+          <LichessMoveList 
+            moves={moveHistory.map(m => m.san)} 
+            currentPlyIndex={currentMoveIndex - 1} 
+            onMoveClick={handleMoveClick} 
+          />
+        </div>
+      )}
     </div>
   );
 }
