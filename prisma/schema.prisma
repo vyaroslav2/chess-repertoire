@@ -62,6 +62,9 @@ model RepertoirePositionStat {
   position     Position   @relation(fields: [positionId], references: [id], onDelete: Cascade)
   targetMove   Move       @relation(fields: [targetMoveId], references: [id], onDelete: Cascade)
 
+  // Natural Language Explanation of the plan (e.g. from Gemini)
+  explanation  String?
+
   // SRS Data (SuperMemo-2 style)
   easeFactor   Float      @default(2.5)
   interval     Int        @default(0)       // Days until next review
