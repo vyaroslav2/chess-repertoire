@@ -14,7 +14,9 @@ export default function LichessMoveList({ moves, currentPlyIndex, onMoveClick }:
 
   // Auto-scroll logic matching Lichess behavior
   useEffect(() => {
-    if (activeMoveRef.current) {
+    if (currentPlyIndex === -1 && containerRef.current) {
+      containerRef.current.scrollTop = 0;
+    } else if (activeMoveRef.current) {
       activeMoveRef.current.scrollIntoView({ block: 'nearest' });
     }
   }, [currentPlyIndex]);
@@ -36,10 +38,10 @@ export default function LichessMoveList({ moves, currentPlyIndex, onMoveClick }:
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
         onMoveClick(Math.min(moves.length - 1, currentPlyIndex + 1));
-      } else if (e.key === 'Home') {
+      } else if (e.key === 'Home' || e.key === 'ArrowUp') {
         e.preventDefault();
         onMoveClick(-1);
-      } else if (e.key === 'End') {
+      } else if (e.key === 'End' || e.key === 'ArrowDown') {
         e.preventDefault();
         onMoveClick(moves.length - 1);
       }
