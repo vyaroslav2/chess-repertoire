@@ -34,7 +34,8 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
   const targetPlyIndex = lineMoves.length; // The ply they are supposed to guess from (after opponent's move)
 
   // Derived lock state
-  const isBrowsing = currentPlyIndex !== targetPlyIndex;
+  const expectedPlyIndex = (testStatus === 'idle' || testStatus === 'wrong') ? targetPlyIndex : targetPlyIndex + 1;
+  const isBrowsing = currentPlyIndex !== expectedPlyIndex;
   const isLocked = testStatus !== 'idle' || isBrowsing;
 
   useEffect(() => {
@@ -53,8 +54,6 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
   useEffect(() => {
     if (!currentStat) return;
 
-    const lineMoves: string[] = currentStat.lineMoves || [];
-    
     if (lineMoves.length === 0) {
       // First move of the game, no opponent move to animate
       chess.reset();
@@ -96,8 +95,11 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
   // Browsing Effect
   useEffect(() => {
     if (!currentStat) return;
-    if (currentPlyIndex === targetPlyIndex) return; // Handled by loading/testing logic
     if (currentPlyIndex < 0) return;
+
+    // To prevent the browsing effect from fighting the 400ms animation sequence, 
+    // we only run it if we are actually browsing OR if the test is complete.
+    if (testStatus === "idle" && currentPlyIndex === targetPlyIndex - 1) return; // In the middle of 400ms delay
 
     // Rebuild board to currentPlyIndex
     const tempChess = new Chess();
@@ -118,7 +120,14 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
         if (m) lm = [m.from, m.to];
       }
     }
+    
+    // Play sound if we browsed (visual check)
+    if (fen !== tempChess.fen()) {
+      playSound();
+    }
+
     setFen(tempChess.fen());
+    chess.load(tempChess.fen()); // Important: sync main chess instance so handleMove works correctly!
     setLastMove(lm);
   }, [currentPlyIndex, currentStat, testStatus, targetPlyIndex, lineMoves]);
 
