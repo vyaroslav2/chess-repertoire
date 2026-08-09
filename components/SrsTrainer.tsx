@@ -52,6 +52,8 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
   // 1. Loading & Animation Sequence
   useEffect(() => {
     if (!currentStat) return;
+
+    const lineMoves: string[] = currentStat.lineMoves || [];
     
     if (lineMoves.length === 0) {
       // First move of the game, no opponent move to animate
@@ -63,12 +65,14 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
       return;
     }
 
-    // Set board to position before opponent's move
-    chess.reset();
+    // Use a fresh instance to safely fast-forward without polluting the main instance during renders
+    const tempChess = new Chess();
     for (let i = 0; i < lineMoves.length - 1; i++) {
-      chess.move(lineMoves[i]);
+      tempChess.move(lineMoves[i]);
     }
-    setFen(chess.fen());
+    
+    setFen(tempChess.fen());
+    chess.load(tempChess.fen());
     setLastMove(undefined);
     setTestStatus("idle");
     setCurrentPlyIndex(lineMoves.length - 1); // Before opponent's move
@@ -76,9 +80,10 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
     // Wait 400ms, then animate opponent's move
     const timer = setTimeout(() => {
       const opponentSan = lineMoves[lineMoves.length - 1];
-      const move = chess.move(opponentSan);
+      const move = tempChess.move(opponentSan);
       if (move) {
-        setFen(chess.fen());
+        setFen(tempChess.fen());
+        chess.load(tempChess.fen()); // Sync main instance
         setLastMove([move.from, move.to]);
         setCurrentPlyIndex(lineMoves.length); // At target position
         playSound();
@@ -123,7 +128,7 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
       if (!currentStat) return;
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
-      // Enter (Reveal)
+      // Enter (Reveal or Good)
       if (e.key === "Enter") {
         if (testStatus === "idle" || testStatus === "wrong") {
           const move = chess.move(currentStat.targetMove.san);
@@ -131,13 +136,17 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
             setFen(chess.fen());
             setLastMove([move.from, move.to]);
             setTestStatus("revealed");
+            setCurrentPlyIndex(targetPlyIndex + 1);
             playSound();
           }
+        } else if (testStatus === "correct" || testStatus === "revealed") {
+          // Default Enter to "Good" (rating 2)
+          handleRate(2);
         }
       }
 
       // 1, 2, 3, 4 (Grade)
-      if (["1", "2", "3", "4"].includes(e.key)) {
+      if (["1", "2", "3", "4"].includes(e.key) && !isBrowsing) {
         // Map 1-4 to 0-3 quality
         const quality = parseInt(e.key) - 1;
         handleRate(quality);
@@ -146,7 +155,7 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentStat, testStatus, chess]);
+  }, [currentStat, testStatus, chess, isBrowsing, targetPlyIndex]);
 
   if (!currentStat) {
     return (
@@ -164,7 +173,8 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
 
   const calcMovable = () => {
     // Only allow moves if we are idle or wrong (let them try again)
-    if (testStatus === "correct" || testStatus === "revealed") {
+    // Completely lock the board during browsing
+    if (testStatus === "correct" || testStatus === "revealed" || isBrowsing) {
       return { free: false, color: undefined, dests: new Map() };
     }
 
@@ -192,13 +202,15 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
           setFen(chess.fen());
           setLastMove([from, to]);
           setTestStatus("correct");
+          setCurrentPlyIndex(targetPlyIndex + 1);
         } else {
           // Wrong move
           setFen(chess.fen());
           setLastMove([from, to]);
           setTestStatus("wrong");
+          setCurrentPlyIndex(targetPlyIndex + 1);
           
-          // Snap back after a short delay
+          // Snap back after a very short delay
           setTimeout(() => {
             chess.undo();
             setFen(chess.fen());
@@ -216,7 +228,8 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
             } else {
               setLastMove(undefined);
             }
-          }, 500);
+            setCurrentPlyIndex(targetPlyIndex);
+          }, 250); // Snappier snapback
         }
       }
     } catch (e) {
@@ -232,20 +245,20 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "20px", position: "relative" }}>
       
-      {/* Absolute Banners */}
+      {/* Fixed Toast Banners */}
       {testStatus === "wrong" && (
-        <div style={{ position: "absolute", top: -60, background: "#c62828", color: "white", padding: "10px 20px", borderRadius: "4px", boxShadow: "0 4px 12px rgba(0,0,0,0.5)", zIndex: 10 }}>
-          Incorrect move. Try again, or press Enter to reveal.
+        <div style={{ position: "fixed", bottom: "20px", left: "20px", background: "#c62828", color: "white", padding: "12px 24px", borderRadius: "8px", boxShadow: "0 4px 12px rgba(0,0,0,0.5)", zIndex: 100, fontSize: "1.1rem" }}>
+          Incorrect move. Try again, or press <strong style={{ color: "black", background: "white", padding: "2px 6px", borderRadius: "4px", fontSize: "0.9rem" }}>Enter</strong> to reveal.
         </div>
       )}
       {testStatus === "correct" && (
-        <div style={{ position: "absolute", top: -60, background: "var(--lichess-green)", color: "white", padding: "10px 20px", borderRadius: "4px", boxShadow: "0 4px 12px rgba(0,0,0,0.5)", zIndex: 10 }}>
-          Correct! Rate how easy it was (1-4).
+        <div style={{ position: "fixed", bottom: "20px", left: "20px", background: "var(--lichess-green)", color: "white", padding: "12px 24px", borderRadius: "8px", boxShadow: "0 4px 12px rgba(0,0,0,0.5)", zIndex: 100, fontSize: "1.1rem" }}>
+          Correct! Press <strong style={{ color: "black", background: "white", padding: "2px 6px", borderRadius: "4px", fontSize: "0.9rem" }}>Enter</strong> for Good (3), or use 1-4.
         </div>
       )}
       {testStatus === "revealed" && (
-        <div style={{ position: "absolute", top: -60, background: "#f9a825", color: "black", padding: "10px 20px", borderRadius: "4px", boxShadow: "0 4px 12px rgba(0,0,0,0.5)", zIndex: 10 }}>
-          Revealed. Press 1 to rate as 'Again'.
+        <div style={{ position: "fixed", bottom: "20px", left: "20px", background: "#f9a825", color: "black", padding: "12px 24px", borderRadius: "8px", boxShadow: "0 4px 12px rgba(0,0,0,0.5)", zIndex: 100, fontSize: "1.1rem" }}>
+          Revealed. Press <strong style={{ color: "white", background: "black", padding: "2px 6px", borderRadius: "4px", fontSize: "0.9rem" }}>Enter</strong> to proceed (defaults to Good).
         </div>
       )}
 
@@ -303,29 +316,6 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
             onMoveClick={(index) => setCurrentPlyIndex(index + 1)} 
           />
         </div>
-      </div>
-
-      <div style={{ minHeight: "80px", display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
-        {(testStatus === "correct" || testStatus === "revealed") ? (
-          <div style={{ display: "flex", gap: "10px" }}>
-            <button className="btn btn-again" onClick={() => handleRate(0)}>Again (1)</button>
-            <button className="btn btn-hard" onClick={() => handleRate(1)}>Hard (2)</button>
-            <button className="btn btn-good" onClick={() => handleRate(2)}>Good (3)</button>
-            <button className="btn btn-easy" onClick={() => handleRate(3)}>Easy (4)</button>
-          </div>
-        ) : (
-          <div style={{ display: "flex", gap: "10px" }}>
-             <button className="btn btn-lichess-secondary" onClick={() => {
-                const move = chess.move(currentStat.targetMove.san);
-                if (move) {
-                  setFen(chess.fen());
-                  setLastMove([move.from, move.to]);
-                  setTestStatus("revealed");
-                  playSound();
-                }
-             }}>Reveal (Enter)</button>
-          </div>
-        )}
       </div>
     </div>
   );
