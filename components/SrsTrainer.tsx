@@ -6,6 +6,7 @@ import "chessground/assets/chessground.base.css";
 import { Chess } from "chess.js";
 import { updateSrsStats } from "../app/actions";
 import LichessMoveList from "./LichessMoveList";
+import { logFlightBox } from "../lib/logger";
 
 interface SrsTrainerProps {
   dueStats: any[];
@@ -56,6 +57,8 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
   useEffect(() => {
     if (!currentStat) return;
 
+    logFlightBox("LOAD_CARD_START", { cardId: currentStat.id, lineMoves });
+
     if (animTimerRef.current) {
       clearTimeout(animTimerRef.current);
       animTimerRef.current = null;
@@ -71,6 +74,7 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
       setTestStatus("idle");
       setCurrentPlyIndex(0);
       setIsInitializing(false);
+      logFlightBox("LOAD_CARD_END_IMMEDIATE", { fen: chess.fen(), currentPlyIndex: 0 });
       return;
     }
 
@@ -85,6 +89,7 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
     let step = 0;
 
     const playNextMove = () => {
+      const startTime = performance.now();
       if (step < lineMoves.length) {
         const m = tempChess.move(lineMoves[step]);
         if (m) {
@@ -93,11 +98,15 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
           setLastMove([m.from, m.to]);
           setCurrentPlyIndex(step + 1);
           playSound();
+          logFlightBox("ANIMATE_MOVE", { step, san: lineMoves[step], fen: tempChess.fen(), timeToExecute: performance.now() - startTime });
+        } else {
+          logFlightBox("ANIMATE_MOVE_FAIL", { step, san: lineMoves[step], fen: tempChess.fen() });
         }
         step++;
         animTimerRef.current = setTimeout(playNextMove, 400); // 400ms per ply animation
       } else {
         setIsInitializing(false); // Done playing out
+        logFlightBox("LOAD_CARD_ANIMATION_COMPLETE", { finalFen: tempChess.fen() });
       }
     };
 
@@ -117,6 +126,7 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
     if (isInitializing) return; // Prevent interference during the opening animation
 
     // Rebuild board to currentPlyIndex
+    const startTime = performance.now();
     const tempChess = new Chess();
     let lm: [string, string] | undefined = undefined;
     
@@ -144,6 +154,8 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
     setFen(tempChess.fen());
     chess.load(tempChess.fen()); // Important: sync main chess instance so handleMove works correctly!
     setLastMove(lm);
+
+    logFlightBox("BROWSING_EFFECT", { currentPlyIndex, newFen: tempChess.fen(), timeToExecute: performance.now() - startTime });
   }, [currentPlyIndex, currentStat, testStatus, targetPlyIndex, lineMoves]);
 
   // Keyboard Controller
@@ -152,6 +164,8 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
       if (!currentStat) return;
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
+      logFlightBox("KEY_PRESS", { key: e.key, isInitializing, isBrowsing, testStatus });
+
       // Skip animation on any key press
       if (isInitializing) {
         if (animTimerRef.current) {
@@ -159,6 +173,8 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
           animTimerRef.current = null;
         }
         setIsInitializing(false);
+        
+        logFlightBox("ANIMATION_SKIPPED", { keyTrigger: e.key });
         
         // Fast forward to the target position
         const tempChess = new Chess();
@@ -191,12 +207,15 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
               setTestStatus("revealed");
               setCurrentPlyIndex(targetPlyIndex + 1);
               playSound();
+              logFlightBox("ACTION_REVEAL", { success: true, san: currentStat.targetMove.san });
             }
           } catch (err) {
             console.error("Reveal error:", err);
+            logFlightBox("ACTION_REVEAL_ERROR", { san: currentStat.targetMove.san, error: String(err) });
           }
         } else if (testStatus === "correct" || testStatus === "revealed") {
           // Default Enter to "Good" (rating 2)
+          logFlightBox("ACTION_RATE_DEFAULT_ENTER", { quality: 2 });
           handleRate(2);
         }
       }
@@ -205,6 +224,7 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
       if (["1", "2", "3", "4"].includes(e.key) && testStatus !== "idle") {
         // Map 1-4 to 0-3 quality
         const quality = parseInt(e.key) - 1;
+        logFlightBox("ACTION_RATE_KEY", { key: e.key, quality });
         handleRate(quality);
       }
     };
@@ -280,22 +300,38 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
               }
               const history = prevChess.history({ verbose: true });
               const last = history[history.length - 1];
-              setLastMove([last.from, last.to]);
-            } else {
-              setLastMove(undefined);
-            }
-            setCurrentPlyIndex(targetPlyIndex);
-          }, 250); // Snappier snapback
+            setLastMove(undefined);
+            logFlightBox("ACTION_USER_MOVE_SNAPBACK", {});
+          }, 250);
         }
       }
     } catch (e) {
-      console.warn("Invalid move", e);
+      logFlightBox("ACTION_USER_MOVE_ERROR", { orig, dest, error: String(e) });
+      // Invalid move, ignore
+      const fen = chess.fen();
+      chess.load(fen);
+      setFen(fen);
     }
   };
 
   const handleRate = async (quality: number) => {
-    setCurrentIndex(prev => prev + 1);
-    await updateSrsStats(currentStat.id, quality);
+    logFlightBox("ACTION_RATE_SUBMIT", { quality, cardId: currentStat.id });
+    
+    // Optimistic UI update: instantly jump to the next card
+    if (currentIndex < stats.length - 1) {
+      setCurrentIndex((prev) => prev + 1);
+    } else {
+      logFlightBox("TRAINING_COMPLETE", {});
+      // End of training session (could redirect or show completion screen)
+    }
+
+    try {
+      // Async update in the background
+      await updateSrsStats(currentStat.id, quality);
+    } catch (e) {
+      console.error("Failed to update stat", e);
+      logFlightBox("ACTION_RATE_SUBMIT_ERROR", { quality, cardId: currentStat.id, error: String(e) });
+    }
   };
 
   return (
@@ -368,8 +404,11 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
             moves={(currentStat?.lineMoves || []).concat(testStatus === 'correct' || testStatus === 'revealed' || testStatus === 'wrong' ? [
               testStatus === 'wrong' && lastMove ? chess.history()[chess.history().length-1] : currentStat.targetMove.san
             ] : [])} 
-            currentPlyIndex={currentPlyIndex - 1} // LichessMoveList index is 0-based for the first move. Our currentPlyIndex is the number of plies (0 means start, 1 means after white's first move). LichessMoveList currentPlyIndex: -1 means start, 0 means white's first move. So they are off by 1!
-            onMoveClick={(index) => setCurrentPlyIndex(index + 1)} 
+            currentPlyIndex={currentPlyIndex - 1}
+            onMoveClick={(index) => {
+              logFlightBox("ACTION_CLICK_MOVE_LIST", { targetIndex: index + 1 });
+              setCurrentPlyIndex(index + 1);
+            }} 
           />
         </div>
       </div>
