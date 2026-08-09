@@ -50,7 +50,12 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
   const playSound = () => {
     if (moveSoundRef.current) {
       moveSoundRef.current.currentTime = 0;
-      moveSoundRef.current.play().catch(e => console.error("Audio play failed:", e));
+      moveSoundRef.current.play().catch(e => {
+        // Suppress autoplay policy errors on first load
+        if (e.name !== "NotAllowedError") {
+          console.error("Audio play failed:", e);
+        }
+      });
     }
   };
 

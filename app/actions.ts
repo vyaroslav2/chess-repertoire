@@ -38,43 +38,12 @@ export async function fetchDuePositions(repertoireId: string) {
       targetMove: true,
       repertoire: true
     },
-    orderBy: { dueDate: "asc" }
+    orderBy: { dueDate: "asc" },
+    take: 20
   });
 
   if (stats.length === 0) {
-    // Generate mock stats for testing the UI
-    return [
-      {
-        id: "mock1",
-        repertoireId: "mockRep",
-        positionId: "pos1",
-        targetMoveId: "move1",
-        repertoire: { title: "Ruy Lopez (Mock)", color: "white" },
-        position: { fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" },
-        targetMove: { san: "e4" },
-        lineMoves: []
-      },
-      {
-        id: "mock2",
-        repertoireId: "mockRep",
-        positionId: "pos2",
-        targetMoveId: "move2",
-        repertoire: { title: "Ruy Lopez (Mock)", color: "white" },
-        position: { fen: "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2" },
-        targetMove: { san: "Nf3" },
-        lineMoves: ["e4", "e5"]
-      },
-      {
-        id: "mock3",
-        repertoireId: "mockRep",
-        positionId: "pos3",
-        targetMoveId: "move3",
-        repertoire: { title: "Ruy Lopez (Mock)", color: "white" },
-        position: { fen: "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3" },
-        targetMove: { san: "Bb5" },
-        lineMoves: ["e4", "e5", "Nf3", "Nc6"]
-      }
-    ];
+    return [];
   }
 
   // Attach full line history to each stat
@@ -106,7 +75,11 @@ export async function updateSrsStats(statId: string, quality: number) {
   if (!stat) return;
 
   // Convert our 0-3 scale to standard SM-2 0-5 scale
-  const qMap = [0, 2, 4, 5];
+  // 0 (Again) -> 1 (Fail)
+  // 1 (Hard) -> 3 (Pass with difficulty)
+  // 2 (Good) -> 4 (Pass normally)
+  // 3 (Easy) -> 5 (Pass effortlessly)
+  const qMap = [1, 3, 4, 5];
   const q = qMap[quality];
 
   let newInterval = stat.interval;
@@ -133,7 +106,7 @@ export async function updateSrsStats(statId: string, quality: number) {
     newDueDate.setMinutes(newDueDate.getMinutes() + 5);
   }
 
-  return prisma.repertoirePositionStat.update({
+  const updatedStat = await prisma.repertoirePositionStat.update({
     where: { id: statId },
     data: {
       interval: newInterval,
@@ -141,5 +114,28 @@ export async function updateSrsStats(statId: string, quality: number) {
       dueDate: newDueDate
     }
   });
+
+  // Log SRS state transition for debugging
+  try {
+    const fs = require("fs");
+    const path = require("path");
+    const logLine = JSON.stringify({
+      timestamp: new Date().toISOString(),
+      statId,
+      quality,
+      q_mapped: q,
+      old_interval: stat.interval,
+      new_interval: newInterval,
+      old_ease: stat.easeFactor,
+      new_ease: newEase,
+      old_due: stat.dueDate,
+      new_due: newDueDate
+    }) + "\n";
+    fs.appendFileSync(path.join(process.cwd(), "srs.log"), logLine, "utf-8");
+  } catch (err) {
+    console.error("Failed to write to srs.log", err);
+  }
+
+  return updatedStat;
 }
 
