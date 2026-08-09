@@ -24,8 +24,8 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
   const [lastMove, setLastMove] = useState<[string, string] | undefined>();
 
   // Browsing state
-  const [currentPlyIndex, setCurrentPlyIndex] = useState(-1);
   const [isInitializing, setIsInitializing] = useState(true);
+  const animTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Sound ref
   const moveSoundRef = useRef<HTMLAudioElement | null>(null);
@@ -55,8 +55,12 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
   useEffect(() => {
     if (!currentStat) return;
 
+    if (animTimerRef.current) {
+      clearTimeout(animTimerRef.current);
+      animTimerRef.current = null;
+    }
+
     setIsInitializing(true);
-    const lineMoves: string[] = currentStat.lineMoves || [];
     
     if (lineMoves.length === 0) {
       // First move of the game, no opponent move to animate
@@ -78,7 +82,6 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
     setCurrentPlyIndex(0);
 
     let step = 0;
-    let timer: NodeJS.Timeout;
 
     const playNextMove = () => {
       if (step < lineMoves.length) {
@@ -91,15 +94,19 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
           playSound();
         }
         step++;
-        timer = setTimeout(playNextMove, 400); // 400ms per ply animation
+        animTimerRef.current = setTimeout(playNextMove, 400); // 400ms per ply animation
       } else {
         setIsInitializing(false); // Done playing out
       }
     };
 
-    timer = setTimeout(playNextMove, 400);
+    animTimerRef.current = setTimeout(playNextMove, 600); // Slightly longer initial pause so they can orient themselves
 
-    return () => clearTimeout(timer);
+    return () => {
+      if (animTimerRef.current) {
+        clearTimeout(animTimerRef.current);
+      }
+    };
   }, [currentStat, chess]);
 
   // Browsing Effect
@@ -144,16 +151,48 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
       if (!currentStat) return;
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
+      // Skip animation on any key press
+      if (isInitializing) {
+        if (animTimerRef.current) {
+          clearTimeout(animTimerRef.current);
+          animTimerRef.current = null;
+        }
+        setIsInitializing(false);
+        
+        // Fast forward to the target position
+        const tempChess = new Chess();
+        let lm: [string, string] | undefined = undefined;
+        for (let i = 0; i < lineMoves.length; i++) {
+          const m = tempChess.move(lineMoves[i]);
+          if (m) lm = [m.from, m.to];
+        }
+        setFen(tempChess.fen());
+        chess.load(tempChess.fen());
+        setLastMove(lm);
+        setCurrentPlyIndex(lineMoves.length);
+        return; // Consume the keypress so it doesn't trigger rating/reveal accidentally
+      }
+
       // Enter (Reveal or Good)
       if (e.key === "Enter") {
         if (testStatus === "idle" || testStatus === "wrong") {
-          const move = chess.move(currentStat.targetMove.san);
-          if (move) {
-            setFen(chess.fen());
-            setLastMove([move.from, move.to]);
-            setTestStatus("revealed");
-            setCurrentPlyIndex(targetPlyIndex + 1);
-            playSound();
+          // Reconstruct the safe target state before revealing, in case they were browsing
+          const tempChess = new Chess();
+          for (let i = 0; i < lineMoves.length; i++) {
+            tempChess.move(lineMoves[i]);
+          }
+          try {
+            const move = tempChess.move(currentStat.targetMove.san);
+            if (move) {
+              setFen(tempChess.fen());
+              chess.load(tempChess.fen());
+              setLastMove([move.from, move.to]);
+              setTestStatus("revealed");
+              setCurrentPlyIndex(targetPlyIndex + 1);
+              playSound();
+            }
+          } catch (err) {
+            console.error("Reveal error:", err);
           }
         } else if (testStatus === "correct" || testStatus === "revealed") {
           // Default Enter to "Good" (rating 2)
