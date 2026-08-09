@@ -40,7 +40,64 @@ export async function fetchDuePositions(repertoireId: string) {
     },
     orderBy: { dueDate: "asc" }
   });
-  return stats;
+
+  if (stats.length === 0) {
+    // Generate mock stats for testing the UI
+    return [
+      {
+        id: "mock1",
+        repertoireId: "mockRep",
+        positionId: "pos1",
+        targetMoveId: "move1",
+        repertoire: { title: "Ruy Lopez (Mock)", color: "white" },
+        position: { fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" },
+        targetMove: { san: "e4" },
+        lineMoves: []
+      },
+      {
+        id: "mock2",
+        repertoireId: "mockRep",
+        positionId: "pos2",
+        targetMoveId: "move2",
+        repertoire: { title: "Ruy Lopez (Mock)", color: "white" },
+        position: { fen: "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2" },
+        targetMove: { san: "Nf3" },
+        lineMoves: ["e4", "e5"]
+      },
+      {
+        id: "mock3",
+        repertoireId: "mockRep",
+        positionId: "pos3",
+        targetMoveId: "move3",
+        repertoire: { title: "Ruy Lopez (Mock)", color: "white" },
+        position: { fen: "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3" },
+        targetMove: { san: "Bb5" },
+        lineMoves: ["e4", "e5", "Nf3", "Nc6"]
+      }
+    ];
+  }
+
+  // Attach full line history to each stat
+
+  // Attach full line history to each stat
+  const enrichedStats = await Promise.all(stats.map(async (stat) => {
+    const lineMoves = [];
+    let currPosId = stat.positionId;
+    while (true) {
+      const incoming = await prisma.move.findFirst({
+        where: { toPositionId: currPosId }
+      });
+      if (incoming) {
+        lineMoves.unshift(incoming.san);
+        currPosId = incoming.fromPositionId;
+      } else {
+        break;
+      }
+    }
+    return { ...stat, lineMoves };
+  }));
+
+  return enrichedStats;
 }
 
 export async function updateSrsStats(statId: string, quality: number) {

@@ -1,54 +1,172 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Chessground from "@react-chess/chessground";
 import "chessground/assets/chessground.base.css";
 import { Chess } from "chess.js";
 import { updateSrsStats } from "../app/actions";
+import LichessMoveList from "./LichessMoveList";
 
 interface SrsTrainerProps {
   dueStats: any[];
 }
 
+type TestStatus = "idle" | "wrong" | "correct" | "revealed";
+
 export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
   const [stats, setStats] = useState(dueStats);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [chess] = useState(new Chess());
-  const [fen, setFen] = useState("");
-  const [lastMove, setLastMove] = useState<[string, string] | undefined>();
   
-  // State machine: 'waiting', 'success', 'failed'
-  const [state, setState] = useState<'waiting' | 'success' | 'failed'>('waiting');
+  // The state machine
+  const [testStatus, setTestStatus] = useState<TestStatus>("idle");
+  const [chess] = useState(new Chess());
+  const [fen, setFen] = useState(chess.fen());
+  const [lastMove, setLastMove] = useState<[string, string] | undefined>();
+
+  // Browsing state
+  const [currentPlyIndex, setCurrentPlyIndex] = useState(-1);
+
+  // Sound ref
+  const moveSoundRef = useRef<HTMLAudioElement | null>(null);
 
   const currentStat = stats[currentIndex];
+  const lineMoves: string[] = currentStat?.lineMoves || [];
+  const targetPlyIndex = lineMoves.length; // The ply they are supposed to guess from (after opponent's move)
+
+  // Derived lock state
+  const isBrowsing = currentPlyIndex !== targetPlyIndex;
+  const isLocked = testStatus !== 'idle' || isBrowsing;
 
   useEffect(() => {
-    if (currentStat) {
-      chess.load(currentStat.position.fen);
-      setFen(chess.fen());
-      
-      // We don't have the last move that led to this position easily available
-      // from just the FEN, so we clear it. The user will see the position as-is.
-      setLastMove(undefined); 
-      setState('waiting');
+    // Initialize audio
+    moveSoundRef.current = new Audio("https://lichess1.org/assets/sound/standard/Move.mp3");
+  }, []);
+
+  const playSound = () => {
+    if (moveSoundRef.current) {
+      moveSoundRef.current.currentTime = 0;
+      moveSoundRef.current.play().catch(e => console.error("Audio play failed:", e));
     }
+  };
+
+  // 1. Loading & Animation Sequence
+  useEffect(() => {
+    if (!currentStat) return;
+    
+    if (lineMoves.length === 0) {
+      // First move of the game, no opponent move to animate
+      chess.reset();
+      setFen(chess.fen());
+      setLastMove(undefined);
+      setTestStatus("idle");
+      setCurrentPlyIndex(0);
+      return;
+    }
+
+    // Set board to position before opponent's move
+    chess.reset();
+    for (let i = 0; i < lineMoves.length - 1; i++) {
+      chess.move(lineMoves[i]);
+    }
+    setFen(chess.fen());
+    setLastMove(undefined);
+    setTestStatus("idle");
+    setCurrentPlyIndex(lineMoves.length - 1); // Before opponent's move
+
+    // Wait 400ms, then animate opponent's move
+    const timer = setTimeout(() => {
+      const opponentSan = lineMoves[lineMoves.length - 1];
+      const move = chess.move(opponentSan);
+      if (move) {
+        setFen(chess.fen());
+        setLastMove([move.from, move.to]);
+        setCurrentPlyIndex(lineMoves.length); // At target position
+        playSound();
+      }
+    }, 400);
+
+    return () => clearTimeout(timer);
   }, [currentStat, chess]);
+
+  // Browsing Effect
+  useEffect(() => {
+    if (!currentStat) return;
+    if (currentPlyIndex === targetPlyIndex) return; // Handled by loading/testing logic
+    if (currentPlyIndex < 0) return;
+
+    // Rebuild board to currentPlyIndex
+    const tempChess = new Chess();
+    let lm: [string, string] | undefined = undefined;
+    
+    // The total available moves include the lineMoves + the user's correct/wrong move if they made one
+    const allMoves = [...lineMoves];
+    if (testStatus === "correct" || testStatus === "revealed") {
+      allMoves.push(currentStat.targetMove.san);
+    } else if (testStatus === "wrong" && lastMove) {
+      // We don't easily have the SAN of the wrong move, but we can reconstruct it from the FEN history if needed.
+      // For simplicity, we just won't let them browse forward into the wrong move.
+    }
+
+    for (let i = 0; i < currentPlyIndex; i++) {
+      if (allMoves[i]) {
+        const m = tempChess.move(allMoves[i]);
+        if (m) lm = [m.from, m.to];
+      }
+    }
+    setFen(tempChess.fen());
+    setLastMove(lm);
+  }, [currentPlyIndex, currentStat, testStatus, targetPlyIndex, lineMoves]);
+
+  // Keyboard Controller
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!currentStat) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      // Enter (Reveal)
+      if (e.key === "Enter") {
+        if (testStatus === "idle" || testStatus === "wrong") {
+          const move = chess.move(currentStat.targetMove.san);
+          if (move) {
+            setFen(chess.fen());
+            setLastMove([move.from, move.to]);
+            setTestStatus("revealed");
+            playSound();
+          }
+        }
+      }
+
+      // 1, 2, 3, 4 (Grade)
+      if (["1", "2", "3", "4"].includes(e.key)) {
+        // Map 1-4 to 0-3 quality
+        const quality = parseInt(e.key) - 1;
+        handleRate(quality);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [currentStat, testStatus, chess]);
 
   if (!currentStat) {
     return (
       <div style={{ color: "white", textAlign: "center", marginTop: "50px" }}>
         <h2 style={{ fontSize: "2rem", color: "var(--lichess-green)" }}>You're all caught up!</h2>
         <p style={{ fontSize: "1.1rem", marginTop: "10px", color: "var(--lichess-text-muted)" }}>
-          No more positions due for review. Check back later!
+          No more positions due for review.
         </p>
       </div>
     );
   }
 
   const calcTurnColor = () => (chess.turn() === "w" ? "white" : "black");
-  
+  const orientation = currentStat.repertoire.color.toLowerCase() === "black" ? "black" : "white";
+
   const calcMovable = () => {
-    if (state !== 'waiting') return { free: false, color: undefined, dests: new Map() };
+    // Only allow moves if we are idle or wrong (let them try again)
+    if (testStatus === "correct" || testStatus === "revealed") {
+      return { free: false, color: undefined, dests: new Map() };
+    }
 
     const dests = new Map();
     chess.moves({ verbose: true }).forEach((m) => {
@@ -63,28 +181,42 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
   };
 
   const handleMove = (from: string, to: string) => {
-    if (state !== 'waiting') return;
+    if (testStatus === "correct" || testStatus === "revealed") return;
 
     try {
       const move = chess.move({ from, to, promotion: "q" });
       if (move) {
-        setFen(chess.fen());
-        setLastMove([from, to]);
+        playSound();
         
-        // Validate against target move
         if (move.san === currentStat.targetMove.san) {
-          setState('success');
+          setFen(chess.fen());
+          setLastMove([from, to]);
+          setTestStatus("correct");
         } else {
-          // Failed! Snap back and play correct move automatically
-          setState('failed');
+          // Wrong move
+          setFen(chess.fen());
+          setLastMove([from, to]);
+          setTestStatus("wrong");
+          
+          // Snap back after a short delay
           setTimeout(() => {
-            chess.load(currentStat.position.fen);
-            const correctMove = chess.move(currentStat.targetMove.san);
-            if (correctMove) {
-              setFen(chess.fen());
-              setLastMove([correctMove.from, correctMove.to]);
+            chess.undo();
+            setFen(chess.fen());
+            
+            // Restore opponent's last move highlight
+            const lineMoves = currentStat.lineMoves || [];
+            if (lineMoves.length > 0) {
+              const prevChess = new Chess();
+              for (let i = 0; i < lineMoves.length; i++) {
+                prevChess.move(lineMoves[i]);
+              }
+              const history = prevChess.history({ verbose: true });
+              const last = history[history.length - 1];
+              setLastMove([last.from, last.to]);
+            } else {
+              setLastMove(undefined);
             }
-          }, 500); // Half second delay to let them register their mistake
+          }, 500);
         }
       }
     } catch (e) {
@@ -93,18 +225,30 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
   };
 
   const handleRate = async (quality: number) => {
-    // Optimistically move to next
     setCurrentIndex(prev => prev + 1);
-    
-    // Update DB in background
     await updateSrsStats(currentStat.id, quality);
   };
 
-  // If the repertoire is for black, we flip the board so Black is on the bottom.
-  const orientation = currentStat.repertoire.color.toLowerCase() === "black" ? "black" : "white"; 
-
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "20px" }}>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "20px", position: "relative" }}>
+      
+      {/* Absolute Banners */}
+      {testStatus === "wrong" && (
+        <div style={{ position: "absolute", top: -60, background: "#c62828", color: "white", padding: "10px 20px", borderRadius: "4px", boxShadow: "0 4px 12px rgba(0,0,0,0.5)", zIndex: 10 }}>
+          Incorrect move. Try again, or press Enter to reveal.
+        </div>
+      )}
+      {testStatus === "correct" && (
+        <div style={{ position: "absolute", top: -60, background: "var(--lichess-green)", color: "white", padding: "10px 20px", borderRadius: "4px", boxShadow: "0 4px 12px rgba(0,0,0,0.5)", zIndex: 10 }}>
+          Correct! Rate how easy it was (1-4).
+        </div>
+      )}
+      {testStatus === "revealed" && (
+        <div style={{ position: "absolute", top: -60, background: "#f9a825", color: "black", padding: "10px 20px", borderRadius: "4px", boxShadow: "0 4px 12px rgba(0,0,0,0.5)", zIndex: 10 }}>
+          Revealed. Press 1 to rate as 'Again'.
+        </div>
+      )}
+
       <div style={{ color: "var(--lichess-text-bright)", textAlign: "center" }}>
         <h2>Reviewing: {currentStat.repertoire.title}</h2>
         <p style={{ color: "var(--lichess-text-muted)" }}>
@@ -112,53 +256,75 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
         </p>
       </div>
 
-      <div className="cg-board-newspaper piece-set-merida" style={{ width: "560px", height: "560px", boxShadow: "var(--glass-shadow)" }}>
-        <Chessground
-          width="100%"
-          height="100%"
-          config={{
-            fen: fen,
-            orientation: orientation,
-            turnColor: calcTurnColor(),
-            lastMove: lastMove,
-            highlight: { lastMove: true, check: true },
-            drawable: { enabled: true, visible: true },
-            coordinates: true,
-            animation: { enabled: true, duration: 200 },
-            movable: {
-              ...calcMovable(),
-              events: {
-                after: handleMove,
+      <div style={{ 
+        display: "flex", 
+        alignItems: "flex-start", 
+        justifyContent: "center", 
+        width: "max-content",
+        height: "560px",
+        margin: "0 auto",
+      }}>
+        <div className={`cg-board-newspaper piece-set-merida ${testStatus !== 'idle' ? 'board-locked' : ''}`} style={{ width: "560px", height: "560px", boxShadow: "var(--glass-shadow)" }}>
+          <Chessground
+            width="100%"
+            height="100%"
+            config={{
+              fen: fen,
+              orientation: orientation,
+              turnColor: calcTurnColor(),
+              lastMove: lastMove,
+              highlight: { lastMove: true, check: true },
+              drawable: { enabled: true, visible: true },
+              coordinates: true,
+              animation: { enabled: true, duration: 200 },
+              movable: {
+                ...calcMovable(),
+                events: {
+                  after: handleMove,
+                },
               },
-            },
-          }}
-        />
+            }}
+          />
+        </div>
+
+        {/* Move List Side Panel */}
+        <div style={{ 
+          width: "188px", 
+          height: "560px", 
+          overflow: "hidden",
+          backgroundColor: "var(--lichess-panel-bg)",
+          boxShadow: "-4px 0 0 0 var(--lichess-panel-bg)"
+        }}>
+          <LichessMoveList 
+            moves={(currentStat?.lineMoves || []).concat(testStatus === 'correct' || testStatus === 'revealed' || testStatus === 'wrong' ? [
+              testStatus === 'wrong' && lastMove ? chess.history()[chess.history().length-1] : currentStat.targetMove.san
+            ] : [])} 
+            currentPlyIndex={currentPlyIndex - 1} // LichessMoveList index is 0-based for the first move. Our currentPlyIndex is the number of plies (0 means start, 1 means after white's first move). LichessMoveList currentPlyIndex: -1 means start, 0 means white's first move. So they are off by 1!
+            onMoveClick={(index) => setCurrentPlyIndex(index + 1)} 
+          />
+        </div>
       </div>
 
       <div style={{ minHeight: "80px", display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
-        {state === 'waiting' && (
-          <h3 style={{ color: "var(--lichess-text-bright)" }}>What is the best move?</h3>
-        )}
-
-        {state === 'failed' && (
-          <>
-            <h3 style={{ color: "#e57373" }}>Incorrect! The right move was {currentStat.targetMove.san}.</h3>
-            <div style={{ display: "flex", gap: "10px" }}>
-              <button className="btn btn-again" onClick={() => handleRate(0)}>Again</button>
-            </div>
-          </>
-        )}
-
-        {state === 'success' && (
-          <>
-            <h3 style={{ color: "var(--lichess-green)" }}>Correct! ({currentStat.targetMove.san})</h3>
-            <div style={{ display: "flex", gap: "10px" }}>
-              <button className="btn btn-again" onClick={() => handleRate(0)}>Again (0d)</button>
-              <button className="btn btn-hard" onClick={() => handleRate(1)}>Hard</button>
-              <button className="btn btn-good" onClick={() => handleRate(2)}>Good</button>
-              <button className="btn btn-easy" onClick={() => handleRate(3)}>Easy</button>
-            </div>
-          </>
+        {(testStatus === "correct" || testStatus === "revealed") ? (
+          <div style={{ display: "flex", gap: "10px" }}>
+            <button className="btn btn-again" onClick={() => handleRate(0)}>Again (1)</button>
+            <button className="btn btn-hard" onClick={() => handleRate(1)}>Hard (2)</button>
+            <button className="btn btn-good" onClick={() => handleRate(2)}>Good (3)</button>
+            <button className="btn btn-easy" onClick={() => handleRate(3)}>Easy (4)</button>
+          </div>
+        ) : (
+          <div style={{ display: "flex", gap: "10px" }}>
+             <button className="btn btn-lichess-secondary" onClick={() => {
+                const move = chess.move(currentStat.targetMove.san);
+                if (move) {
+                  setFen(chess.fen());
+                  setLastMove([move.from, move.to]);
+                  setTestStatus("revealed");
+                  playSound();
+                }
+             }}>Reveal (Enter)</button>
+          </div>
         )}
       </div>
     </div>

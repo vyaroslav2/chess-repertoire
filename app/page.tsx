@@ -1,16 +1,16 @@
 import React from "react";
-import RepertoireTester from "../components/RepertoireTester";
-import { getDatabaseRepertoire } from "./actions";
+import SrsTrainer from "../components/SrsTrainer";
+import { fetchDuePositions } from "./actions";
 
 export default async function Home() {
-  const repertoireData = await getDatabaseRepertoire();
+  const dueStats = await fetchDuePositions("some-repertoire-id");
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", 
     /*background: "yellow",*/ 
     background: "#161512", 
     gap: "20px", padding: "20px" }}>
-      <RepertoireTester database={repertoireData} />
+      <SrsTrainer dueStats={dueStats} />
     </div>
   );
 }
