@@ -318,6 +318,8 @@ async function expandNode(
     console.log(`Algorithm Selected: ${selectedMoveSan} -> ${explanation}`);
     const moveSan = selectedMoveSan;
 
+    try {
+
       const moveResult = tempChess.move(moveSan);
       if (!moveResult) {
         throw new Error(`Gemini suggested illegal move: ${moveSan}`);
