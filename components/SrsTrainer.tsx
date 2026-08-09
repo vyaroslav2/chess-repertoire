@@ -25,6 +25,7 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
 
   // Browsing state
   const [currentPlyIndex, setCurrentPlyIndex] = useState(-1);
+  const [isInitializing, setIsInitializing] = useState(true);
 
   // Sound ref
   const moveSoundRef = useRef<HTMLAudioElement | null>(null);
@@ -36,7 +37,7 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
   // Derived lock state
   const expectedPlyIndex = (testStatus === 'idle' || testStatus === 'wrong') ? targetPlyIndex : targetPlyIndex + 1;
   const isBrowsing = currentPlyIndex !== expectedPlyIndex;
-  const isLocked = testStatus !== 'idle' || isBrowsing;
+  const isLocked = testStatus !== 'idle' || isBrowsing || isInitializing;
 
   useEffect(() => {
     // Initialize audio
@@ -54,6 +55,9 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
   useEffect(() => {
     if (!currentStat) return;
 
+    setIsInitializing(true);
+    const lineMoves: string[] = currentStat.lineMoves || [];
+    
     if (lineMoves.length === 0) {
       // First move of the game, no opponent move to animate
       chess.reset();
@@ -61,33 +65,39 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
       setLastMove(undefined);
       setTestStatus("idle");
       setCurrentPlyIndex(0);
+      setIsInitializing(false);
       return;
     }
 
-    // Use a fresh instance to safely fast-forward without polluting the main instance during renders
+    // Start from the beginning to play out the full line as requested
     const tempChess = new Chess();
-    for (let i = 0; i < lineMoves.length - 1; i++) {
-      tempChess.move(lineMoves[i]);
-    }
-    
     setFen(tempChess.fen());
     chess.load(tempChess.fen());
     setLastMove(undefined);
     setTestStatus("idle");
-    setCurrentPlyIndex(lineMoves.length - 1); // Before opponent's move
+    setCurrentPlyIndex(0);
 
-    // Wait 400ms, then animate opponent's move
-    const timer = setTimeout(() => {
-      const opponentSan = lineMoves[lineMoves.length - 1];
-      const move = tempChess.move(opponentSan);
-      if (move) {
-        setFen(tempChess.fen());
-        chess.load(tempChess.fen()); // Sync main instance
-        setLastMove([move.from, move.to]);
-        setCurrentPlyIndex(lineMoves.length); // At target position
-        playSound();
+    let step = 0;
+    let timer: NodeJS.Timeout;
+
+    const playNextMove = () => {
+      if (step < lineMoves.length) {
+        const m = tempChess.move(lineMoves[step]);
+        if (m) {
+          setFen(tempChess.fen());
+          chess.load(tempChess.fen()); // Sync main instance
+          setLastMove([m.from, m.to]);
+          setCurrentPlyIndex(step + 1);
+          playSound();
+        }
+        step++;
+        timer = setTimeout(playNextMove, 400); // 400ms per ply animation
+      } else {
+        setIsInitializing(false); // Done playing out
       }
-    }, 400);
+    };
+
+    timer = setTimeout(playNextMove, 400);
 
     return () => clearTimeout(timer);
   }, [currentStat, chess]);
@@ -96,10 +106,7 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
   useEffect(() => {
     if (!currentStat) return;
     if (currentPlyIndex < 0) return;
-
-    // To prevent the browsing effect from fighting the 400ms animation sequence, 
-    // we only run it if we are actually browsing OR if the test is complete.
-    if (testStatus === "idle" && currentPlyIndex === targetPlyIndex - 1) return; // In the middle of 400ms delay
+    if (isInitializing) return; // Prevent interference during the opening animation
 
     // Rebuild board to currentPlyIndex
     const tempChess = new Chess();
@@ -155,7 +162,7 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
       }
 
       // 1, 2, 3, 4 (Grade)
-      if (["1", "2", "3", "4"].includes(e.key) && !isBrowsing) {
+      if (["1", "2", "3", "4"].includes(e.key) && testStatus !== "idle") {
         // Map 1-4 to 0-3 quality
         const quality = parseInt(e.key) - 1;
         handleRate(quality);
@@ -182,8 +189,8 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
 
   const calcMovable = () => {
     // Only allow moves if we are idle or wrong (let them try again)
-    // Completely lock the board during browsing
-    if (testStatus === "correct" || testStatus === "revealed" || isBrowsing) {
+    // Completely lock the board during browsing or initialization
+    if (testStatus === "correct" || testStatus === "revealed" || isBrowsing || isInitializing) {
       return { free: false, color: undefined, dests: new Map() };
     }
 
