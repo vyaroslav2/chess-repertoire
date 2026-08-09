@@ -3,6 +3,7 @@ import { Chess } from "chess.js";
 import { GoogleGenAI } from "@google/genai";
 import * as dotenv from "dotenv";
 import * as fs from "fs";
+import { createEmptyCard } from "ts-fsrs";
 
 if (fs.existsSync("C:\\Files\\.env")) {
   dotenv.config({ path: "C:\\Files\\.env" });
@@ -419,10 +420,25 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
         dbBlackMove = await prisma.move.create({ data: { san: algoResult.selectedMoveSan, fromPositionId: posAfterWhite.id, toPositionId: posAfterBlack.id } });
       }
 
+      const emptyCard = createEmptyCard();
       await prisma.repertoirePositionStat.upsert({
         where: { repertoireId_positionId: { repertoireId: repertoire.id, positionId: posAfterWhite.id } },
         update: { targetMoveId: dbBlackMove.id, explanation: explanation },
-        create: { repertoireId: repertoire.id, positionId: posAfterWhite.id, targetMoveId: dbBlackMove.id, explanation: explanation }
+        create: { 
+          repertoireId: repertoire.id, 
+          positionId: posAfterWhite.id, 
+          targetMoveId: dbBlackMove.id, 
+          explanation: explanation,
+          due: emptyCard.due,
+          stability: emptyCard.stability,
+          difficulty: emptyCard.difficulty,
+          elapsed_days: emptyCard.elapsed_days,
+          scheduled_days: emptyCard.scheduled_days,
+          reps: emptyCard.reps,
+          lapses: emptyCard.lapses,
+          state: emptyCard.state,
+          last_review: emptyCard.last_review || null
+        }
       });
 
       queue.push({

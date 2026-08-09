@@ -40,11 +40,14 @@ export async function fetchDuePositions(repertoireId: string) {
       targetMove: true,
       repertoire: true
     },
-    orderBy: { due: "asc" },
-    take: 20
+    orderBy: { due: "asc" }
   });
 
+  console.log(`[fetchDuePositions] Found ${stats.length} due stats for repertoire ${repertoireId} at ${new Date()}`);
+
   if (stats.length === 0) {
+    const allStats = await prisma.repertoirePositionStat.count({ where: { repertoireId } });
+    console.log(`[fetchDuePositions] Total stats for repertoire (regardless of due): ${allStats}`);
     return [];
   }
 
@@ -66,7 +69,10 @@ export async function fetchDuePositions(repertoireId: string) {
     return { ...stat, lineMoves };
   }));
 
-  return enrichedStats;
+  // Sort by depth (shallower lines first) to ensure new cards are introduced logically
+  enrichedStats.sort((a, b) => a.lineMoves.length - b.lineMoves.length);
+
+  return enrichedStats.slice(0, 20);
 }
 
 export async function updateSrsStats(statId: string, quality: number) {
