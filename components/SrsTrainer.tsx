@@ -24,6 +24,7 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
   const [lastMove, setLastMove] = useState<[string, string] | undefined>();
 
   // Browsing state
+  const [currentPlyIndex, setCurrentPlyIndex] = useState(-1);
   const [isInitializing, setIsInitializing] = useState(true);
   const animTimerRef = useRef<NodeJS.Timeout | null>(null);
 
