@@ -3,6 +3,7 @@ import { Chess } from "chess.js";
 import { GoogleGenAI } from "@google/genai";
 import * as dotenv from "dotenv";
 import * as fs from "fs";
+import { createEmptyCard } from "ts-fsrs";
 
 // Try to load from C:\Files\.env first as user requested, then fallback to local .env
 if (fs.existsSync("C:\\Files\\.env")) {
@@ -32,14 +33,26 @@ const ai = new GoogleGenAI({
 // Delay helper to avoid hitting API rate limits too hard
 const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
-async function getOrCreatePosition(fen: string) {
+async function getOrCreatePosition(fen: string, eco?: string, openingName?: string) {
   const strippedFen = fen.split(" ").slice(0, 4).join(" ");
   let pos = await prisma.position.findUnique({
     where: { fen: strippedFen },
   });
   if (!pos) {
     pos = await prisma.position.create({
-      data: { fen: strippedFen },
+      data: { 
+        fen: strippedFen,
+        eco: eco || null,
+        openingName: openingName || null
+      },
+    });
+  } else if ((eco && !pos.eco) || (openingName && !pos.openingName)) {
+    pos = await prisma.position.update({
+      where: { id: pos.id },
+      data: {
+        eco: pos.eco || eco || null,
+        openingName: pos.openingName || openingName || null
+      }
     });
   }
   return pos;
@@ -105,8 +118,10 @@ async function expandNode(
     }
 
     let nextOpeningName = openingName;
-    if (data && data.opening && data.opening.name) {
-      nextOpeningName = data.opening.name;
+    let nextEco: string | undefined = undefined;
+    if (data && data.opening) {
+      if (data.opening.name) nextOpeningName = data.opening.name;
+      if (data.opening.eco) nextEco = data.opening.eco;
     }
 
     if (!data || !data.moves) {
@@ -133,7 +148,7 @@ async function expandNode(
         const moveResult = tempChess.move(moveSan);
         if (!moveResult) continue;
 
-        const newPos = await getOrCreatePosition(tempChess.fen());
+        const newPos = await getOrCreatePosition(tempChess.fen(), nextEco, nextOpeningName);
         
         // Create Move in DB if it doesn't exist
         let dbMove = await prisma.move.findFirst({
@@ -347,6 +362,7 @@ async function expandNode(
       }
 
       // Create SRS Card
+      const emptyCard = createEmptyCard();
       await prisma.repertoirePositionStat.upsert({
         where: {
           repertoireId_positionId: {
@@ -362,7 +378,16 @@ async function expandNode(
           repertoireId: repertoireId,
           positionId: currentPositionId,
           targetMoveId: dbMove.id,
-          explanation: explanation
+          explanation: explanation,
+          due: emptyCard.due,
+          stability: emptyCard.stability,
+          difficulty: emptyCard.difficulty,
+          elapsed_days: emptyCard.elapsed_days,
+          scheduled_days: emptyCard.scheduled_days,
+          reps: emptyCard.reps,
+          lapses: emptyCard.lapses,
+          state: emptyCard.state,
+          last_review: emptyCard.last_review || null
         }
       });
 
@@ -429,6 +454,7 @@ async function main() {
     || await prisma.move.create({ data: { san: "c6", fromPositionId: posAfterE4.id, toPositionId: posAfterC6.id } });
 
   // Add the base SRS card for Black's very first move (c6 against e4)
+  const emptyBaseCard = createEmptyCard();
   await prisma.repertoirePositionStat.upsert({
     where: {
       repertoireId_positionId: {
@@ -441,7 +467,16 @@ async function main() {
       repertoireId: repertoire.id,
       positionId: posAfterE4.id,
       targetMoveId: moveC6.id,
-      explanation: "The Caro-Kann defense. Solid and fights for the center."
+      explanation: "The Caro-Kann defense. Solid and fights for the center.",
+      due: emptyBaseCard.due,
+      stability: emptyBaseCard.stability,
+      difficulty: emptyBaseCard.difficulty,
+      elapsed_days: emptyBaseCard.elapsed_days,
+      scheduled_days: emptyBaseCard.scheduled_days,
+      reps: emptyBaseCard.reps,
+      lapses: emptyBaseCard.lapses,
+      state: emptyBaseCard.state,
+      last_review: emptyBaseCard.last_review || null
     }
   });
 

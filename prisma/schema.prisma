@@ -31,6 +31,8 @@ model Repertoire {
 model Position {
   id           String                   @id @default(uuid())
   fen          String                   @unique
+  eco          String?                  // e.g., "B12"
+  openingName  String?                  // e.g., "Caro-Kann Defense: Advance Variation"
   
   // Relationships for moves where this position is the starting or resulting point
   outgoingMoves Move[]                  @relation("FromPosition")
@@ -64,11 +66,20 @@ model RepertoirePositionStat {
 
   // Natural Language Explanation of the plan (e.g. from Gemini)
   explanation  String?
+  tags         String?
 
-  // SRS Data (SuperMemo-2 style)
-  easeFactor   Float      @default(2.5)
-  interval     Int        @default(0)       // Days until next review
-  dueDate      DateTime   @default(now())
+  // --- EXACT TS-FSRS CARD OBJECT ---
+  due            DateTime @default(now()) // Next review date
+  stability      Float    @default(0)     // Memory stability
+  difficulty     Float    @default(0)     // Memory difficulty
+  elapsed_days   Int      @default(0)     // Days since last review
+  scheduled_days Int      @default(0)     // The new "Interval"
+  reps           Int      @default(0)     // Total times reviewed
+  lapses         Int      @default(0)     // Times you pressed "1" (Again)
+  state          Int      @default(0)     // 0=New, 1=Learning, 2=Review, 3=Relearning
+  last_review    DateTime?                // When you last saw it
+  
+  createdAt      DateTime @default(now())
 
   @@unique([repertoireId, positionId]) // Ensure a user has only one set of stats per position per repertoire
 }

@@ -2,8 +2,10 @@
 
 import { PrismaClient } from "@prisma/client";
 import { Chess } from "chess.js";
+import { fsrs, createEmptyCard, Rating, Card, State } from "ts-fsrs";
 
 const prisma = new PrismaClient();
+const f = fsrs(); // Initialize FSRS algorithm
 
 export async function getDatabaseRepertoire() {
   // const repertoires = await prisma.repertoire.findMany();
@@ -31,22 +33,20 @@ export async function fetchDuePositions(repertoireId: string) {
   const stats = await prisma.repertoirePositionStat.findMany({
     where: {
       repertoireId,
-      dueDate: { lte: new Date() }
+      due: { lte: new Date() }
     },
     include: {
       position: true,
       targetMove: true,
       repertoire: true
     },
-    orderBy: { dueDate: "asc" },
+    orderBy: { due: "asc" },
     take: 20
   });
 
   if (stats.length === 0) {
     return [];
   }
-
-  // Attach full line history to each stat
 
   // Attach full line history to each stat
   const enrichedStats = await Promise.all(stats.map(async (stat) => {
@@ -71,51 +71,50 @@ export async function fetchDuePositions(repertoireId: string) {
 
 export async function updateSrsStats(statId: string, quality: number) {
   // quality: 0 (Again), 1 (Hard), 2 (Good), 3 (Easy)
+  // FSRS expects Rating enums: 1=Again, 2=Hard, 3=Good, 4=Easy
+  const fsrsRatingMap = [Rating.Again, Rating.Hard, Rating.Good, Rating.Easy];
+  const fsrsRating = fsrsRatingMap[quality];
+
   const stat = await prisma.repertoirePositionStat.findUnique({ where: { id: statId } });
   if (!stat) return;
 
-  // Convert our 0-3 scale to standard SM-2 0-5 scale
-  // 0 (Again) -> 1 (Fail)
-  // 1 (Hard) -> 3 (Pass with difficulty)
-  // 2 (Good) -> 4 (Pass normally)
-  // 3 (Easy) -> 5 (Pass effortlessly)
-  const qMap = [1, 3, 4, 5];
-  const q = qMap[quality];
+  // Build the TS-FSRS Card from database state
+  const currentCard: Card = {
+    due: stat.due,
+    stability: stat.stability,
+    difficulty: stat.difficulty,
+    elapsed_days: stat.elapsed_days,
+    scheduled_days: stat.scheduled_days,
+    reps: stat.reps,
+    lapses: stat.lapses,
+    state: stat.state as State,
+    last_review: stat.last_review || undefined
+  };
 
-  let newInterval = stat.interval;
-  let newEase = stat.easeFactor;
-
-  if (q < 3) {
-    // Failed
-    newInterval = 0;
-  } else {
-    if (stat.interval === 0) newInterval = 1;
-    else if (stat.interval === 1) newInterval = 6;
-    else newInterval = Math.round(stat.interval * stat.easeFactor);
-  }
-
-  // Update ease factor
-  newEase = newEase + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02));
-  if (newEase < 1.3) newEase = 1.3;
-
-  const newDueDate = new Date();
-  if (newInterval > 0) {
-    newDueDate.setDate(newDueDate.getDate() + newInterval);
-  } else {
-    // Review again in 5 minutes
-    newDueDate.setMinutes(newDueDate.getMinutes() + 5);
-  }
+  // Run the algorithm
+  const now = new Date();
+  const schedulingInfo = f.repeat(currentCard, now);
+  
+  // Extract the specific result based on the rating the user provided
+  const recordLog = schedulingInfo[fsrsRating];
+  const newCard = recordLog.card;
 
   const updatedStat = await prisma.repertoirePositionStat.update({
     where: { id: statId },
     data: {
-      interval: newInterval,
-      easeFactor: newEase,
-      dueDate: newDueDate
+      due: newCard.due,
+      stability: newCard.stability,
+      difficulty: newCard.difficulty,
+      elapsed_days: newCard.elapsed_days,
+      scheduled_days: newCard.scheduled_days,
+      reps: newCard.reps,
+      lapses: newCard.lapses,
+      state: newCard.state,
+      last_review: newCard.last_review
     }
   });
 
-  // Log SRS state transition for debugging
+  // Log FSRS state transition for debugging
   try {
     const fs = require("fs");
     const path = require("path");
@@ -123,13 +122,15 @@ export async function updateSrsStats(statId: string, quality: number) {
       timestamp: new Date().toISOString(),
       statId,
       quality,
-      q_mapped: q,
-      old_interval: stat.interval,
-      new_interval: newInterval,
-      old_ease: stat.easeFactor,
-      new_ease: newEase,
-      old_due: stat.dueDate,
-      new_due: newDueDate
+      fsrsRating,
+      old_stability: currentCard.stability,
+      new_stability: newCard.stability,
+      old_difficulty: currentCard.difficulty,
+      new_difficulty: newCard.difficulty,
+      old_state: currentCard.state,
+      new_state: newCard.state,
+      old_due: currentCard.due,
+      new_due: newCard.due
     }) + "\n";
     fs.appendFileSync(path.join(process.cwd(), "srs.log"), logLine, "utf-8");
   } catch (err) {
