@@ -89,9 +89,9 @@ async function main() {
       if (pos?.eco || pos?.openingName) {
         out += `ECO: ${pos.eco || "?"} | Opening: ${pos.openingName || "?"}\n`;
       }
-      if (pos?.wikiText) {
+      /*if (pos?.wikiText) {
          out += `Wiki: ${pos.wikiText}\n`;
-      }
+      }*/
       out += `Threat/Trap: ${pos?.isTrap ? "1 (True)" : "0 (False)"}\n\n`;
 
       out += isWhite ? `--- WHITE'S MOVE ---\n` : `--- BLACK'S MOVE ---\n`;
@@ -111,7 +111,9 @@ async function main() {
         out += ` - Weighted Masters: ${(move.mastersGames || 0) * 5}\n`;
         out += ` - Lichess: ${move.lichessGames || 0}\n`;
         out += ` - Total Weighted: ${move.weightedCount || 0}\n`;
-        out += `Eval: ${move.eval !== null ? move.eval.toFixed(2) : "N/A"} | Win/Draw/Loss: ${((move.lichessWin||0)*100).toFixed(0)}% / ${((move.lichessDraw||0)*100).toFixed(0)}% / ${((move.lichessLoss||0)*100).toFixed(0)}%\n\n`;
+        const lEval = move.lichessEval !== null ? move.lichessEval.toFixed(2) : "N/A";
+        const cEval = move.chessdbEval !== null ? move.chessdbEval.toFixed(2) : "N/A";
+        out += `Eval: Lichess ${lEval} / ChessDB ${cEval} | Win/Draw/Loss: ${((move.lichessWin||0)*100).toFixed(0)}% / ${((move.lichessDraw||0)*100).toFixed(0)}% / ${((move.lichessLoss||0)*100).toFixed(0)}%\n\n`;
       }
 
       // Engines

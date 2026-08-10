@@ -35,7 +35,10 @@ model Position {
   eco            String?
   openingName    String?
   wikiText       String?
-  isTrap         Boolean  @default(false)
+  
+  trueProbability Float   @default(0)
+  isAmateurTrap   Boolean @default(false)
+  isMasterThreat  Boolean @default(false)
 
   incomingMoves  Move[]   @relation("IncomingMoves")
   outgoingMoves  Move[]   @relation("OutgoingMoves")
@@ -50,7 +53,8 @@ model Move {
   fromPositionId String
   toPositionId   String
 
-  eval           Float?
+  lichessEval    Float?
+  chessdbEval    Float?
   prob           Float?
   cumulativeProb Float?
   
@@ -78,6 +82,7 @@ model EngineEval {
   cp         Float
   mate       Int?
   rank       Int
+  source     String   @default("lichess")
   
   position   Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
 }

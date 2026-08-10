@@ -1,4 +1,17 @@
 import { PrismaClient } from "@prisma/client";
+import { getMoveResults } from "./get_move_results";
+import * as readline from 'readline/promises';
+import { stdin as processStdin, stdout as processStdout } from 'process';
+
+async function promptUser(query: string): Promise<string> {
+  const rl = readline.createInterface({ input: processStdin, output: processStdout });
+  const answer = await rl.question(query);
+  rl.close();
+  return answer;
+}
+
+let GLOBAL_USE_LICHESS_EVAL = true;
+
 import { Chess } from "chess.js";
 import { GoogleGenAI } from "@google/genai";
 import * as dotenv from "dotenv";
@@ -86,22 +99,63 @@ async function getOrCreatePosition(fen: string, openingMetadata?: { eco: string,
   return pos;
 }
 
-async function fetchWithRetry(url: string, retries = 3) {
+async function fetchWithRetry(url: string, retries = 10, useToken = true, apiType: 'eval' | 'explorer' = 'explorer') {
+  const headers: any = { 'Accept': 'application/json' };
+  if (useToken) headers['Authorization'] = `Bearer ${LICHESS_API_TOKEN}`;
+
   for (let i = 0; i < retries; i++) {
-    const response = await fetch(url, { headers: { 'Authorization': `Bearer ${LICHESS_API_TOKEN}`, 'Accept': 'application/json' }});
-    if (response.status === 429) {
-      const waitTime = 10000 * (i+1);
-      console.log(`[WARNING] Lichess rate limit (429). Waiting ${waitTime/1000}s before retry...`);
-      await delay(waitTime);
+    try {
+      const response = await fetch(url, { headers });
+      if (response.status === 429) {
+        if (i < retries - 1) {
+            console.log(`[WARNING] Lichess rate limit (429) on ${url}. Auto-retrying in 2s (Attempt ${i+1}/${retries})...`);
+            await delay(2000);
+            continue;
+        }
+
+        console.log(`\n[WARNING] Lichess rate limit (429) on ${url}`);
+        const cOption = apiType === 'eval' ? `, [c]=Fallback to ChessDB` : ``;
+        const answer = await promptUser(`[ACTION REQUIRED] Auto-retries exhausted. Switch VPN and press Enter to retry. (Options: [Enter]=Retry, [n]=Deny/Skip${cOption}, [s]=Stop script): `);
+        const choice = answer.toLowerCase().trim();
+        
+        if (choice === 's') {
+            console.log("Stopping script.");
+            process.exit(0);
+        } else if (choice === 'c' && apiType === 'eval') {
+            GLOBAL_USE_LICHESS_EVAL = false;
+            return null;
+        } else if (choice === 'n') {
+            return null;
+        }
+        return await fetchWithRetry(url, retries, useToken, apiType);
+      }
+      if (!response.ok) {
+        console.log(`Lichess error ${response.status} on ${url}`);
+        return null;
+      }
+      return await response.json();
+    } catch (e: any) {
+      console.log(`[WARNING] Network error fetching ${url}: ${e.message}`);
+      if (i === retries - 1) {
+          const cOption = apiType === 'eval' ? `, [c]=Fallback to ChessDB` : ``;
+          const answer = await promptUser(`\n[ACTION REQUIRED] Network errors exhausted. Switch VPN and press Enter to retry. (Options: [Enter]=Retry, [n]=Deny/Skip${cOption}, [s]=Stop script): `);
+          const choice = answer.toLowerCase().trim();
+          
+          if (choice === 's') {
+              console.log("Stopping script.");
+              process.exit(0);
+          } else if (choice === 'c' && apiType === 'eval') {
+              GLOBAL_USE_LICHESS_EVAL = false;
+              return null;
+          } else if (choice === 'n') {
+              return null;
+          }
+          return await fetchWithRetry(url, retries, useToken, apiType);
+      }
+      await delay(1000);
       continue;
     }
-    if (!response.ok) {
-      console.log(`Lichess error ${response.status} on ${url}`);
-      return null;
-    }
-    return await response.json();
   }
-  console.log(`[SKIPPED] Rate limit exhausted for ${url}. Leaving data unfilled to be processed later.`);
   return null;
 }
 
@@ -145,25 +199,16 @@ async function fetchAllDatabases(fen: string) {
   return [masters, elite, amateur];
 }
 
-function calculateMasterThreatScore(mastersData: any, eliteData: any) {
-    const MIN_GAMES_THRESHOLD = 15;
-    const SKEPTICAL_PRIOR_BLACK_WINS = 50; 
+function getSmoothedWinRate(whiteWins: number, draws: number, totalGames: number, anchor = 50, prior = 0.52) {
+    const realScore = whiteWins + (0.5 * draws);
+    const fakeScore = anchor * prior; 
+    return (realScore + fakeScore) / (totalGames + anchor);
+}
 
-    const mTotal = mastersData ? mastersData.white + mastersData.draws + mastersData.black : 0;
-    const mWhite = mastersData ? mastersData.white : 0;
-
-    const eTotal = eliteData ? eliteData.white + eliteData.draws + eliteData.black : 0;
-    const eWhite = eliteData ? eliteData.white : 0;
-
-    const weightedCount = (mTotal * 5) + eTotal;
-    const weightedWhiteWins = (mWhite * 5) + eWhite;
-
-    if (weightedCount < MIN_GAMES_THRESHOLD) return 0;
-
-    const smoothedCount = weightedCount + SKEPTICAL_PRIOR_BLACK_WINS;
-    const whiteWinRate = weightedWhiteWins / smoothedCount;
-    
-    return whiteWinRate; 
+function getCpTolerance(moveNumber: number): number {
+    if (moveNumber <= 4) return 80;
+    if (moveNumber <= 8) return 50;
+    return 35; 
 }
 
 function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: number, mastersList: any[], eliteList: any[], amateurList: any[], totalAmateurGames: number) {
@@ -177,9 +222,18 @@ function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: number, mast
     let isTrap = false;
     let probability = totalAmateurGames > 0 ? aTotal / totalAmateurGames : 0;
 
+    // Compile the comprehensive stats to save in DB
+    const mTotal = mastersData ? (mastersData.white + mastersData.draws + mastersData.black) : 0;
+    const mWin = mTotal > 0 ? mastersData.white / mTotal : 0;
+    const mDraw = mTotal > 0 ? mastersData.draws / mTotal : 0;
+    const mLoss = mTotal > 0 ? mastersData.black / mTotal : 0;
+
+    const aWin = aTotal > 0 ? amateurData.white / aTotal : 0;
+    const aDraw = aTotal > 0 ? amateurData.draws / aTotal : 0;
+    const aLoss = aTotal > 0 ? amateurData.black / aTotal : 0;
+
     if (totalAmateurGames > 0) {
       const amateurWhiteWinRate = aTotal > 0 ? amateurData.white / aTotal : 0;
-      const masterThreatScore = calculateMasterThreatScore(mastersData, eliteData);
 
       let requiredProbability = 0.15; 
       if (currentMoveNumber <= 4) requiredProbability = 0.05;
@@ -190,24 +244,21 @@ function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: number, mast
           reason = "Mainline";
       } else if (probability >= 0.01 && amateurWhiteWinRate >= 0.55) {
           include = true;
-          reason = "Amateur Trap";
-          isTrap = true;
-      } else if (masterThreatScore >= 0.45) {
-          include = true;
-          reason = "Master Threat";
-          isTrap = true;
+          reason = "Amateur Trap (Pending Eval)";
+      } else if (probability > 0) {
+          // Master Threat checking is now deferred to post-evaluation, 
+          // but we still need to include moves that *might* be threats to evaluate them.
+          const masterSmoothed = getSmoothedWinRate(
+            mTotal > 0 ? mastersData.white : 0, 
+            mTotal > 0 ? mastersData.draws : 0, 
+            mTotal, 50, 0.52
+          );
+          if (mTotal >= 15 && masterSmoothed >= 0.58) {
+              include = true;
+              reason = "Master Threat (Pending Eval)";
+          }
       }
     }
-
-    // Compile the comprehensive stats to save in DB
-    const mTotal = mastersData ? (mastersData.white + mastersData.draws + mastersData.black) : 0;
-    const mWin = mTotal > 0 ? mastersData.white / mTotal : 0;
-    const mDraw = mTotal > 0 ? mastersData.draws / mTotal : 0;
-    const mLoss = mTotal > 0 ? mastersData.black / mTotal : 0;
-
-    const aWin = aTotal > 0 ? amateurData.white / aTotal : 0;
-    const aDraw = aTotal > 0 ? amateurData.draws / aTotal : 0;
-    const aLoss = aTotal > 0 ? amateurData.black / aTotal : 0;
 
     return { 
       include, reason, isTrap, probability,
@@ -290,14 +341,23 @@ async function evaluateBlackMove(fen: string, posId: string, chess: Chess, moveN
   candidateMoves.sort((a, b) => b.score - a.score);
 
   await delay(1000);
+  let lichessCp: number | null = null;
+  let chessdbCp: number | null = null;
   let bestCp = 0;
   let enginePvs: any[] = [];
+  let chessdbPvs: any[] = [];
+  let evalSource = 'Lichess';
   try {
-    const cloudUrl = `https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(strippedFen)}&multiPv=5`;
-    const cloudData = await fetchWithRetry(cloudUrl);
+    let cloudData: any = null;
+    if (GLOBAL_USE_LICHESS_EVAL) {
+      const cloudUrl = `https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(strippedFen)}&multiPv=5`;
+      cloudData = await fetchWithRetry(cloudUrl, 10, false, 'eval');
+    }
+    
     if (cloudData && !cloudData.error && cloudData.pvs && cloudData.pvs.length > 0) {
       enginePvs = cloudData.pvs;
-      bestCp = enginePvs[0].cp;
+      lichessCp = enginePvs[0].cp;
+      bestCp = lichessCp!;
       
       // Save Engine Eval Top Moves
       let rank = 1;
@@ -312,13 +372,60 @@ async function evaluateBlackMove(fen: string, posId: string, chess: Chess, moveN
           
           await prisma.engineEval.create({
             data: {
-              positionId: posId, san: moveResult.san, cp: pv.cp, mate: pv.mate || null, rank: rank++
+              positionId: posId, san: moveResult.san, cp: pv.cp, mate: pv.mate || null, rank: rank++, source: "lichess"
             }
           });
         } catch(e) {}
       }
+    } else {
+      evalSource = 'ChessDB';
     }
-  } catch (e) {}
+
+    try {
+      const chessdbUrl = `https://www.chessdb.cn/cdb.php?action=queryall&board=${encodeURIComponent(strippedFen)}`;
+      const chessdbRes = await fetch(chessdbUrl);
+      if (chessdbRes.ok) {
+        const text = await chessdbRes.text();
+        if (text.includes("move:")) {
+          const moves = text.split("|");
+          let rank = 1;
+          for (const m of moves) {
+            const moveMatch = m.match(/move:([^,]+),score:([^,]+)/);
+            if (moveMatch) {
+              const lan = moveMatch[1];
+              const scoreCp = parseInt(moveMatch[2], 10);
+              const whiteCp = -scoreCp; // Invert to White's POV
+              chessdbPvs.push({ cp: whiteCp, moves: lan });
+              
+              try {
+                const tempChess = new Chess(fen);
+                const fromSq = lan.substring(0, 2);
+                const toSq = lan.substring(2, 4);
+                const promotion = lan.length === 5 ? lan[4] : undefined;
+                const moveResult = tempChess.move({ from: fromSq, to: toSq, promotion } as any);
+                
+                await prisma.engineEval.create({
+                  data: {
+                    positionId: posId, san: moveResult.san, cp: whiteCp, mate: null, rank: rank++, source: "chessdb"
+                  }
+                });
+              } catch(e) {}
+            }
+          }
+          if (chessdbPvs.length > 0) {
+            chessdbPvs.sort((a, b) => a.cp - b.cp);
+            chessdbCp = chessdbPvs[0].cp;
+            if (evalSource === 'ChessDB') {
+              enginePvs = chessdbPvs;
+              bestCp = chessdbCp;
+            }
+          }
+        }
+      }
+    } catch (e) {}
+  } catch (e) {
+    console.log("Error fetching engine eval:", e);
+  }
 
   let selectedMoveSan: string | null = null;
   let selectedStats: any = null;
@@ -350,9 +457,9 @@ Reply ONLY with the exact standard algebraic notation of the single best move (e
         chess.undo();
         const lan = moveResult.lan; 
         const enginePv = enginePvs.find(pv => pv.moves.split(" ")[0] === lan);
-        // Engine perspective is for White. If it's Black's turn, engine CP is still from White's POV.
-        // Wait, Lichess cloud eval CP is always from White's POV.
-        if (enginePv && Math.abs(enginePv.cp - bestCp) <= 80) {
+        const currentTolerance = getCpTolerance(moveNumber);
+        
+        if (enginePv && Math.abs(enginePv.cp - bestCp) <= currentTolerance) {
           selectedMoveSan = candidate.san;
           selectedStats = candidate;
           selectedEngineCp = enginePv.cp;
@@ -381,7 +488,14 @@ Reply ONLY with the exact standard algebraic notation of the single best move (e
     selectedStats = candidateMoves[0];
   }
 
-  return { selectedMoveSan, selectedStats, selectedEngineCp };
+  if (selectedEngineCp === null) {
+      const answer = await promptUser(`\n[N/A EVAL] API limits reached for ${fen}. Turn on VPN and press Enter to retry, or type 's' to skip: `);
+      if (answer.toLowerCase() !== 's') {
+          return await evaluateBlackMove(fen, posId, chess, moveNumber, previousMovesSan);
+      }
+  }
+
+  return { selectedMoveSan, selectedStats, selectedEngineCp, lichessCp, chessdbCp, evalSource };
 }
 
 async function generateRepertoire(startFen: string, maxDepth: number) {
@@ -407,15 +521,25 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
   }
 
   const queue = [{ fen: startFen, currentMoveNumber: 1, trapDepth: 0, cumulativeProb: 1.0, history: [] as string[] }];
+  const visitedFens = new Set<string>();
   
   while (queue.length > 0) {
     const node = queue.shift();
     if (!node) continue;
     
+    if (visitedFens.has(node.fen)) {
+      console.log(`[BFS] Skipping transposition: ${node.fen}`);
+      continue;
+    }
+    visitedFens.add(node.fen);
+    
     totalPositionsProcessed++;
 
+    const currentElapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    
     console.log(`\n--- Queue Size: ${queue.length} | Move: ${node.currentMoveNumber} | Trap Depth: ${node.trapDepth} ---`);
     console.log(`History: ${node.history.join(" ")}`);
+    console.log(`[Stats] Elapsed: ${currentElapsed}s | Positions Processed: ${totalPositionsProcessed} | N/A Evals: ${totalNaEvals}`);
 
     let dynamicMaxDepth = 5; 
     if (node.cumulativeProb > 0.02) { 
@@ -464,13 +588,7 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
       
       const newHistory = [...node.history, whiteMove.san];
       
-      const isTrapFlag = whiteMove.isTrap || false;
       const posAfterWhite = await getOrCreatePosition(fenAfterWhite, undefined, newHistory);
-
-      // Update position trap flag if it is newly identified as a trap in another line
-      if (isTrapFlag && !posAfterWhite.isTrap) {
-          await prisma.position.update({ where: { id: posAfterWhite.id }, data: { isTrap: true }});
-      }
 
       const existingStat = await prisma.repertoirePositionStat.findUnique({
         where: { repertoireId_positionId: { repertoireId: repertoire.id, positionId: posAfterWhite.id } }
@@ -497,6 +615,8 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
       }
       
       let dbWhiteMove = await prisma.move.findFirst({ where: { fromPositionId: posId, toPositionId: posAfterWhite.id, san: whiteMove.san } });
+      const incomingPathProb = node.cumulativeProb * (whiteMove.probability || 1.0);
+      
       if (!dbWhiteMove) {
         dbWhiteMove = await prisma.move.create({ 
           data: { 
@@ -504,7 +624,7 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
             fromPositionId: posId, 
             toPositionId: posAfterWhite.id,
             prob: whiteMove.probability,
-            cumulativeProb: node.cumulativeProb * (whiteMove.probability || 1.0),
+            cumulativeProb: incomingPathProb,
             mastersGames: whiteMove.mastersGames,
             mastersWin: whiteMove.mastersWin,
             mastersDraw: whiteMove.mastersDraw,
@@ -515,14 +635,61 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
             lichessLoss: whiteMove.lichessLoss
           } 
         });
+        
+        await prisma.position.update({
+            where: { id: posAfterWhite.id },
+            data: { trueProbability: { increment: incomingPathProb } }
+        });
       } else {
         await prisma.move.update({
           where: { id: dbWhiteMove.id },
-          data: { cumulativeProb: node.cumulativeProb * (whiteMove.probability || 1.0) }
+          data: { cumulativeProb: Math.max(dbWhiteMove.cumulativeProb || 0, incomingPathProb) }
+        });
+        
+        await prisma.position.update({
+            where: { id: posAfterWhite.id },
+            data: { trueProbability: { increment: incomingPathProb } }
         });
       }
 
       const algoResult = await evaluateBlackMove(fenAfterWhite, posAfterWhite.id, tempChess, node.currentMoveNumber, newHistory);
+      
+      const evalIsSafe = algoResult.selectedEngineCp !== null && algoResult.selectedEngineCp >= -200 && algoResult.selectedEngineCp <= 60;
+
+      if (evalIsSafe) {
+          const masterSmoothed = getSmoothedWinRate(
+              whiteMove.mastersWin * whiteMove.mastersGames,
+              whiteMove.mastersDraw * whiteMove.mastersGames,
+              whiteMove.mastersGames,
+              50, 0.52 
+          );
+          
+          const amateurSmoothed = getSmoothedWinRate(
+              whiteMove.lichessWin * whiteMove.lichessGames,
+              whiteMove.lichessDraw * whiteMove.lichessGames,
+              whiteMove.lichessGames,
+              50, 0.52
+          );
+
+          let isMasterThreat = false;
+          let isAmateurTrap = false;
+
+          if (whiteMove.mastersGames >= 15 && masterSmoothed >= 0.58) {
+              isMasterThreat = true;
+          }
+          
+          if (whiteMove.lichessGames >= 15 && amateurSmoothed >= 0.58 && !isMasterThreat) {
+              isAmateurTrap = true;
+          }
+
+          if (isMasterThreat || isAmateurTrap) {
+              await prisma.position.update({
+                  where: { id: posAfterWhite.id },
+                  data: { isMasterThreat, isAmateurTrap }
+              });
+              console.log(`[ALERT] Flagged ${whiteMove.san} as ${isMasterThreat ? 'Master Threat' : 'Amateur Trap'}! (Eval: ${algoResult.selectedEngineCp})`);
+          }
+      }
 
       if (!algoResult.selectedMoveSan) {
         console.log("No valid Black move found. Stopping branch.");
@@ -534,8 +701,15 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
           totalNaEvals++;
       }
 
-      let explanation = `Score: ${(algoResult.selectedStats?.score * 100 || 0).toFixed(1)}% | Weighted Vol: ${algoResult.selectedStats?.weightedCount || 0} | Eval: ${algoResult.selectedEngineCp !== null ? (algoResult.selectedEngineCp/100).toFixed(2) : "N/A"}`;
-      console.log(`Black responds with: ${algoResult.selectedMoveSan} -> ${explanation}`);
+      let scoreStr = "N/A";
+      let volStr = "0";
+      if (algoResult.selectedStats) {
+          scoreStr = (algoResult.selectedStats.score * 100).toFixed(1) + "%";
+          volStr = algoResult.selectedStats.weightedCount.toString();
+      }
+
+      console.log(`Black responds with: ${algoResult.selectedMoveSan} -> Score: ${scoreStr} | Weighted Vol: ${volStr} | ${algoResult.evalSource} Eval: ${algoResult.selectedEngineCp !== null ? (algoResult.selectedEngineCp / 100).toFixed(2) : "N/A"}`);
+      let explanation = `Score: ${scoreStr} | Weighted Vol: ${volStr} | Eval: ${algoResult.selectedEngineCp !== null ? (algoResult.selectedEngineCp/100).toFixed(2) : "N/A"}`;
 
       tempChess.move(algoResult.selectedMoveSan);
       const fenAfterBlack = tempChess.fen();
@@ -568,7 +742,8 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
             san: algoResult.selectedMoveSan, 
             fromPositionId: posAfterWhite.id, 
             toPositionId: posAfterBlack.id,
-            eval: algoResult.selectedEngineCp ? algoResult.selectedEngineCp / 100 : null,
+            lichessEval: algoResult.lichessCp ? algoResult.lichessCp / 100 : null,
+            chessdbEval: algoResult.chessdbCp ? algoResult.chessdbCp / 100 : null,
             weightedCount: algoResult.selectedStats?.weightedCount || 0,
             mastersGames: mGames, mastersWin: mWin, mastersDraw: mDraw, mastersLoss: mLoss,
             lichessGames: lGames, lichessWin: lWin, lichessDraw: lDraw, lichessLoss: lLoss
