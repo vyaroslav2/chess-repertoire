@@ -29,29 +29,71 @@ model Repertoire {
 }
 
 model Position {
-  id           String                   @id @default(uuid())
-  fen          String                   @unique
-  eco          String?                  // e.g., "B12"
-  openingName  String?                  // e.g., "Caro-Kann Defense: Advance Variation"
+  id             String   @id @default(uuid())
+  fen            String   @unique
   
-  // Relationships for moves where this position is the starting or resulting point
-  outgoingMoves Move[]                  @relation("FromPosition")
-  incomingMoves Move[]                  @relation("ToPosition")
+  eco            String?
+  openingName    String?
+  wikiText       String?
+  isTrap         Boolean  @default(false)
 
-  stats        RepertoirePositionStat[]
+  incomingMoves  Move[]   @relation("IncomingMoves")
+  outgoingMoves  Move[]   @relation("OutgoingMoves")
+  repertoireStats RepertoirePositionStat[]
+  engineEvals    EngineEval[]
+  explorerMoves  ExplorerMove[]
 }
 
 model Move {
-  id             String     @id @default(uuid())
-  san            String     // The Standard Algebraic Notation (e.g. "e4")
+  id             String   @id @default(uuid())
+  san            String
   fromPositionId String
   toPositionId   String
 
-  fromPosition   Position   @relation("FromPosition", fields: [fromPositionId], references: [id], onDelete: Cascade)
-  toPosition     Position   @relation("ToPosition", fields: [toPositionId], references: [id], onDelete: Cascade)
+  eval           Float?
+  prob           Float?
+  cumulativeProb Float?
+  
+  mastersGames   Int?
+  mastersWin     Float?
+  mastersDraw    Float?
+  mastersLoss    Float?
 
-  // One position can have multiple target moves depending on the repertoire, so we link it here
+  lichessGames   Int?
+  lichessWin     Float?
+  lichessDraw    Float?
+  lichessLoss    Float?
+
+  weightedCount  Int?
+
+  fromPosition   Position @relation("OutgoingMoves", fields: [fromPositionId], references: [id], onDelete: Cascade)
+  toPosition     Position @relation("IncomingMoves", fields: [toPositionId], references: [id], onDelete: Cascade)
   stats          RepertoirePositionStat[]
+}
+
+model EngineEval {
+  id         String   @id @default(uuid())
+  positionId String
+  san        String
+  cp         Float
+  mate       Int?
+  rank       Int
+  
+  position   Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
+}
+
+model ExplorerMove {
+  id         String   @id @default(uuid())
+  positionId String
+  dbType     String
+  san        String
+  games      Int
+  win        Float
+  draw       Float
+  loss       Float
+  rank       Int
+  
+  position   Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
 }
 
 model RepertoirePositionStat {

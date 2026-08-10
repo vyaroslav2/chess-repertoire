@@ -20,24 +20,62 @@ const ai = new GoogleGenAI({
 
 const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
-async function getOrCreatePosition(fen: string) {
-  const strippedFen = fen.split(" ").slice(0, 4).join(" ");
-  let pos = await prisma.position.findUnique({ where: { fen: strippedFen } });
-  if (!pos) { pos = await prisma.position.create({ data: { fen: strippedFen } }); }
-  return pos;
+async function fetchWikiSnippet(title: string) {
+  try {
+    // Attempt to fetch from Wikipedia. 
+    // Lichess titles might be like "Caro-Kann Defense: Advance Variation".
+    // We can try the full title, and if it fails, try just the part before the colon.
+    const fetchWiki = async (t: string) => {
+      const url = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=1&explaintext=1&titles=${encodeURIComponent(t)}&format=json`;
+      const res = await fetch(url);
+      const data = await res.json();
+      const pages = data.query.pages;
+      const pageId = Object.keys(pages)[0];
+      if (pageId !== "-1") return pages[pageId].extract;
+      return null;
+    };
+
+    let extract = await fetchWiki(title);
+    if (!extract && title.includes(":")) {
+       extract = await fetchWiki(title.split(":")[0].trim());
+    }
+    return extract;
+  } catch(e) {}
+  return null;
 }
 
-async function getEngineEval(fen: string) {
+async function getOrCreatePosition(fen: string, openingMetadata?: { eco: string, name: string }) {
   const strippedFen = fen.split(" ").slice(0, 4).join(" ");
-  try {
-    const cloudUrl = `https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(strippedFen)}&multiPv=1`;
-    const cloudRes = await fetch(cloudUrl, { headers: { 'Authorization': `Bearer ${LICHESS_API_TOKEN}`, 'Accept': 'application/json' }});
-    const cloudData = await cloudRes.json();
-    if (!cloudData.error && cloudData.pvs && cloudData.pvs.length > 0) {
-      return cloudData.pvs[0].cp;
+  let pos = await prisma.position.findUnique({ where: { fen: strippedFen } });
+  
+  if (!pos) { 
+    let wikiText = null;
+    if (openingMetadata && openingMetadata.name) {
+      wikiText = await fetchWikiSnippet(openingMetadata.name);
     }
-  } catch (e) {}
-  return null;
+    pos = await prisma.position.create({ 
+      data: { 
+        fen: strippedFen,
+        eco: openingMetadata?.eco || null,
+        openingName: openingMetadata?.name || null,
+        wikiText: wikiText
+      } 
+    }); 
+  } else if (openingMetadata && openingMetadata.name && !pos.openingName) {
+    // If we discovered the opening name later, update it
+    let wikiText = pos.wikiText;
+    if (!wikiText) wikiText = await fetchWikiSnippet(openingMetadata.name);
+    
+    pos = await prisma.position.update({
+      where: { id: pos.id },
+      data: {
+        eco: openingMetadata.eco,
+        openingName: openingMetadata.name,
+        wikiText: wikiText
+      }
+    });
+  }
+  return pos;
 }
 
 // Fetch wrapper with 429 backoff
@@ -58,7 +96,6 @@ async function fetchWithRetry(url: string, retries = 3) {
   return null;
 }
 
-// Phase 1: Data Fetching for White
 async function fetchAllDatabases(fen: string) {
   const strippedFen = fen.split(" ").slice(0, 4).join(" ");
   let masters: any = { moves: [], totalGames: 0 };
@@ -74,7 +111,7 @@ async function fetchAllDatabases(fen: string) {
     }
   } catch (e) {}
 
-  await delay(1000); // Be gentle to API
+  await delay(1000); 
 
   try {
     const eliteUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(strippedFen)}&speeds=classical,rapid&ratings=2500`;
@@ -85,7 +122,7 @@ async function fetchAllDatabases(fen: string) {
     }
   } catch (e) {}
 
-  await delay(1000); // Be gentle to API
+  await delay(1000);
 
   try {
     const amateurUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(strippedFen)}&speeds=classical,rapid&ratings=1600,1800,2000`;
@@ -99,7 +136,6 @@ async function fetchAllDatabases(fen: string) {
   return [masters, elite, amateur];
 }
 
-// Phase 2: Reverse penalty for White
 function calculateMasterThreatScore(mastersData: any, eliteData: any) {
     const MIN_GAMES_THRESHOLD = 15;
     const SKEPTICAL_PRIOR_BLACK_WINS = 50; 
@@ -121,115 +157,122 @@ function calculateMasterThreatScore(mastersData: any, eliteData: any) {
     return whiteWinRate; 
 }
 
-// Phase 3: Filter White's moves
 function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: number, mastersList: any[], eliteList: any[], amateurList: any[], totalAmateurGames: number) {
     const amateurData = amateurList.find(m => m.san === moveSan) || { white: 0, draws: 0, black: 0 };
     const aTotal = amateurData.white + amateurData.draws + amateurData.black;
     const mastersData = mastersList.find(m => m.san === moveSan);
     const eliteData = eliteList.find(m => m.san === moveSan);
 
-    if (totalAmateurGames === 0) return { include: false };
+    let include = false;
+    let reason = "";
+    let isTrap = false;
+    let probability = totalAmateurGames > 0 ? aTotal / totalAmateurGames : 0;
 
-    const probability = aTotal / totalAmateurGames;
-    const amateurWhiteWinRate = aTotal > 0 ? amateurData.white / aTotal : 0;
-    const masterThreatScore = calculateMasterThreatScore(mastersData, eliteData);
+    if (totalAmateurGames > 0) {
+      const amateurWhiteWinRate = aTotal > 0 ? amateurData.white / aTotal : 0;
+      const masterThreatScore = calculateMasterThreatScore(mastersData, eliteData);
 
-    let requiredProbability = 0.15; 
-    if (currentMoveNumber <= 4) requiredProbability = 0.05;
-    else if (currentMoveNumber <= 8) requiredProbability = 0.10;
-    
-    if (probability >= requiredProbability) {
-        return { include: true, reason: "Mainline", isTrap: false, probability };
+      let requiredProbability = 0.15; 
+      if (currentMoveNumber <= 4) requiredProbability = 0.05;
+      else if (currentMoveNumber <= 8) requiredProbability = 0.10;
+      
+      if (probability >= requiredProbability) {
+          include = true;
+          reason = "Mainline";
+      } else if (probability >= 0.01 && amateurWhiteWinRate >= 0.55) {
+          include = true;
+          reason = "Amateur Trap";
+          isTrap = true;
+      } else if (masterThreatScore >= 0.45) {
+          include = true;
+          reason = "Master Threat";
+          isTrap = true;
+      }
     }
 
-    if (probability >= 0.01 && amateurWhiteWinRate >= 0.55) {
-        return { include: true, reason: "Amateur Trap", isTrap: true, probability };
-    }
+    // Compile the comprehensive stats to save in DB
+    const mTotal = mastersData ? (mastersData.white + mastersData.draws + mastersData.black) : 0;
+    const mWin = mTotal > 0 ? mastersData.white / mTotal : 0;
+    const mDraw = mTotal > 0 ? mastersData.draws / mTotal : 0;
+    const mLoss = mTotal > 0 ? mastersData.black / mTotal : 0;
 
-    if (masterThreatScore >= 0.45) {
-        return { include: true, reason: "Master Threat", isTrap: true, probability };
-    }
+    const aWin = aTotal > 0 ? amateurData.white / aTotal : 0;
+    const aDraw = aTotal > 0 ? amateurData.draws / aTotal : 0;
+    const aLoss = aTotal > 0 ? amateurData.black / aTotal : 0;
 
-    return { include: false };
+    return { 
+      include, reason, isTrap, probability,
+      mastersGames: mTotal, mastersWin: mWin, mastersDraw: mDraw, mastersLoss: mLoss,
+      lichessGames: aTotal, lichessWin: aWin, lichessDraw: aDraw, lichessLoss: aLoss
+    };
 }
 
-// Black move evaluator
-async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: number, previousMovesSan: string[]) {
+async function evaluateBlackMove(fen: string, posId: string, chess: Chess, moveNumber: number, previousMovesSan: string[]) {
   const strippedFen = fen.split(" ").slice(0, 4).join(" ");
   
-  // Seed first move preferences
-  if (moveNumber === 1 && previousMovesSan.length === 1) {
-    const whiteFirstMove = previousMovesSan[0];
-    if (whiteFirstMove === "e4") return { selectedMoveSan: "c6", selectedStats: { score: 1, weightedCount: 999 }, selectedEngineCp: await getEngineEval(fen), explanation: "Caro-Kann" };
-    if (whiteFirstMove === "d4") return { selectedMoveSan: "d5", selectedStats: { score: 1, weightedCount: 999 }, selectedEngineCp: await getEngineEval(fen), explanation: "QGD Structure" };
-    
-    // For c4, Nf3, etc. Ask Gemini!
-    try {
-      const prompt = `White just played ${whiteFirstMove} on move 1. I am a Black player who plays the Caro-Kann against 1.e4 and QGD/Slav structures against 1.d4 (starting with 1...d5). 
-What is a solid, theoretical 1st move for Black against ${whiteFirstMove} that often transposes into similar solid structures (e.g., c6 or d5 setups)? 
-Reply ONLY with the exact standard algebraic notation of the single best move (e.g. c6). Do not include any other text.`;
-      
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: prompt,
-      });
-      const suggestedMove = response.text?.trim().replace(/[^a-zA-Z0-9]/g, '');
-      if (suggestedMove && chess.moves().includes(suggestedMove)) {
-         return { selectedMoveSan: suggestedMove, selectedStats: { score: 1, weightedCount: 999 }, selectedEngineCp: await getEngineEval(fen), explanation: `Gemini Transposition Suggestion (${suggestedMove})` };
-      }
-    } catch (e) {
-      console.warn("Gemini suggestion failed for move 1, falling back to math.");
-    }
-  }
-
   let mergedMoves: Record<string, any> = {};
   
   try {
     const mastersUrl = `https://explorer.lichess.ovh/masters?fen=${encodeURIComponent(strippedFen)}`;
     const mastersData = await fetchWithRetry(mastersUrl);
     if (mastersData && mastersData.moves) {
+      let rank = 1;
       for (const m of mastersData.moves) {
+        const total = m.white + m.draws + m.black;
         mergedMoves[m.san] = {
-          san: m.san, mastersCount: m.white + m.draws + m.black,
-          mastersBlackWin: m.black, mastersDraws: m.draws,
-          onlineCount: 0, onlineBlackWin: 0, onlineDraws: 0
+          san: m.san, mastersCount: total,
+          mastersBlackWin: m.black, mastersDraws: m.draws, mastersWhiteWin: m.white,
+          onlineCount: 0, onlineBlackWin: 0, onlineDraws: 0, onlineWhiteWin: 0
         };
+        // Save to ExplorerMove
+        await prisma.explorerMove.create({
+          data: {
+            positionId: posId, dbType: "masters", san: m.san, games: total, rank: rank++,
+            win: total > 0 ? m.white/total : 0, draw: total > 0 ? m.draws/total : 0, loss: total > 0 ? m.black/total : 0
+          }
+        });
       }
     }
   } catch (e) {}
 
-  await delay(1000); // Be gentle
+  await delay(1000);
 
   try {
     const onlineUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(strippedFen)}&speeds=classical&ratings=2500`;
     const onlineData = await fetchWithRetry(onlineUrl);
     if (onlineData && onlineData.moves) {
+      let rank = 1;
       for (const m of onlineData.moves) {
-        const totalOnline = m.white + m.draws + m.black;
+        const total = m.white + m.draws + m.black;
         if (mergedMoves[m.san]) {
-          mergedMoves[m.san].onlineCount = totalOnline;
+          mergedMoves[m.san].onlineCount = total;
           mergedMoves[m.san].onlineBlackWin = m.black;
           mergedMoves[m.san].onlineDraws = m.draws;
+          mergedMoves[m.san].onlineWhiteWin = m.white;
         } else {
           mergedMoves[m.san] = {
-            san: m.san, mastersCount: 0, mastersBlackWin: 0, mastersDraws: 0,
-            onlineCount: totalOnline, onlineBlackWin: m.black, onlineDraws: m.draws
+            san: m.san, mastersCount: 0, mastersBlackWin: 0, mastersDraws: 0, mastersWhiteWin: 0,
+            onlineCount: total, onlineBlackWin: m.black, onlineDraws: m.draws, onlineWhiteWin: m.white
           };
         }
+        // Save to ExplorerMove
+        await prisma.explorerMove.create({
+          data: {
+            positionId: posId, dbType: "lichess", san: m.san, games: total, rank: rank++,
+            win: total > 0 ? m.white/total : 0, draw: total > 0 ? m.draws/total : 0, loss: total > 0 ? m.black/total : 0
+          }
+        });
       }
     }
   } catch (e) {}
 
   const MIN_GAMES_THRESHOLD = 5;
-    const candidateMoves = Object.values(mergedMoves).map(m => {
+  const candidateMoves = Object.values(mergedMoves).map(m => {
     const weightedCount = (m.mastersCount * 5) + m.onlineCount;
     const weightedBlackWins = (m.mastersBlackWin * 5) + m.onlineBlackWin;
     const weightedDraws = (m.mastersDraws * 5) + m.onlineDraws;
     
-    // THE SKEPTICAL PRIOR: Add 50 dummy White wins to pull flukes down to 0%
     const smoothedCount = weightedCount + 50;
-    
-    // Calculate score based on actual wins/draws, not "tricks"
     const score = (weightedBlackWins + (0.5 * weightedDraws)) / smoothedCount;
     
     return { ...m, weightedCount, score };
@@ -245,6 +288,25 @@ Reply ONLY with the exact standard algebraic notation of the single best move (e
     if (cloudData && !cloudData.error && cloudData.pvs && cloudData.pvs.length > 0) {
       enginePvs = cloudData.pvs;
       bestCp = enginePvs[0].cp;
+      
+      // Save Engine Eval Top Moves
+      let rank = 1;
+      for (const pv of enginePvs) {
+        const lan = pv.moves.split(" ")[0];
+        try {
+          const tempChess = new Chess(fen);
+          const fromSq = lan.substring(0, 2);
+          const toSq = lan.substring(2, 4);
+          const promotion = lan.length === 5 ? lan[4] : undefined;
+          const moveResult = tempChess.move({ from: fromSq, to: toSq, promotion } as any);
+          
+          await prisma.engineEval.create({
+            data: {
+              positionId: posId, san: moveResult.san, cp: pv.cp, mate: pv.mate || null, rank: rank++
+            }
+          });
+        } catch(e) {}
+      }
     }
   } catch (e) {}
 
@@ -252,13 +314,34 @@ Reply ONLY with the exact standard algebraic notation of the single best move (e
   let selectedStats: any = null;
   let selectedEngineCp: number | null = null;
 
-  if (enginePvs.length > 0 && candidateMoves.length > 0) {
+  if (moveNumber === 1 && previousMovesSan.length === 1) {
+    const whiteFirstMove = previousMovesSan[0];
+    if (whiteFirstMove === "e4") { selectedMoveSan = "c6"; selectedStats = candidateMoves.find(m => m.san === "c6"); selectedEngineCp = bestCp; }
+    else if (whiteFirstMove === "d4") { selectedMoveSan = "d5"; selectedStats = candidateMoves.find(m => m.san === "d5"); selectedEngineCp = bestCp; }
+    else {
+      try {
+        const prompt = `White just played ${whiteFirstMove} on move 1. I am a Black player who plays the Caro-Kann against 1.e4 and QGD/Slav structures against 1.d4 (starting with 1...d5). 
+Reply ONLY with the exact standard algebraic notation of the single best move (e.g. c6). Do not include any other text.`;
+        const response = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
+        const suggestedMove = response.text?.trim().replace(/[^a-zA-Z0-9]/g, '');
+        if (suggestedMove && chess.moves().includes(suggestedMove)) {
+           selectedMoveSan = suggestedMove;
+           selectedStats = candidateMoves.find(m => m.san === suggestedMove);
+           selectedEngineCp = bestCp;
+        }
+      } catch (e) {}
+    }
+  }
+
+  if (!selectedMoveSan && enginePvs.length > 0 && candidateMoves.length > 0) {
     for (const candidate of candidateMoves) {
       try {
         const moveResult = chess.move(candidate.san);
         chess.undo();
         const lan = moveResult.lan; 
         const enginePv = enginePvs.find(pv => pv.moves.split(" ")[0] === lan);
+        // Engine perspective is for White. If it's Black's turn, engine CP is still from White's POV.
+        // Wait, Lichess cloud eval CP is always from White's POV.
         if (enginePv && Math.abs(enginePv.cp - bestCp) <= 80) {
           selectedMoveSan = candidate.san;
           selectedStats = candidate;
@@ -279,11 +362,10 @@ Reply ONLY with the exact standard algebraic notation of the single best move (e
       chess.undo();
       selectedMoveSan = moveResult.san;
       selectedEngineCp = bestCp;
-      selectedStats = candidateMoves.find(m => m.san === selectedMoveSan) || { weightedCount: 0, score: 0 };
+      selectedStats = candidateMoves.find(m => m.san === selectedMoveSan) || null;
     } catch(e) {}
   }
 
-  // FALLBACK: If Cloud Eval is missing/fails, just pick the top human move
   if (!selectedMoveSan && candidateMoves.length > 0) {
     selectedMoveSan = candidateMoves[0].san;
     selectedStats = candidateMoves[0];
@@ -292,7 +374,6 @@ Reply ONLY with the exact standard algebraic notation of the single best move (e
   return { selectedMoveSan, selectedStats, selectedEngineCp };
 }
 
-// Phase 4: BFS Generator
 async function generateRepertoire(startFen: string, maxDepth: number) {
   console.log("Initializing BFS Tree Generator...");
 
@@ -315,15 +396,12 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
     console.log(`\n--- Queue Size: ${queue.length} | Move: ${node.currentMoveNumber} | Trap Depth: ${node.trapDepth} ---`);
     console.log(`History: ${node.history.join(" ")}`);
 
-    // Calculate Dynamic Depth Limit based on Cumulative Probability
-    let dynamicMaxDepth = 5; // Default shallow depth for rare stuff (< 0.5%)
-    
+    let dynamicMaxDepth = 5; 
     if (node.cumulativeProb > 0.02) { 
-        dynamicMaxDepth = 15; // Tier 1: > 2% (The absolute mainlines)
+        dynamicMaxDepth = 15;
     } else if (node.cumulativeProb > 0.005) {
-        dynamicMaxDepth = 8;  // Tier 2: > 0.5% (Common variations)
+        dynamicMaxDepth = 8;
     }
-
     dynamicMaxDepth = Math.min(dynamicMaxDepth, maxDepth);
 
     if (node.currentMoveNumber > dynamicMaxDepth) {
@@ -335,10 +413,11 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
       continue;
     }
 
-    const posId = (await getOrCreatePosition(node.fen)).id;
     const [masters, elite, amateur] = await fetchAllDatabases(node.fen);
     
-    // Aggregate White candidate moves from all sources
+    // Create/update position and potentially fetch Wiki snippet using the opening data from masters DB
+    const posId = (await getOrCreatePosition(node.fen, masters.opening)).id;
+    
     const allWhiteSan = new Set<string>();
     if (masters.moves) masters.moves.forEach((m: any) => allWhiteSan.add(m.san));
     if (elite.moves) elite.moves.forEach((m: any) => allWhiteSan.add(m.san));
@@ -356,11 +435,18 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
       const tempChess = new Chess(node.fen);
       tempChess.move(whiteMove.san);
       const fenAfterWhite = tempChess.fen();
-      const posAfterWhite = await getOrCreatePosition(fenAfterWhite);
+      
+      const newHistory = [...node.history, whiteMove.san];
+      
+      const isTrapFlag = whiteMove.isTrap || false;
+      const posAfterWhite = await prisma.position.findUnique({ where: { fen: fenAfterWhite.split(" ").slice(0, 4).join(" ") } }) || 
+                            await prisma.position.create({ data: { fen: fenAfterWhite.split(" ").slice(0, 4).join(" "), isTrap: isTrapFlag } });
 
-      // ==========================================
-      // NEW: SKIP ALREADY GENERATED ENTRIES
-      // ==========================================
+      // Update position trap flag if it is newly identified as a trap in another line
+      if (isTrapFlag && !posAfterWhite.isTrap) {
+          await prisma.position.update({ where: { id: posAfterWhite.id }, data: { isTrap: true }});
+      }
+
       const existingStat = await prisma.repertoirePositionStat.findUnique({
         where: { repertoireId_positionId: { repertoireId: repertoire.id, positionId: posAfterWhite.id } }
       });
@@ -368,7 +454,7 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
       if (existingStat) {
         const dbBlackMove = await prisma.move.findUnique({ where: { id: existingStat.targetMoveId } });
         if (dbBlackMove) {
-          console.log(`[SKIPPED API] Already generated in DB! Black responds with: ${dbBlackMove.san} -> ${existingStat.explanation}`);
+          console.log(`[SKIPPED API] Already generated in DB! Black responds with: ${dbBlackMove.san}`);
           
           tempChess.move(dbBlackMove.san);
           const fenAfterBlack = tempChess.fen();
@@ -381,43 +467,84 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
             history: [...node.history, whiteMove.san, dbBlackMove.san]
           });
           
-          continue; // Instantly move to the next White candidate!
+          continue; 
         }
       }
-      // ==========================================
       
       let dbWhiteMove = await prisma.move.findFirst({ where: { fromPositionId: posId, toPositionId: posAfterWhite.id, san: whiteMove.san } });
       if (!dbWhiteMove) {
-        dbWhiteMove = await prisma.move.create({ data: { san: whiteMove.san, fromPositionId: posId, toPositionId: posAfterWhite.id } });
+        dbWhiteMove = await prisma.move.create({ 
+          data: { 
+            san: whiteMove.san, 
+            fromPositionId: posId, 
+            toPositionId: posAfterWhite.id,
+            prob: whiteMove.probability,
+            cumulativeProb: node.cumulativeProb * (whiteMove.probability || 1.0),
+            mastersGames: whiteMove.mastersGames,
+            mastersWin: whiteMove.mastersWin,
+            mastersDraw: whiteMove.mastersDraw,
+            mastersLoss: whiteMove.mastersLoss,
+            lichessGames: whiteMove.lichessGames,
+            lichessWin: whiteMove.lichessWin,
+            lichessDraw: whiteMove.lichessDraw,
+            lichessLoss: whiteMove.lichessLoss
+          } 
+        });
+      } else {
+        await prisma.move.update({
+          where: { id: dbWhiteMove.id },
+          data: { cumulativeProb: node.cumulativeProb * (whiteMove.probability || 1.0) }
+        });
       }
 
-      // Evaluate Black Response
-      const newHistory = [...node.history, whiteMove.san];
-      const algoResult = await evaluateBlackMove(fenAfterWhite, tempChess, node.currentMoveNumber, newHistory);
+      const algoResult = await evaluateBlackMove(fenAfterWhite, posAfterWhite.id, tempChess, node.currentMoveNumber, newHistory);
 
       if (!algoResult.selectedMoveSan) {
         console.log("No valid Black move found. Stopping branch.");
         continue;
       }
 
-      let explanation = algoResult.explanation || "";
-      if (!explanation) {
-        if (algoResult.selectedStats?.weightedCount === 0) {
-           explanation = `Engine Fallback | Eval: ${algoResult.selectedEngineCp !== null ? (algoResult.selectedEngineCp/100).toFixed(2) : "N/A"}`;
-        } else {
-           explanation = `Score: ${(algoResult.selectedStats?.score * 100).toFixed(1)}% | Weighted Vol: ${algoResult.selectedStats?.weightedCount} | Eval: ${algoResult.selectedEngineCp !== null ? (algoResult.selectedEngineCp/100).toFixed(2) : "N/A"}`;
-        }
-      }
-      
+      let explanation = `Score: ${(algoResult.selectedStats?.score * 100 || 0).toFixed(1)}% | Weighted Vol: ${algoResult.selectedStats?.weightedCount || 0} | Eval: ${algoResult.selectedEngineCp !== null ? (algoResult.selectedEngineCp/100).toFixed(2) : "N/A"}`;
       console.log(`Black responds with: ${algoResult.selectedMoveSan} -> ${explanation}`);
 
       tempChess.move(algoResult.selectedMoveSan);
       const fenAfterBlack = tempChess.fen();
-      const posAfterBlack = await getOrCreatePosition(fenAfterBlack);
+      const posAfterBlack = await prisma.position.findUnique({ where: { fen: fenAfterBlack.split(" ").slice(0, 4).join(" ") } }) || 
+                            await prisma.position.create({ data: { fen: fenAfterBlack.split(" ").slice(0, 4).join(" ") } });
 
       let dbBlackMove = await prisma.move.findFirst({ where: { fromPositionId: posAfterWhite.id, toPositionId: posAfterBlack.id, san: algoResult.selectedMoveSan } });
       if (!dbBlackMove) {
-        dbBlackMove = await prisma.move.create({ data: { san: algoResult.selectedMoveSan, fromPositionId: posAfterWhite.id, toPositionId: posAfterBlack.id } });
+        // Calculate probability of Black's move based on masters
+        let bProb = 0;
+        let mGames = 0, mWin = 0, mDraw = 0, mLoss = 0;
+        let lGames = 0, lWin = 0, lDraw = 0, lLoss = 0;
+        if (algoResult.selectedStats) {
+           const s = algoResult.selectedStats;
+           if (s.mastersCount > 0) {
+               mGames = s.mastersCount;
+               mWin = s.mastersWhiteWin / mGames;
+               mDraw = s.mastersDraws / mGames;
+               mLoss = s.mastersBlackWin / mGames;
+           }
+           if (s.onlineCount > 0) {
+               lGames = s.onlineCount;
+               lWin = s.onlineWhiteWin / lGames;
+               lDraw = s.onlineDraws / lGames;
+               lLoss = s.onlineBlackWin / lGames;
+           }
+        }
+
+        dbBlackMove = await prisma.move.create({ 
+          data: { 
+            san: algoResult.selectedMoveSan, 
+            fromPositionId: posAfterWhite.id, 
+            toPositionId: posAfterBlack.id,
+            eval: algoResult.selectedEngineCp ? algoResult.selectedEngineCp / 100 : null,
+            weightedCount: algoResult.selectedStats?.weightedCount || 0,
+            mastersGames: mGames, mastersWin: mWin, mastersDraw: mDraw, mastersLoss: mLoss,
+            lichessGames: lGames, lichessWin: lWin, lichessDraw: lDraw, lichessLoss: lLoss
+          } 
+        });
       }
 
       const emptyCard = createEmptyCard();
@@ -449,7 +576,7 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
         history: [...newHistory, algoResult.selectedMoveSan]
       });
 
-      await delay(2000); // Respect API limits
+      await delay(2000); 
     }
   }
   
@@ -457,4 +584,4 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
 }
 
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-generateRepertoire(START_FEN, 3).catch(console.error).finally(() => prisma.$disconnect());
+generateRepertoire(START_FEN, 4).catch(console.error).finally(() => prisma.$disconnect());
