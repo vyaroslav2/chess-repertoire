@@ -20,38 +20,44 @@ const ai = new GoogleGenAI({
 
 const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
-async function fetchWikiSnippet(title: string) {
-  try {
-    // Attempt to fetch from Wikipedia. 
-    // Lichess titles might be like "Caro-Kann Defense: Advance Variation".
-    // We can try the full title, and if it fails, try just the part before the colon.
-    const fetchWiki = async (t: string) => {
-      const url = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=1&explaintext=1&titles=${encodeURIComponent(t)}&format=json`;
-      const res = await fetch(url);
-      const data = await res.json();
-      const pages = data.query.pages;
-      const pageId = Object.keys(pages)[0];
-      if (pageId !== "-1") return pages[pageId].extract;
-      return null;
-    };
+async function fetchWikibooksSnippet(history: string[]) {
+  if (history.length === 0) return null;
+  
+  let path = "Chess_Opening_Theory";
+  for (let i = 0; i < history.length; i++) {
+      const moveNum = Math.floor(i / 2) + 1;
+      const isWhite = i % 2 === 0;
+      if (isWhite) {
+          path += `/${moveNum}._${history[i]}`;
+      } else {
+          path += `/${moveNum}...${history[i]}`;
+      }
+  }
 
-    let extract = await fetchWiki(title);
-    if (!extract && title.includes(":")) {
-       extract = await fetchWiki(title.split(":")[0].trim());
+  try {
+    const url = `https://en.wikibooks.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&titles=${encodeURIComponent(path)}&format=json`;
+    const res = await fetch(url);
+    const data = await res.json();
+    const pages = data.query.pages;
+    const pageId = Object.keys(pages)[0];
+    if (pageId !== "-1") {
+       let extract = pages[pageId].extract;
+       // Clean up the Wikibooks heading e.g. "== 3. e5 · Advance variation =="
+       extract = extract.replace(/^==[^=]+==\n/, "").trim();
+       if (extract.length > 50) return extract; // ensure it's not just "..." or empty
     }
-    return extract;
   } catch(e) {}
   return null;
 }
 
-async function getOrCreatePosition(fen: string, openingMetadata?: { eco: string, name: string }) {
+async function getOrCreatePosition(fen: string, openingMetadata?: { eco: string, name: string }, history?: string[]) {
   const strippedFen = fen.split(" ").slice(0, 4).join(" ");
   let pos = await prisma.position.findUnique({ where: { fen: strippedFen } });
   
   if (!pos) { 
     let wikiText = null;
-    if (openingMetadata && openingMetadata.name) {
-      wikiText = await fetchWikiSnippet(openingMetadata.name);
+    if (history && history.length > 0) {
+       wikiText = await fetchWikibooksSnippet(history);
     }
     pos = await prisma.position.create({ 
       data: { 
@@ -64,7 +70,9 @@ async function getOrCreatePosition(fen: string, openingMetadata?: { eco: string,
   } else if (openingMetadata && openingMetadata.name && !pos.openingName) {
     // If we discovered the opening name later, update it
     let wikiText = pos.wikiText;
-    if (!wikiText) wikiText = await fetchWikiSnippet(openingMetadata.name);
+    if (!wikiText && history && history.length > 0) {
+       wikiText = await fetchWikibooksSnippet(history);
+    }
     
     pos = await prisma.position.update({
       where: { id: pos.id },
@@ -78,13 +86,13 @@ async function getOrCreatePosition(fen: string, openingMetadata?: { eco: string,
   return pos;
 }
 
-// Fetch wrapper with 429 backoff
 async function fetchWithRetry(url: string, retries = 3) {
   for (let i = 0; i < retries; i++) {
     const response = await fetch(url, { headers: { 'Authorization': `Bearer ${LICHESS_API_TOKEN}`, 'Accept': 'application/json' }});
     if (response.status === 429) {
-      console.log(`Rate limited by Lichess (429). Retrying in ${3 * (i+1)} seconds...`);
-      await delay(3000 * (i+1));
+      const waitTime = 10000 * (i+1);
+      console.log(`[WARNING] Lichess rate limit (429). Waiting ${waitTime/1000}s before retry...`);
+      await delay(waitTime);
       continue;
     }
     if (!response.ok) {
@@ -93,6 +101,7 @@ async function fetchWithRetry(url: string, retries = 3) {
     }
     return await response.json();
   }
+  console.log(`[SKIPPED] Rate limit exhausted for ${url}. Leaving data unfilled to be processed later.`);
   return null;
 }
 
@@ -238,7 +247,7 @@ async function evaluateBlackMove(fen: string, posId: string, chess: Chess, moveN
   await delay(1000);
 
   try {
-    const onlineUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(strippedFen)}&speeds=classical&ratings=2500`;
+    const onlineUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(strippedFen)}&speeds=classical,rapid&ratings=2500`;
     const onlineData = await fetchWithRetry(onlineUrl);
     if (onlineData && onlineData.moves) {
       let rank = 1;
@@ -280,6 +289,7 @@ async function evaluateBlackMove(fen: string, posId: string, chess: Chess, moveN
 
   candidateMoves.sort((a, b) => b.score - a.score);
 
+  await delay(1000);
   let bestCp = 0;
   let enginePvs: any[] = [];
   try {
@@ -376,6 +386,15 @@ Reply ONLY with the exact standard algebraic notation of the single best move (e
 
 async function generateRepertoire(startFen: string, maxDepth: number) {
   console.log("Initializing BFS Tree Generator...");
+  
+  const startTime = Date.now();
+  let totalPositionsProcessed = 0;
+  let totalWhiteMovesFound = 0;
+  let totalWhiteMainlines = 0;
+  let totalWhiteTraps = 0;
+  let totalWhiteThreats = 0;
+  let totalBlackMovesEvaluated = 0;
+  let totalNaEvals = 0;
 
   let user = await prisma.user.findUnique({ where: { username: "Yaroslav" } });
   if (!user) { user = await prisma.user.create({ data: { username: "Yaroslav" } }); }
@@ -392,6 +411,8 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
   while (queue.length > 0) {
     const node = queue.shift();
     if (!node) continue;
+    
+    totalPositionsProcessed++;
 
     console.log(`\n--- Queue Size: ${queue.length} | Move: ${node.currentMoveNumber} | Trap Depth: ${node.trapDepth} ---`);
     console.log(`History: ${node.history.join(" ")}`);
@@ -416,7 +437,7 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
     const [masters, elite, amateur] = await fetchAllDatabases(node.fen);
     
     // Create/update position and potentially fetch Wiki snippet using the opening data from masters DB
-    const posId = (await getOrCreatePosition(node.fen, masters.opening)).id;
+    const posId = (await getOrCreatePosition(node.fen, masters.opening, node.history)).id;
     
     const allWhiteSan = new Set<string>();
     if (masters.moves) masters.moves.forEach((m: any) => allWhiteSan.add(m.san));
@@ -429,8 +450,13 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
     }).filter(m => m.include);
 
     console.log(`Found ${whiteCandidates.length} White threats/mainlines to process.`);
+    totalWhiteMovesFound += whiteCandidates.length;
 
     for (const whiteMove of whiteCandidates) {
+      if (whiteMove.reason === "Mainline") totalWhiteMainlines++;
+      else if (whiteMove.reason === "Amateur Trap") totalWhiteTraps++;
+      else if (whiteMove.reason === "Master Threat") totalWhiteThreats++;
+
       console.log(`\nEvaluating White Move: ${whiteMove.san} (Reason: ${whiteMove.reason}, Prob: ${whiteMove.probability ? (whiteMove.probability*100).toFixed(1) : 0}%)`);
       const tempChess = new Chess(node.fen);
       tempChess.move(whiteMove.san);
@@ -439,8 +465,7 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
       const newHistory = [...node.history, whiteMove.san];
       
       const isTrapFlag = whiteMove.isTrap || false;
-      const posAfterWhite = await prisma.position.findUnique({ where: { fen: fenAfterWhite.split(" ").slice(0, 4).join(" ") } }) || 
-                            await prisma.position.create({ data: { fen: fenAfterWhite.split(" ").slice(0, 4).join(" "), isTrap: isTrapFlag } });
+      const posAfterWhite = await getOrCreatePosition(fenAfterWhite, undefined, newHistory);
 
       // Update position trap flag if it is newly identified as a trap in another line
       if (isTrapFlag && !posAfterWhite.isTrap) {
@@ -503,14 +528,18 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
         console.log("No valid Black move found. Stopping branch.");
         continue;
       }
+      
+      totalBlackMovesEvaluated++;
+      if (algoResult.selectedEngineCp === null) {
+          totalNaEvals++;
+      }
 
       let explanation = `Score: ${(algoResult.selectedStats?.score * 100 || 0).toFixed(1)}% | Weighted Vol: ${algoResult.selectedStats?.weightedCount || 0} | Eval: ${algoResult.selectedEngineCp !== null ? (algoResult.selectedEngineCp/100).toFixed(2) : "N/A"}`;
       console.log(`Black responds with: ${algoResult.selectedMoveSan} -> ${explanation}`);
 
       tempChess.move(algoResult.selectedMoveSan);
       const fenAfterBlack = tempChess.fen();
-      const posAfterBlack = await prisma.position.findUnique({ where: { fen: fenAfterBlack.split(" ").slice(0, 4).join(" ") } }) || 
-                            await prisma.position.create({ data: { fen: fenAfterBlack.split(" ").slice(0, 4).join(" ") } });
+      const posAfterBlack = await getOrCreatePosition(fenAfterBlack, undefined, [...newHistory, algoResult.selectedMoveSan]);
 
       let dbBlackMove = await prisma.move.findFirst({ where: { fromPositionId: posAfterWhite.id, toPositionId: posAfterBlack.id, san: algoResult.selectedMoveSan } });
       if (!dbBlackMove) {
@@ -580,7 +609,21 @@ async function generateRepertoire(startFen: string, maxDepth: number) {
     }
   }
   
-  console.log("BFS Generation Complete!");
+  const endTime = Date.now();
+  const timeElapsed = ((endTime - startTime) / 1000).toFixed(2);
+  
+  console.log("\n========================================================");
+  console.log("=== TREE GENERATION SUMMARY ===");
+  console.log(`Time Elapsed:             ${timeElapsed} seconds`);
+  console.log(`Total Nodes Processed:    ${totalPositionsProcessed}`);
+  console.log(`White Moves Found:        ${totalWhiteMovesFound}`);
+  console.log(`  - Mainlines:            ${totalWhiteMainlines}`);
+  console.log(`  - Master Threats:       ${totalWhiteThreats}`);
+  console.log(`  - Amateur Traps:        ${totalWhiteTraps}`);
+  console.log(`Total Black Responses:    ${totalBlackMovesEvaluated}`);
+  console.log(`Total N/A Evals (Null):   ${totalNaEvals}`);
+  console.log("========================================================\n");
+  console.log("Generation Complete!");
 }
 
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";

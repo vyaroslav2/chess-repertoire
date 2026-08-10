@@ -90,7 +90,7 @@ async function main() {
         out += `ECO: ${pos.eco || "?"} | Opening: ${pos.openingName || "?"}\n`;
       }
       if (pos?.wikiText) {
-         out += `Wiki: ${pos.wikiText.substring(0, 150)}...\n`;
+         out += `Wiki: ${pos.wikiText}\n`;
       }
       out += `Threat/Trap: ${pos?.isTrap ? "1 (True)" : "0 (False)"}\n\n`;
 
@@ -149,8 +149,16 @@ async function main() {
     return out;
   }
 
+  const qgdLines = lines.filter(l => l.sanArray.join(" ").startsWith("d4 d5 c4"));
+  qgdLines.sort((a, b) => b.sanArray.length - a.sanArray.length);
+
   console.log("=== ADVANCE CARO-KANN LINES (DEEPEST) ===\n");
-  for (const l of caroLines.slice(0, 1)) {
+  for (const l of caroLines.slice(0, 3)) {
+    console.log(formatLine(l));
+  }
+
+  console.log("=== QUEEN'S GAMBIT LINES (DEEPEST) ===\n");
+  for (const l of qgdLines.slice(0, 3)) {
     console.log(formatLine(l));
   }
 }
