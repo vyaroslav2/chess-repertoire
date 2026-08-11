@@ -9,8 +9,8 @@ export function getCpTolerance(moveNumber: number, isLocalEngine = false): numbe
     return isLocalEngine ? 40 : 35; 
 }
 
-// Safely handles both CP and Forced Mates
-export const getCp = (pv: any) => pv.cp !== undefined ? pv.cp : (pv.mate > 0 ? 10000 - pv.mate : -10000 - pv.mate);
+// Safely handles both CP and Forced Mates (using 30000 as extreme baseline)
+export const getCp = (pv: any) => pv.mate !== null ? (pv.mate > 0 ? 30000 - pv.mate : -30000 - pv.mate) : (pv.cp !== undefined ? pv.cp : 0);
 
 export async function runLocalStockfish(fen: string, multiPv = 15, depth = 18): Promise<any[]> {
     const enginePath = path.resolve(process.cwd(), 'bin', 'stockfish.exe');

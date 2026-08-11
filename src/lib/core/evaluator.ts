@@ -247,6 +247,42 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
     }
   }
 
+  // --- KILL MODE (Forced Mate Detection) ---
+  let baselinePvs = enginePvs.length > 0 ? enginePvs : (chessdbPvs.length > 0 ? chessdbPvs : []);
+  if (baselinePvs.length === 0) {
+      console.log(`[KILL MODE] APIs down, running shallow Local Stockfish baseline...`);
+      baselinePvs = await runLocalStockfish(normFen, 15, 18);
+  }
+
+  const bestBaseline = baselinePvs[0];
+  if (bestBaseline && bestBaseline.mate !== null && bestBaseline.mate < 0) {
+      console.log(`[KILL MODE] Forced mate detected (Mate in ${Math.abs(bestBaseline.mate)}). Bypassing human candidates and running deep search...`);
+      
+      const deepPvs = await runLocalStockfish(normFen, 1, 24);
+      const bestDeep = deepPvs[0];
+      
+      if (bestDeep) {
+          const tempChess = new Chess(fen);
+          const lan = bestDeep.moves.split(' ')[0];
+          const moveResult = tempChess.move({ from: lan.substring(0, 2), to: lan.substring(2, 4), promotion: lan.length === 5 ? lan[4] : undefined } as any);
+          
+          const finalCp = getCp(bestDeep);
+          await saveEngineEvalCache(fen, "local_deep", { san: moveResult.san, cp: finalCp, mate: bestDeep.mate, rank: 1 });
+          
+          return {
+              selectedMoveSan: moveResult.san,
+              selectedStats: candidateMoves.find(m => m.san === moveResult.san) || null,
+              selectedEngineCp: finalCp,
+              lichessCp,
+              chessdbCp,
+              evalSource: 'Local Deep Stockfish',
+              candidateMoves,
+              enginePvs: deepPvs
+          };
+      }
+  }
+  // --- END KILL MODE ---
+
   let selectedMoveSan: string | null = null;
   let selectedStats: any = null;
   let selectedEngineCp: number | null = null;
