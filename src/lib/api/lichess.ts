@@ -16,7 +16,7 @@ export async function fetchAllDatabases(fen: string) {
 
   const reconstructCache = (cachedRows: any[]) => {
     let totalGames = 0;
-    const moves = cachedRows.map(row => {
+    const moves = cachedRows.filter(row => row.san !== "_EMPTY_").map(row => {
       totalGames += row.games;
       return {
         san: row.san,
@@ -44,11 +44,13 @@ export async function fetchAllDatabases(fen: string) {
     if (mData) {
       masters = mData;
       masters.totalGames = masters.white + masters.draws + masters.black;
-      if (mData.moves) {
+      if (mData.moves && mData.moves.length > 0) {
         for (const m of mData.moves) {
           const total = m.white + m.draws + m.black;
           await saveExplorerMoveCache(normFen, "masters", { san: m.san, games: total, whiteWins: m.white, draws: m.draws, blackWins: m.black });
         }
+      } else {
+        await saveExplorerMoveCache(normFen, "masters", { san: "_EMPTY_", games: 0, whiteWins: 0, draws: 0, blackWins: 0 });
       }
     }
   } catch (e) {}
@@ -61,11 +63,13 @@ export async function fetchAllDatabases(fen: string) {
     if (eData) {
       elite = eData;
       elite.totalGames = elite.white + elite.draws + elite.black;
-      if (eData.moves) {
+      if (eData.moves && eData.moves.length > 0) {
         for (const m of eData.moves) {
           const total = m.white + m.draws + m.black;
           await saveExplorerMoveCache(normFen, "elite", { san: m.san, games: total, whiteWins: m.white, draws: m.draws, blackWins: m.black });
         }
+      } else {
+        await saveExplorerMoveCache(normFen, "elite", { san: "_EMPTY_", games: 0, whiteWins: 0, draws: 0, blackWins: 0 });
       }
     }
   } catch (e) {}
@@ -78,11 +82,13 @@ export async function fetchAllDatabases(fen: string) {
     if (aData) {
       amateur = aData;
       amateur.totalGames = amateur.white + amateur.draws + amateur.black;
-      if (aData.moves) {
+      if (aData.moves && aData.moves.length > 0) {
         for (const m of aData.moves) {
           const total = m.white + m.draws + m.black;
           await saveExplorerMoveCache(normFen, "amateur", { san: m.san, games: total, whiteWins: m.white, draws: m.draws, blackWins: m.black });
         }
+      } else {
+        await saveExplorerMoveCache(normFen, "amateur", { san: "_EMPTY_", games: 0, whiteWins: 0, draws: 0, blackWins: 0 });
       }
     }
   } catch (e) {}
