@@ -1,5 +1,5 @@
 import { Chess } from "chess.js";
-import { prisma, getOrCreatePosition } from "../db/operations";
+import { prisma, getOrCreatePositionCache, getRepertoireNode, createRepertoireNode, createRepertoireMove } from "../db/operations";
 import { fetchAllDatabases } from "../api/lichess";
 import { shouldIncludeWhiteMove, evaluateBlackMove } from "./evaluator";
 import { getSmoothedWinRate } from "./math";
@@ -28,25 +28,40 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
     });
   }
 
-  const queue = [{ fen: startFen, currentMoveNumber: 1, trapDepth: 0, cumulativeProb: 1.0, history: [] as string[] }];
-  const visitedFens = new Set<string>();
+  // Ensure root node exists
+  await getOrCreatePositionCache(startFen);
+  let rootNode = await getRepertoireNode(repertoire.id, "");
+  if (!rootNode) {
+    rootNode = await createRepertoireNode(repertoire.id, startFen, "", 1.0);
+  }
+
+  const queue = [{ 
+    nodeId: rootNode.id,
+    fen: startFen, 
+    currentMoveNumber: 1, 
+    trapDepth: 0, 
+    cumulativeProb: 1.0, 
+    history: [] as string[] 
+  }];
+  
+  const visitedPgns = new Set<string>();
   
   while (queue.length > 0) {
     const node = queue.shift();
     if (!node) continue;
     
-    if (visitedFens.has(node.fen)) {
-      console.log(`[BFS] Skipping transposition: ${node.fen}`);
+    const pgnString = node.history.join(" ");
+    if (visitedPgns.has(pgnString)) {
       continue;
     }
-    visitedFens.add(node.fen);
+    visitedPgns.add(pgnString);
     
     totalPositionsProcessed++;
 
     const currentElapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     
     console.log(`\n--- Queue Size: ${queue.length} | Move: ${node.currentMoveNumber} | Trap Depth: ${node.trapDepth} ---`);
-    console.log(`History: ${node.history.join(" ")}`);
+    console.log(`History: ${pgnString}`);
     console.log(`[Stats] Elapsed: ${currentElapsed}s | Positions Processed: ${totalPositionsProcessed} | N/A Evals: ${totalNaEvals}`);
 
     let dynamicMaxDepth = 5; 
@@ -67,8 +82,7 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
     }
 
     const [masters, elite, amateur] = await fetchAllDatabases(node.fen);
-    
-    const posId = (await getOrCreatePosition(node.fen, masters.opening, node.history)).id;
+    await getOrCreatePositionCache(node.fen, masters.opening, node.history);
     
     const allWhiteSan = new Set<string>();
     if (masters.moves) masters.moves.forEach((m: any) => allWhiteSan.add(m.san));
@@ -94,15 +108,37 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
       const fenAfterWhite = tempChess.fen();
       
       const newHistory = [...node.history, whiteMove.san];
+      const newPgn = newHistory.join(" ");
       
-      const posAfterWhite = await getOrCreatePosition(fenAfterWhite, undefined, newHistory);
+      await getOrCreatePositionCache(fenAfterWhite, undefined, newHistory);
+      
+      const incomingPathProb = node.cumulativeProb * (whiteMove.probability || 1.0);
+      let posAfterWhiteNode = await getRepertoireNode(repertoire.id, newPgn);
+      if (!posAfterWhiteNode) {
+          posAfterWhiteNode = await createRepertoireNode(repertoire.id, fenAfterWhite, newPgn, incomingPathProb);
+      } else {
+          await prisma.repertoireNode.update({
+              where: { id: posAfterWhiteNode.id },
+              data: { cumulativeProb: Math.max(posAfterWhiteNode.cumulativeProb, incomingPathProb) }
+          });
+      }
+
+      await createRepertoireMove({
+          repertoireId: repertoire.id,
+          fromNodeId: node.nodeId,
+          toNodeId: posAfterWhiteNode.id,
+          san: whiteMove.san,
+          playerTurn: "OPPONENT",
+          prob: whiteMove.probability,
+          trueProbability: incomingPathProb
+      });
 
       const existingStat = await prisma.repertoirePositionStat.findUnique({
-        where: { repertoireId_positionId: { repertoireId: repertoire.id, positionId: posAfterWhite.id } }
+        where: { repertoireId_nodeId: { repertoireId: repertoire.id, nodeId: posAfterWhiteNode.id } }
       });
 
       if (existingStat) {
-        const dbBlackMove = await prisma.move.findUnique({ where: { id: existingStat.targetMoveId } });
+        const dbBlackMove = await prisma.repertoireMove.findUnique({ where: { id: existingStat.targetMoveId } });
         if (dbBlackMove) {
           console.log(`[SKIPPED API] Already generated in DB! Black responds with: ${dbBlackMove.san}`);
           
@@ -110,56 +146,19 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
           const fenAfterBlack = tempChess.fen();
           
           queue.push({
+            nodeId: dbBlackMove.toNodeId,
             fen: fenAfterBlack,
             currentMoveNumber: node.currentMoveNumber + 1,
             trapDepth: whiteMove.isTrap ? node.trapDepth + 1 : 0,
-            cumulativeProb: node.cumulativeProb * (whiteMove.probability || 1.0),
-            history: [...node.history, whiteMove.san, dbBlackMove.san]
+            cumulativeProb: incomingPathProb,
+            history: [...newHistory, dbBlackMove.san]
           });
           
           continue; 
         }
       }
-      
-      let dbWhiteMove = await prisma.move.findFirst({ where: { fromPositionId: posId, toPositionId: posAfterWhite.id, san: whiteMove.san } });
-      const incomingPathProb = node.cumulativeProb * (whiteMove.probability || 1.0);
-      
-      if (!dbWhiteMove) {
-        dbWhiteMove = await prisma.move.create({ 
-          data: { 
-            san: whiteMove.san, 
-            fromPositionId: posId, 
-            toPositionId: posAfterWhite.id,
-            prob: whiteMove.probability,
-            cumulativeProb: incomingPathProb,
-            mastersGames: whiteMove.mastersGames,
-            mastersWin: whiteMove.mastersWin,
-            mastersDraw: whiteMove.mastersDraw,
-            mastersLoss: whiteMove.mastersLoss,
-            lichessGames: whiteMove.lichessGames,
-            lichessWin: whiteMove.lichessWin,
-            lichessDraw: whiteMove.lichessDraw,
-            lichessLoss: whiteMove.lichessLoss
-          } 
-        });
-        
-        await prisma.position.update({
-            where: { id: posAfterWhite.id },
-            data: { trueProbability: { increment: incomingPathProb } }
-        });
-      } else {
-        await prisma.move.update({
-          where: { id: dbWhiteMove.id },
-          data: { cumulativeProb: Math.max(dbWhiteMove.cumulativeProb || 0, incomingPathProb) }
-        });
-        
-        await prisma.position.update({
-            where: { id: posAfterWhite.id },
-            data: { trueProbability: { increment: incomingPathProb } }
-        });
-      }
 
-      const algoResult = await evaluateBlackMove(fenAfterWhite, posAfterWhite.id, tempChess, node.currentMoveNumber, newHistory);
+      const algoResult = await evaluateBlackMove(fenAfterWhite, tempChess, node.currentMoveNumber, newHistory);
       
       const evalIsSafe = algoResult.selectedEngineCp !== null && algoResult.selectedEngineCp >= -200 && algoResult.selectedEngineCp <= 60;
 
@@ -190,8 +189,8 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
           }
 
           if (isMasterThreat || isAmateurTrap) {
-              await prisma.position.update({
-                  where: { id: posAfterWhite.id },
+              await prisma.repertoireNode.update({
+                  where: { id: posAfterWhiteNode.id },
                   data: { isMasterThreat, isAmateurTrap }
               });
               console.log(`[ALERT] Flagged ${whiteMove.san} as ${isMasterThreat ? 'Master Threat' : 'Amateur Trap'}! (Eval: ${algoResult.selectedEngineCp})`);
@@ -220,50 +219,40 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
 
       tempChess.move(algoResult.selectedMoveSan);
       const fenAfterBlack = tempChess.fen();
-      const posAfterBlack = await getOrCreatePosition(fenAfterBlack, undefined, [...newHistory, algoResult.selectedMoveSan]);
-
-      let dbBlackMove = await prisma.move.findFirst({ where: { fromPositionId: posAfterWhite.id, toPositionId: posAfterBlack.id, san: algoResult.selectedMoveSan } });
-      if (!dbBlackMove) {
-        let bProb = 0;
-        let mGames = 0, mWin = 0, mDraw = 0, mLoss = 0;
-        let lGames = 0, lWin = 0, lDraw = 0, lLoss = 0;
-        if (algoResult.selectedStats) {
-           const s = algoResult.selectedStats;
-           if (s.mastersCount > 0) {
-               mGames = s.mastersCount;
-               mWin = s.mastersWhiteWin / mGames;
-               mDraw = s.mastersDraws / mGames;
-               mLoss = s.mastersBlackWin / mGames;
-           }
-           if (s.onlineCount > 0) {
-               lGames = s.onlineCount;
-               lWin = s.onlineWhiteWin / lGames;
-               lDraw = s.onlineDraws / lGames;
-               lLoss = s.onlineBlackWin / lGames;
-           }
-        }
-
-        dbBlackMove = await prisma.move.create({ 
-          data: { 
-            san: algoResult.selectedMoveSan, 
-            fromPositionId: posAfterWhite.id, 
-            toPositionId: posAfterBlack.id,
-            lichessEval: algoResult.lichessCp ? algoResult.lichessCp / 100 : null,
-            chessdbEval: algoResult.chessdbCp ? algoResult.chessdbCp / 100 : null,
-            weightedCount: algoResult.selectedStats?.weightedCount || 0,
-            mastersGames: mGames, mastersWin: mWin, mastersDraw: mDraw, mastersLoss: mLoss,
-            lichessGames: lGames, lichessWin: lWin, lichessDraw: lDraw, lichessLoss: lLoss
-          } 
-        });
+      const blackHistory = [...newHistory, algoResult.selectedMoveSan];
+      const blackPgn = blackHistory.join(" ");
+      
+      await getOrCreatePositionCache(fenAfterBlack, undefined, blackHistory);
+      
+      let posAfterBlackNode = await getRepertoireNode(repertoire.id, blackPgn);
+      if (!posAfterBlackNode) {
+          posAfterBlackNode = await createRepertoireNode(repertoire.id, fenAfterBlack, blackPgn, incomingPathProb);
+      } else {
+          await prisma.repertoireNode.update({
+              where: { id: posAfterBlackNode.id },
+              data: { cumulativeProb: Math.max(posAfterBlackNode.cumulativeProb, incomingPathProb) }
+          });
       }
+
+      const dbBlackMove = await createRepertoireMove({
+          repertoireId: repertoire.id,
+          fromNodeId: posAfterWhiteNode.id,
+          toNodeId: posAfterBlackNode.id,
+          san: algoResult.selectedMoveSan,
+          playerTurn: "RESPONSE",
+          lichessCp: typeof algoResult.lichessCp === 'number' ? algoResult.lichessCp / 100 : undefined,
+          chessdbCp: typeof algoResult.chessdbCp === 'number' ? algoResult.chessdbCp / 100 : undefined,
+          weightedCount: algoResult.selectedStats?.weightedCount || 0,
+          engineSource: algoResult.evalSource
+      });
 
       const emptyCard = createEmptyCard();
       await prisma.repertoirePositionStat.upsert({
-        where: { repertoireId_positionId: { repertoireId: repertoire.id, positionId: posAfterWhite.id } },
+        where: { repertoireId_nodeId: { repertoireId: repertoire.id, nodeId: posAfterWhiteNode.id } },
         update: { targetMoveId: dbBlackMove.id, explanation: explanation },
         create: { 
           repertoireId: repertoire.id, 
-          positionId: posAfterWhite.id, 
+          nodeId: posAfterWhiteNode.id, 
           targetMoveId: dbBlackMove.id, 
           explanation: explanation,
           due: emptyCard.due,
@@ -279,14 +268,15 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
       });
 
       queue.push({
+        nodeId: posAfterBlackNode.id,
         fen: fenAfterBlack,
         currentMoveNumber: node.currentMoveNumber + 1,
         trapDepth: whiteMove.isTrap ? node.trapDepth + 1 : 0,
-        cumulativeProb: node.cumulativeProb * (whiteMove.probability || 1.0),
-        history: [...newHistory, algoResult.selectedMoveSan]
+        cumulativeProb: incomingPathProb,
+        history: blackHistory
       });
 
-      await delay(2000); 
+      await delay(100); // Shorter delay since we hit cache!
     }
   }
   

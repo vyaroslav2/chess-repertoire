@@ -5,9 +5,6 @@ generator client {
   provider = "prisma-client-js"
 }
 
-// Since Docker wasn't running locally, we are using SQLite for the local environment.
-// This is perfect for local testing and can be effortlessly swapped to "postgresql" 
-// in the future if you decide to host the application.
 datasource db {
   provider = "sqlite"
   url      = env("DATABASE_URL")
@@ -26,90 +23,109 @@ model Repertoire {
   userId       String
   user         User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
   stats        RepertoirePositionStat[]
+  nodes        RepertoireNode[]
+  moves        RepertoireMove[]
 }
 
-model Position {
-  id             String   @id @default(uuid())
-  fen            String   @unique
-  
+// --- THE CACHE LAYER ---
+
+model PositionCache {
+  fen            String   @id // Normalized FEN (no clocks)
   eco            String?
   openingName    String?
   wikiText       String?
-  
-  trueProbability Float   @default(0)
-  isAmateurTrap   Boolean @default(false)
-  isMasterThreat  Boolean @default(false)
 
-  incomingMoves  Move[]   @relation("IncomingMoves")
-  outgoingMoves  Move[]   @relation("OutgoingMoves")
-  repertoireStats RepertoirePositionStat[]
-  engineEvals    EngineEval[]
-  explorerMoves  ExplorerMove[]
+  explorerMoves  ExplorerMoveCache[]
+  engineEvals    EngineEvalCache[]
+  repertoireNodes RepertoireNode[]
 }
 
-model Move {
-  id             String   @id @default(uuid())
-  san            String
-  fromPositionId String
-  toPositionId   String
-
-  lichessEval    Float?
-  chessdbEval    Float?
-  prob           Float?
-  cumulativeProb Float?
-  
-  mastersGames   Int?
-  mastersWin     Float?
-  mastersDraw    Float?
-  mastersLoss    Float?
-
-  lichessGames   Int?
-  lichessWin     Float?
-  lichessDraw    Float?
-  lichessLoss    Float?
-
-  weightedCount  Int?
-
-  fromPosition   Position @relation("OutgoingMoves", fields: [fromPositionId], references: [id], onDelete: Cascade)
-  toPosition     Position @relation("IncomingMoves", fields: [toPositionId], references: [id], onDelete: Cascade)
-  stats          RepertoirePositionStat[]
-}
-
-model EngineEval {
+model ExplorerMoveCache {
   id         String   @id @default(uuid())
-  positionId String
+  positionId String   // FK to PositionCache.fen
+  dbType     String   // "masters", "elite", "amateur"
+  san        String
+  games      Int
+  whiteWins  Float
+  draws      Float
+  blackWins  Float
+
+  position   PositionCache @relation(fields: [positionId], references: [fen], onDelete: Cascade)
+  
+  @@unique([positionId, dbType, san])
+}
+
+model EngineEvalCache {
+  id         String   @id @default(uuid())
+  positionId String   // FK to PositionCache.fen
   san        String
   cp         Float
   mate       Int?
   rank       Int
-  source     String   @default("lichess")
-  
-  position   Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  source     String   // "lichess" or "chessdb"
+
+  position   PositionCache @relation(fields: [positionId], references: [fen], onDelete: Cascade)
+
+  @@unique([positionId, san, source])
 }
 
-model ExplorerMove {
-  id         String   @id @default(uuid())
-  positionId String
-  dbType     String
-  san        String
-  games      Int
-  win        Float
-  draw       Float
-  loss       Float
-  rank       Int
+
+// --- THE ALGORITHM LAYER ---
+
+model RepertoireNode {
+  id             String   @id @default(uuid()) // Unique ID for this specific path
+  repertoireId   String   
+  fen            String   // FK to PositionCache
+  pgn            String   // The unique move history
+  cumulativeProb Float    @default(0)
+  isAmateurTrap  Boolean  @default(false)
+  isMasterThreat Boolean  @default(false)
+
+  cache          PositionCache @relation(fields: [fen], references: [fen], onDelete: Cascade)
+  repertoire     Repertoire    @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
+
+  incomingMoves  RepertoireMove[] @relation("IncomingMoves")
+  outgoingMoves  RepertoireMove[] @relation("OutgoingMoves")
+  stats          RepertoirePositionStat[]
   
-  position   Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  @@unique([repertoireId, pgn]) // A specific PGN history is unique per repertoire
+}
+
+model RepertoireMove {
+  id              String   @id @default(uuid())
+  repertoireId    String
+  fromNodeId      String
+  toNodeId        String
+  san             String
+  playerTurn      String   // "OPPONENT" or "RESPONSE"
+  
+  // Opponent specific fields
+  prob            Float?
+  trueProbability Float?
+
+  // Response specific fields
+  weightedCount   Float?
+  lichessCp       Float?
+  chessdbCp       Float?
+  engineSource    String?
+
+  fromNode        RepertoireNode @relation("OutgoingMoves", fields: [fromNodeId], references: [id], onDelete: Cascade)
+  toNode          RepertoireNode @relation("IncomingMoves", fields: [toNodeId], references: [id], onDelete: Cascade)
+  repertoire      Repertoire     @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
+  stats           RepertoirePositionStat[]
+
+  @@unique([fromNodeId, san])
 }
 
 model RepertoirePositionStat {
   id           String     @id @default(uuid())
   repertoireId String
-  positionId   String
+  nodeId       String
   targetMoveId String
 
   repertoire   Repertoire @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
-  position     Position   @relation(fields: [positionId], references: [id], onDelete: Cascade)
-  targetMove   Move       @relation(fields: [targetMoveId], references: [id], onDelete: Cascade)
+  node         RepertoireNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  targetMove   RepertoireMove @relation(fields: [targetMoveId], references: [id], onDelete: Cascade)
 
   // Natural Language Explanation of the plan (e.g. from Gemini)
   explanation  String?
@@ -128,5 +144,5 @@ model RepertoirePositionStat {
   
   createdAt      DateTime @default(now())
 
-  @@unique([repertoireId, positionId]) // Ensure a user has only one set of stats per position per repertoire
+  @@unique([repertoireId, nodeId]) // Ensure a user has only one set of stats per node per repertoire
 }

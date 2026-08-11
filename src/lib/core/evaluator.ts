@@ -1,12 +1,13 @@
 import { Chess } from "chess.js";
-import { prisma } from "../db/operations";
+import { prisma, saveExplorerMoveCache, saveEngineEvalCache } from "../db/operations";
 import { fetchWithRetry, delay, promptUser, GlobalState } from "../api/retry";
 import { getCpTolerance, getSmoothedWinRate } from "./math";
 import { fallbackGeminiMove } from "../api/gemini";
+import { normalizeFen } from "./fen";
 
 export function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: number, mastersList: any[], eliteList: any[], amateurList: any[], totalAmateurGames: number) {
-    const amateurData = amateurList.find(m => m.san === moveSan) || { white: 0, draws: 0, black: 0 };
-    const aTotal = amateurData.white + amateurData.draws + amateurData.black;
+    const amateurData = amateurList.find(m => m.san === moveSan) || { games: 0, white: 0, draws: 0, black: 0 };
+    const aTotal = amateurData.games || (amateurData.white + amateurData.draws + amateurData.black);
     const mastersData = mastersList.find(m => m.san === moveSan);
     const eliteData = eliteList.find(m => m.san === moveSan);
 
@@ -15,7 +16,7 @@ export function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: numbe
     let isTrap = false;
     let probability = totalAmateurGames > 0 ? aTotal / totalAmateurGames : 0;
 
-    const mTotal = mastersData ? (mastersData.white + mastersData.draws + mastersData.black) : 0;
+    const mTotal = mastersData ? (mastersData.games || (mastersData.white + mastersData.draws + mastersData.black)) : 0;
     const mWin = mTotal > 0 ? mastersData.white / mTotal : 0;
     const mDraw = mTotal > 0 ? mastersData.draws / mTotal : 0;
     const mLoss = mTotal > 0 ? mastersData.black / mTotal : 0;
@@ -57,62 +58,43 @@ export function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: numbe
     };
 }
 
-export async function evaluateBlackMove(fen: string, posId: string, chess: Chess, moveNumber: number, previousMovesSan: string[]): Promise<any> {
-  const strippedFen = fen.split(" ").slice(0, 4).join(" ");
+import { fetchAllDatabases } from "../api/lichess";
+
+export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: number, previousMovesSan: string[]): Promise<any> {
+  const normFen = normalizeFen(fen);
   
+  // 1. Check Explorer Cache via lichess.ts
+  const [mastersData, eliteData, amateurData] = await fetchAllDatabases(fen);
+
   let mergedMoves: Record<string, any> = {};
-  
-  try {
-    const mastersUrl = `https://explorer.lichess.ovh/masters?fen=${encodeURIComponent(strippedFen)}`;
-    const mastersData = await fetchWithRetry(mastersUrl);
-    if (mastersData && mastersData.moves) {
-      let rank = 1;
-      for (const m of mastersData.moves) {
-        const total = m.white + m.draws + m.black;
+
+  if (mastersData && mastersData.moves) {
+    for (const m of mastersData.moves) {
+      const total = m.white + m.draws + m.black;
+      mergedMoves[m.san] = {
+        san: m.san, mastersCount: total,
+        mastersBlackWin: m.black, mastersDraws: m.draws, mastersWhiteWin: m.white,
+        onlineCount: 0, onlineBlackWin: 0, onlineDraws: 0, onlineWhiteWin: 0
+      };
+    }
+  }
+
+  if (eliteData && eliteData.moves) {
+    for (const m of eliteData.moves) {
+      const total = m.white + m.draws + m.black;
+      if (mergedMoves[m.san]) {
+        mergedMoves[m.san].onlineCount = total;
+        mergedMoves[m.san].onlineBlackWin = m.black;
+        mergedMoves[m.san].onlineDraws = m.draws;
+        mergedMoves[m.san].onlineWhiteWin = m.white;
+      } else {
         mergedMoves[m.san] = {
-          san: m.san, mastersCount: total,
-          mastersBlackWin: m.black, mastersDraws: m.draws, mastersWhiteWin: m.white,
-          onlineCount: 0, onlineBlackWin: 0, onlineDraws: 0, onlineWhiteWin: 0
+          san: m.san, mastersCount: 0, mastersBlackWin: 0, mastersDraws: 0, mastersWhiteWin: 0,
+          onlineCount: total, onlineBlackWin: m.black, onlineDraws: m.draws, onlineWhiteWin: m.white
         };
-        await prisma.explorerMove.create({
-          data: {
-            positionId: posId, dbType: "masters", san: m.san, games: total, rank: rank++,
-            win: total > 0 ? m.white/total : 0, draw: total > 0 ? m.draws/total : 0, loss: total > 0 ? m.black/total : 0
-          }
-        });
       }
     }
-  } catch (e) {}
-
-  await delay(1000);
-
-  try {
-    const onlineUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(strippedFen)}&speeds=classical,rapid&ratings=2500`;
-    const onlineData = await fetchWithRetry(onlineUrl);
-    if (onlineData && onlineData.moves) {
-      let rank = 1;
-      for (const m of onlineData.moves) {
-        const total = m.white + m.draws + m.black;
-        if (mergedMoves[m.san]) {
-          mergedMoves[m.san].onlineCount = total;
-          mergedMoves[m.san].onlineBlackWin = m.black;
-          mergedMoves[m.san].onlineDraws = m.draws;
-          mergedMoves[m.san].onlineWhiteWin = m.white;
-        } else {
-          mergedMoves[m.san] = {
-            san: m.san, mastersCount: 0, mastersBlackWin: 0, mastersDraws: 0, mastersWhiteWin: 0,
-            onlineCount: total, onlineBlackWin: m.black, onlineDraws: m.draws, onlineWhiteWin: m.white
-          };
-        }
-        await prisma.explorerMove.create({
-          data: {
-            positionId: posId, dbType: "lichess", san: m.san, games: total, rank: rank++,
-            win: total > 0 ? m.white/total : 0, draw: total > 0 ? m.draws/total : 0, loss: total > 0 ? m.black/total : 0
-          }
-        });
-      }
-    }
-  } catch (e) {}
+  }
 
   const MIN_GAMES_THRESHOLD = 5;
   const candidateMoves = Object.values(mergedMoves).map(m => {
@@ -128,90 +110,116 @@ export async function evaluateBlackMove(fen: string, posId: string, chess: Chess
 
   candidateMoves.sort((a, b) => b.score - a.score);
 
-  await delay(1000);
+  // 2. Check Engine Eval Cache
   let lichessCp: number | null = null;
   let chessdbCp: number | null = null;
   let bestCp = 0;
   let enginePvs: any[] = [];
   let chessdbPvs: any[] = [];
   let evalSource = 'Lichess';
-  try {
-    let cloudData: any = null;
-    if (GlobalState.useLichessEval) {
-      const cloudUrl = `https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(strippedFen)}&multiPv=5`;
-      cloudData = await fetchWithRetry(cloudUrl, 10, false, 'eval');
-    }
+
+  const cachedEvals = await prisma.engineEvalCache.findMany({ where: { positionId: normFen }, orderBy: { rank: 'asc' } });
+  
+  if (cachedEvals.length > 0) {
+    const lichessCached = cachedEvals.filter(e => e.source === "lichess");
+    const chessdbCached = cachedEvals.filter(e => e.source === "chessdb");
     
-    if (cloudData && !cloudData.error && cloudData.pvs && cloudData.pvs.length > 0) {
-      enginePvs = cloudData.pvs;
-      lichessCp = enginePvs[0].cp;
-      bestCp = lichessCp!;
-      
-      let rank = 1;
-      for (const pv of enginePvs) {
-        const lan = pv.moves.split(" ")[0];
+    if (lichessCached.length > 0) {
+      lichessCp = lichessCached[0].cp;
+      bestCp = lichessCp;
+      // Reconstruct PVs
+      enginePvs = lichessCached.map(c => {
         try {
           const tempChess = new Chess(fen);
-          const fromSq = lan.substring(0, 2);
-          const toSq = lan.substring(2, 4);
-          const promotion = lan.length === 5 ? lan[4] : undefined;
-          const moveResult = tempChess.move({ from: fromSq, to: toSq, promotion } as any);
-          
-          await prisma.engineEval.create({
-            data: {
-              positionId: posId, san: moveResult.san, cp: pv.cp, mate: pv.mate || null, rank: rank++, source: "lichess"
-            }
-          });
-        } catch(e) {}
-      }
-    } else {
+          const res = tempChess.move(c.san);
+          return { cp: c.cp, mate: c.mate, moves: res.lan };
+        } catch(e) { return null; }
+      }).filter(Boolean);
+    } else if (chessdbCached.length > 0) {
       evalSource = 'ChessDB';
+      chessdbCp = chessdbCached[0].cp;
+      bestCp = chessdbCp;
+      enginePvs = chessdbCached.map(c => {
+        try {
+          const tempChess = new Chess(fen);
+          const res = tempChess.move(c.san);
+          return { cp: c.cp, mate: c.mate, moves: res.lan };
+        } catch(e) { return null; }
+      }).filter(Boolean);
     }
-
+  } else {
+    // Missing Cache: Fetch from Engine APIs
+    await delay(1000);
     try {
-      const chessdbUrl = `https://www.chessdb.cn/cdb.php?action=queryall&board=${encodeURIComponent(strippedFen)}`;
-      const chessdbRes = await fetch(chessdbUrl);
-      if (chessdbRes.ok) {
-        const text = await chessdbRes.text();
-        if (text.includes("move:")) {
-          const moves = text.split("|");
-          let rank = 1;
-          for (const m of moves) {
-            const moveMatch = m.match(/move:([^,]+),score:([^,]+)/);
-            if (moveMatch) {
-              const lan = moveMatch[1];
-              const scoreCp = parseInt(moveMatch[2], 10);
-              const whiteCp = -scoreCp; 
-              chessdbPvs.push({ cp: whiteCp, moves: lan });
-              
-              try {
-                const tempChess = new Chess(fen);
-                const fromSq = lan.substring(0, 2);
-                const toSq = lan.substring(2, 4);
-                const promotion = lan.length === 5 ? lan[4] : undefined;
-                const moveResult = tempChess.move({ from: fromSq, to: toSq, promotion } as any);
+      let cloudData: any = null;
+      if (GlobalState.useLichessEval) {
+        const cloudUrl = `https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(normFen)}&multiPv=5`;
+        cloudData = await fetchWithRetry(cloudUrl, 10, false, 'eval');
+      }
+      
+      if (cloudData && !cloudData.error && cloudData.pvs && cloudData.pvs.length > 0) {
+        enginePvs = cloudData.pvs;
+        lichessCp = enginePvs[0].cp;
+        bestCp = lichessCp!;
+        
+        let rank = 1;
+        for (const pv of enginePvs) {
+          const lan = pv.moves.split(" ")[0];
+          try {
+            const tempChess = new Chess(fen);
+            const fromSq = lan.substring(0, 2);
+            const toSq = lan.substring(2, 4);
+            const promotion = lan.length === 5 ? lan[4] : undefined;
+            const moveResult = tempChess.move({ from: fromSq, to: toSq, promotion } as any);
+            
+            await saveEngineEvalCache(fen, "lichess", { san: moveResult.san, cp: pv.cp, mate: pv.mate || null, rank: rank++ });
+          } catch(e) {}
+        }
+      } else {
+        evalSource = 'ChessDB';
+      }
+
+      try {
+        const chessdbUrl = `https://www.chessdb.cn/cdb.php?action=queryall&board=${encodeURIComponent(normFen)}`;
+        const chessdbRes = await fetch(chessdbUrl);
+        if (chessdbRes.ok) {
+          const text = await chessdbRes.text();
+          if (text.includes("move:")) {
+            const moves = text.split("|");
+            let rank = 1;
+            for (const m of moves) {
+              const moveMatch = m.match(/move:([^,]+),score:([^,]+)/);
+              if (moveMatch) {
+                const lan = moveMatch[1];
+                const scoreCp = parseInt(moveMatch[2], 10);
+                const whiteCp = -scoreCp; 
+                chessdbPvs.push({ cp: whiteCp, moves: lan });
                 
-                await prisma.engineEval.create({
-                  data: {
-                    positionId: posId, san: moveResult.san, cp: whiteCp, mate: null, rank: rank++, source: "chessdb"
-                  }
-                });
-              } catch(e) {}
+                try {
+                  const tempChess = new Chess(fen);
+                  const fromSq = lan.substring(0, 2);
+                  const toSq = lan.substring(2, 4);
+                  const promotion = lan.length === 5 ? lan[4] : undefined;
+                  const moveResult = tempChess.move({ from: fromSq, to: toSq, promotion } as any);
+                  
+                  await saveEngineEvalCache(fen, "chessdb", { san: moveResult.san, cp: whiteCp, mate: null, rank: rank++ });
+                } catch(e) {}
+              }
             }
-          }
-          if (chessdbPvs.length > 0) {
-            chessdbPvs.sort((a, b) => a.cp - b.cp);
-            chessdbCp = chessdbPvs[0].cp;
-            if (evalSource === 'ChessDB') {
-              enginePvs = chessdbPvs;
-              bestCp = chessdbCp;
+            if (chessdbPvs.length > 0) {
+              chessdbPvs.sort((a, b) => a.cp - b.cp);
+              chessdbCp = chessdbPvs[0].cp;
+              if (evalSource === 'ChessDB') {
+                enginePvs = chessdbPvs;
+                bestCp = chessdbCp;
+              }
             }
           }
         }
-      }
-    } catch (e) {}
-  } catch (e) {
-    console.log("Error fetching engine eval:", e);
+      } catch (e) {}
+    } catch (e) {
+      console.log("Error fetching engine eval:", e);
+    }
   }
 
   let selectedMoveSan: string | null = null;
@@ -273,7 +281,7 @@ export async function evaluateBlackMove(fen: string, posId: string, chess: Chess
   if (selectedEngineCp === null) {
       const answer = await promptUser(`\n[N/A EVAL] API limits reached for ${fen}. Turn on VPN and press Enter to retry, or type 's' to skip: `);
       if (answer.toLowerCase() !== 's') {
-          return await evaluateBlackMove(fen, posId, chess, moveNumber, previousMovesSan);
+          return await evaluateBlackMove(fen, chess, moveNumber, previousMovesSan);
       }
   }
 
