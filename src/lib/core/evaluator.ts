@@ -27,15 +27,23 @@ export function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: numbe
 
     let isAmateurTrap = false;
     let isMasterThreat = false;
+    
+    const masterSmoothed = getSmoothedWinRate(
+      mTotal > 0 ? mastersData.white : 0, 
+      mTotal > 0 ? mastersData.draws : 0, 
+      mTotal, 50, 0.52
+    );
+
+    if (mTotal >= 15 && masterSmoothed >= 0.58) {
+        isMasterThreat = true;
+    }
+    
+    if (isMasterThreat && probability < 0.01) {
+        probability = 0.01;
+    }
 
     if (totalAmateurGames > 0) {
       const amateurWhiteWinRate = aTotal > 0 ? amateurData.white / aTotal : 0;
-      
-      const masterSmoothed = getSmoothedWinRate(
-        mTotal > 0 ? mastersData.white : 0, 
-        mTotal > 0 ? mastersData.draws : 0, 
-        mTotal, 50, 0.52
-      );
       
       const amateurSmoothed = getSmoothedWinRate(
         aTotal > 0 ? amateurData.white : 0, 
@@ -43,9 +51,6 @@ export function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: numbe
         aTotal, 50, 0.52
       );
 
-      if (mTotal >= 15 && masterSmoothed >= 0.58) {
-          isMasterThreat = true;
-      }
       if (aTotal >= 15 && amateurSmoothed >= 0.58 && !isMasterThreat) {
           isAmateurTrap = true;
       }
@@ -114,14 +119,15 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
     }
   }
 
-  const MIN_GAMES_THRESHOLD = 5;
+  const MIN_GAMES_THRESHOLD = 15;
   const candidateMoves = Object.values(mergedMoves).map(m => {
     const weightedCount = (m.mastersCount * 5) + m.onlineCount;
     const weightedBlackWins = (m.mastersBlackWin * 5) + m.onlineBlackWin;
     const weightedDraws = (m.mastersDraws * 5) + m.onlineDraws;
     
+    const priorWins = 50 * 0.52; // 26
     const smoothedCount = weightedCount + 50;
-    const score = (weightedBlackWins + (0.5 * weightedDraws)) / smoothedCount;
+    const score = (weightedBlackWins + (0.5 * weightedDraws) + priorWins) / smoothedCount;
     
     return { ...m, weightedCount, score };
   }).filter(m => m.weightedCount >= MIN_GAMES_THRESHOLD);
