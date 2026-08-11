@@ -27,14 +27,26 @@ export async function runLocalStockfish(fen: string, multiPv = 15, depth = 18): 
     const isBlackToMove = fen.includes(' b ');
     const multiplier = isBlackToMove ? -1 : 1;
     
-    return result.info
-        .filter((info: any) => info.pv)
+    // 1. Map all valid info lines
+    const allPvs = result.info
+        .filter((info: any) => info.pv && info.score)
         .map((info: any) => ({
             cp: info.score.value !== undefined ? info.score.value * multiplier : 0,
             mate: info.score.unit === 'mate' ? info.score.value * multiplier : null,
             moves: info.pv
-        }))
-        .sort((a: any, b: any) => isBlackToMove ? getCp(a) - getCp(b) : getCp(b) - getCp(a)); 
+        }));
+
+    // 2. Deduplicate: Keep only the deepest (latest) evaluation for each unique first move
+    const uniquePvs = new Map<string, any>();
+    for (const pv of allPvs) {
+        const firstMove = pv.moves.split(' ')[0];
+        uniquePvs.set(firstMove, pv); 
+    }
+
+    // 3. Sort by perspective and limit strictly to the requested multiPv amount
+    return Array.from(uniquePvs.values())
+        .sort((a: any, b: any) => isBlackToMove ? getCp(a) - getCp(b) : getCp(b) - getCp(a))
+        .slice(0, multiPv);
 }
 
 export function checkPvTolerance(candidateLan: string, pvs: any[], bestCp: number, tolerance: number): 'VALID' | 'REJECTED' | 'NEED_DEEPER_SEARCH' {
