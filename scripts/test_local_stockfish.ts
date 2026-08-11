@@ -40,8 +40,8 @@ async function runTest() {
     console.log("Sorting is correct (lowest CP first).");
   }
 
-  console.log("\n[Sorted Moves from Local Stockfish (Top 5)]");
-  for (let i = 0; i < Math.min(5, localPvs.length); i++) {
+  console.log("\n[Sorted Moves from Local Stockfish]");
+  for (let i = 0; i < localPvs.length; i++) {
       console.log(`${i+1}. ${localPvs[i].moves.split(' ')[0]} (CP: ${localPvs[i].cp})`);
   }
 
@@ -121,10 +121,11 @@ async function runTest() {
       chessdbPvs.sort((a, b) => a.cp - b.cp);
       const sortedLocal = [...localPvs].sort((a, b) => a.cp - b.cp);
       
-      console.log(`\n[ANALYTICS: TOP 5 CANDIDATES COMPARISON]`);
+      console.log(`\n[ANALYTICS: ALL CANDIDATES COMPARISON]`);
       console.log(`Rank | Local Stockfish          | ChessDB Cloud`);
       console.log(`-----------------------------------------------------`);
-      for (let i = 0; i < 5; i++) {
+      const maxLen = Math.max(sortedLocal.length, chessdbPvs.length);
+      for (let i = 0; i < maxLen; i++) {
           const localStr = sortedLocal[i] ? `${sortedLocal[i].moves.split(' ')[0]} (CP: ${sortedLocal[i].cp})`.padEnd(24) : 'N/A'.padEnd(24);
           const cdbStr = chessdbPvs[i] ? `${chessdbPvs[i].moves} (CP: ${chessdbPvs[i].cp})` : 'N/A';
           console.log(`  ${i+1}  | ${localStr} | ${cdbStr}`);
