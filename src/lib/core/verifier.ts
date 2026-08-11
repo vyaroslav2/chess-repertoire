@@ -34,7 +34,7 @@ export async function runLocalStockfish(fen: string, multiPv = 15, depth = 18): 
             mate: info.score.unit === 'mate' ? info.score.value * multiplier : null,
             moves: info.pv
         }))
-        .sort((a: any, b: any) => getCp(b) - getCp(a)); 
+        .sort((a: any, b: any) => isBlackToMove ? getCp(a) - getCp(b) : getCp(b) - getCp(a)); 
 }
 
 export function checkPvTolerance(candidateLan: string, pvs: any[], bestCp: number, tolerance: number): 'VALID' | 'REJECTED' | 'NEED_DEEPER_SEARCH' {
