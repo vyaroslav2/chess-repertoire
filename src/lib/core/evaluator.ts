@@ -303,5 +303,5 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
       }
   }
 
-  return { selectedMoveSan, selectedStats, selectedEngineCp, lichessCp, chessdbCp, evalSource };
+  return { selectedMoveSan, selectedStats, selectedEngineCp, lichessCp, chessdbCp, evalSource, candidateMoves, enginePvs };
 }

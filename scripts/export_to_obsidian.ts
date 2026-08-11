@@ -5,7 +5,11 @@ const filesToExtract = [
   'src/lib/core/math.ts',
   'src/lib/core/evaluator.ts',
   'src/lib/core/generator.ts',
-  'scripts/start_tree_generator.ts'
+  'scripts/start_tree_generator.ts',
+  'src/lib/api/lichess.ts',
+  'src/lib/api/retry.ts',
+  'src/lib/db/operations.ts',
+  'src/lib/api/gemini.ts' 
 ];
 
 const destFolder = 'C:\\Users\\vyaro\\OneDrive\\Рабочий стол\\NewObsidian';
