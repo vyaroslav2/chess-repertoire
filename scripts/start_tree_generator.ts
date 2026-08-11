@@ -18,7 +18,7 @@ async function main() {
     };
 
     try {
-        await generateRepertoire(START_FEN, 2);
+        await generateRepertoire(START_FEN, 4);
     } catch (e) {
         console.error("Fatal Error:", e);
     } finally {

@@ -15,9 +15,11 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
   let totalWhiteMainlines = 0;
   let totalWhiteTraps = 0;
   let totalWhiteThreats = 0;
+  let totalMissingWhiteMoves = 0;
   let totalBlackMovesEvaluated = 0;
   let totalSkippedMoves = 0;
   let totalBranchesAborted = 0;
+  let totalMissingBlackMoves = 0;
   let totalNaEvals = 0;
 
   let user = await prisma.user.findUnique({ where: { username: "Yaroslav" } });
@@ -62,7 +64,8 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
 
     const currentElapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     
-    console.log(`\n--- Queue Size: ${queue.length} | Move: ${node.currentMoveNumber} | Trap Depth: ${node.trapDepth} ---`);
+    let trapLog = node.trapDepth > 0 ? ` | Trap Depth: ${node.trapDepth}` : "";
+    console.log(`\n--- Queue Size: ${queue.length} | Move: ${node.currentMoveNumber}${trapLog} ---`);
     console.log(`History: ${pgnString}`);
     console.log(`[Stats] Elapsed: ${currentElapsed}s | Positions Processed: ${totalPositionsProcessed} | N/A Evals: ${totalNaEvals}`);
 
@@ -98,7 +101,15 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
        return { san, ...filterResult };
     }).filter(m => m.include);
 
-    console.log(`Found ${whiteCandidates.length} White threats/mainlines to process.`);
+    if (whiteCandidates.length === 0) {
+        const tempChess = new Chess(node.fen);
+        if (!tempChess.isGameOver()) {
+            console.log(`[ALERT - ERROR] No White candidates found after ${pgnString}. Stopping branch.`);
+            totalMissingWhiteMoves++;
+        }
+    } else {
+        console.log(`Found ${whiteCandidates.length} White threats/mainlines to process.`);
+    }
     totalWhiteMovesFound += whiteCandidates.length;
 
     for (const whiteMove of whiteCandidates) {
@@ -166,7 +177,7 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
             nodeId: dbBlackMove.toNodeId,
             fen: fenAfterBlack,
             currentMoveNumber: node.currentMoveNumber + 1,
-            trapDepth: whiteMove.isTrap ? node.trapDepth + 1 : 0,
+            trapDepth: node.trapDepth > 0 ? node.trapDepth + 1 : (isTrap || isThreat ? 1 : 0),
             cumulativeProb: incomingPathProb,
             history: [...newHistory, dbBlackMove.san]
           });
@@ -216,7 +227,8 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
       }
 
       if (!algoResult.selectedMoveSan) {
-        console.log("No valid Black move found. Stopping branch.");
+        console.log(`[ALERT - ERROR] No valid Black move found after ${newPgn}. Stopping branch.`);
+        totalMissingBlackMoves++;
         continue;
       }
       
@@ -296,13 +308,21 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
         nodeId: posAfterBlackNode.id,
         fen: fenAfterBlack,
         currentMoveNumber: node.currentMoveNumber + 1,
-        trapDepth: whiteMove.isTrap ? node.trapDepth + 1 : 0,
+        trapDepth: node.trapDepth > 0 ? node.trapDepth + 1 : (isTrap || isThreat ? 1 : 0),
         cumulativeProb: incomingPathProb,
         history: blackHistory
       });
 
       await delay(100); // Shorter delay since we hit cache!
     }
+
+    // --- TEMPORARY DETAILED SUMMARY PER NODE ---
+    const runningElapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.log(`\n--- [TEMPORARY CHECKPOINT] Node Finished ---`);
+    console.log(`Time: ${runningElapsed}s | Nodes Processed: ${totalPositionsProcessed} (Aborted: ${totalBranchesAborted})`);
+    console.log(`White Moves Found: ${totalWhiteMovesFound} (Skipped: ${totalSkippedMoves} | Mainlines: ${totalWhiteMainlines} | Traps: ${totalWhiteTraps} | Threats: ${totalWhiteThreats})`);
+    console.log(`Missing White Moves: ${totalMissingWhiteMoves} | Missing Black Moves: ${totalMissingBlackMoves}`);
+    console.log(`--------------------------------------------\n`);
   }
   
   const endTime = Date.now();
@@ -319,6 +339,8 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
   console.log(`  - Amateur Traps:        ${totalWhiteTraps}`);
   console.log(`Total Black Responses:    ${totalBlackMovesEvaluated}`);
   console.log(`Total Skipped (In DB):    ${totalSkippedMoves}`);
+  console.log(`Missing White Moves:      ${totalMissingWhiteMoves}`);
+  console.log(`Missing Black Moves:      ${totalMissingBlackMoves}`);
   console.log(`Total N/A Evals (Null):   ${totalNaEvals}`);
   console.log("========================================================\n");
   console.log("Generation Complete!");
