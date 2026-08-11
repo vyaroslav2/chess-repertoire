@@ -1,9 +1,11 @@
 import { evaluateBlackMove } from '../src/lib/core/evaluator';
 import { Chess } from 'chess.js';
 import { PrismaClient } from '@prisma/client';
-import { saveExplorerMoveCache } from '../src/lib/api/lichess';
+import { saveExplorerMoveCache, getOrCreatePositionCache } from '../src/lib/db/operations';
+import { normalizeFen } from '../src/lib/core/fen';
 
-const normalizeFen = (fen: string) => fen.split(' ').slice(0, 4).join(' ');
+// Ensure burner DB
+process.env.DATABASE_URL = "file:./burner.db";
 
 const prisma = new PrismaClient();
 
@@ -31,6 +33,12 @@ async function runTest() {
     }
     return originalFetch(input, init);
   };
+
+  // Ensure the PositionCache exists before saving foreign-keyed cache data
+  await getOrCreatePositionCache(normFen);
+
+  // Clean previous engine evals for this test FEN
+  await prisma.engineEvalCache.deleteMany({ where: { positionId: normFen } });
 
   // Inject terrible human moves to prove they are ignored
   await prisma.explorerMoveCache.deleteMany({ where: { positionId: normFen } });
