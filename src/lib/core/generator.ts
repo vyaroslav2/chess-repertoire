@@ -116,8 +116,9 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
       let isTrap = false;
       let isThreat = false;
       let isMainline = whiteMove.reason === "Mainline";
+      let tag = whiteMove.reason.startsWith("Amateur Trap") ? "[TRAP] " : (whiteMove.reason.startsWith("Master Threat") ? "[THREAT] " : "");
 
-      console.log(`\nEvaluating White Move: ${whiteMove.san} (Reason: ${whiteMove.reason}, Prob: ${whiteMove.probability ? (whiteMove.probability*100).toFixed(1) : 0}%)`);
+      console.log(`\n${tag}Evaluating White Move: ${whiteMove.san} (Reason: ${whiteMove.reason}, Prob: ${whiteMove.probability ? (whiteMove.probability*100).toFixed(1) : 0}%)`);
       const tempChess = new Chess(node.fen);
       tempChess.move(whiteMove.san);
       const fenAfterWhite = tempChess.fen();
@@ -166,11 +167,11 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
           if (isMainline) totalWhiteMainlines++;
           if (isTrap) {
               totalWhiteTraps++;
-              console.log(`[ALERT - SKIPPED] Flagged ${whiteMove.san} as Amateur Trap (already in DB)!`);
+              console.log(`[TRAP] (Skipped) Flagged ${whiteMove.san} as Amateur Trap (already in DB)!`);
           }
           if (isThreat) {
               totalWhiteThreats++;
-              console.log(`[ALERT - SKIPPED] Flagged ${whiteMove.san} as Master Threat (already in DB)!`);
+              console.log(`[THREAT] (Skipped) Flagged ${whiteMove.san} as Master Threat (already in DB)!`);
           }
 
           queue.push({
@@ -222,7 +223,9 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
                   where: { id: posAfterWhiteNode.id },
                   data: { isMasterThreat, isAmateurTrap }
               });
-              console.log(`[ALERT] Flagged ${whiteMove.san} as ${isMasterThreat ? 'Master Threat' : 'Amateur Trap'}! (Eval: ${algoResult.selectedEngineCp})`);
+              let finalTag = isMasterThreat ? '[THREAT]' : '[TRAP]';
+              let finalLabel = isMasterThreat ? 'Master Threat' : 'Amateur Trap';
+              console.log(`${finalTag} Flagged ${whiteMove.san} as ${finalLabel}! (Eval: ${algoResult.selectedEngineCp})`);
           }
       }
 
