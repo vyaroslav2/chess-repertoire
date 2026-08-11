@@ -115,8 +115,8 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
     for (const whiteMove of whiteCandidates) {
       let isTrap = whiteMove.isAmateurTrap;
       let isThreat = whiteMove.isMasterThreat;
-      let isMainline = whiteMove.reason === "Mainline";
-      let tag = whiteMove.reason.startsWith("Amateur Trap") ? "[TRAP] " : (whiteMove.reason.startsWith("Master Threat") ? "[THREAT] " : "");
+      let isMainline = whiteMove.reason === "Mainline" && !isTrap && !isThreat;
+      let tag = isTrap ? "[TRAP] " : (isThreat ? "[THREAT] " : "");
 
       console.log(`\n${tag}Evaluating White Move: ${whiteMove.san} (Reason: ${whiteMove.reason}, Prob: ${whiteMove.probability ? (whiteMove.probability*100).toFixed(1) : 0}%)`);
       const tempChess = new Chess(node.fen);
