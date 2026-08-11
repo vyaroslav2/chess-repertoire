@@ -1,7 +1,8 @@
 import { Chess } from "chess.js";
 import { prisma, saveExplorerMoveCache, saveEngineEvalCache } from "../db/operations";
 import { fetchWithRetry, delay, promptUser, GlobalState } from "../api/retry";
-import { getCpTolerance, getSmoothedWinRate } from "./math";
+import { getSmoothedWinRate } from "./math";
+import { runLocalStockfish, checkPvTolerance, getCpTolerance, getCp } from "./verifier";
 import { fallbackGeminiMove } from "../api/gemini";
 import { normalizeFen } from "./fen";
 
@@ -264,23 +265,61 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
     }
   }
 
-  if (!selectedMoveSan && enginePvs.length > 0 && candidateMoves.length > 0) {
-    for (const candidate of candidateMoves) {
-      try {
-        const moveResult = chess.move(candidate.san);
-        chess.undo();
-        const lan = moveResult.lan; 
-        const enginePv = enginePvs.find(pv => pv.moves.split(" ")[0] === lan);
-        const currentTolerance = getCpTolerance(moveNumber);
-        
-        if (enginePv && Math.abs(enginePv.cp - bestCp) <= currentTolerance) {
-          selectedMoveSan = candidate.san;
-          selectedStats = candidate;
-          selectedEngineCp = enginePv.cp;
-          break;
-        }
-      } catch(e) {}
-    }
+  if (!selectedMoveSan && candidateMoves.length > 0) {
+      let localEngineRun = false;
+      let localEnginePvs: any[] = [];
+      const currentBestCp = enginePvs.length > 0 ? getCp(enginePvs[0]) : 0;
+      
+      for (const candidate of candidateMoves) {
+          try {
+              const moveResult = chess.move(candidate.san);
+              chess.undo();
+              const lan = moveResult.lan; 
+              const currentTolerance = getCpTolerance(moveNumber, false);
+  
+              // 1. Check Lichess PVs
+              let status = checkPvTolerance(lan, enginePvs, currentBestCp, currentTolerance);
+              if (status === 'VALID') {
+                  selectedMoveSan = candidate.san;
+                  selectedStats = candidate;
+                  selectedEngineCp = getCp(enginePvs.find(pv => pv.moves.split(" ")[0] === lan));
+                  break;
+              }
+              if (status === 'REJECTED') continue;
+  
+              // 2. Check ChessDB PVs
+              status = checkPvTolerance(lan, chessdbPvs, currentBestCp, currentTolerance);
+              if (status === 'VALID') {
+                  selectedMoveSan = candidate.san;
+                  selectedStats = candidate;
+                  selectedEngineCp = getCp(chessdbPvs.find(pv => pv.moves.split(" ")[0] === lan));
+                  evalSource = 'ChessDB';
+                  break;
+              }
+              if (status === 'REJECTED') continue;
+  
+              // 3. Waterfall to Local Stockfish
+              if (!localEngineRun) {
+                  console.log(`\n[DEEP SEARCH] Candidate '${candidate.san}' exceeds API depth. Running Local Stockfish...`);
+                  localEnginePvs = await runLocalStockfish(normFen, 15, 18);
+                  localEngineRun = true;
+              }
+  
+              const localTolerance = getCpTolerance(moveNumber, true); // Fluctuation allowance active
+              const localBestCp = localEnginePvs.length > 0 ? getCp(localEnginePvs[0]) : currentBestCp;
+              
+              status = checkPvTolerance(lan, localEnginePvs, localBestCp, localTolerance);
+              if (status === 'VALID') {
+                  selectedMoveSan = candidate.san;
+                  selectedStats = candidate;
+                  selectedEngineCp = getCp(localEnginePvs.find(pv => pv.moves.split(" ")[0] === lan));
+                  evalSource = 'Local Stockfish';
+                  break;
+              }
+              
+              // If REJECTED or still NEED_DEEPER_SEARCH (highly unlikely at MultiPV 15), move to next candidate.
+          } catch(e) {}
+      }
   }
 
   if (!selectedMoveSan && enginePvs.length > 0) {
@@ -302,12 +341,6 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
     selectedStats = candidateMoves[0];
   }
 
-  if (selectedEngineCp === null) {
-      const answer = await promptUser(`\n[N/A EVAL] API limits reached for ${fen}. Turn on VPN and press Enter to retry, or type 's' to skip: `);
-      if (answer.toLowerCase() !== 's') {
-          return await evaluateBlackMove(fen, chess, moveNumber, previousMovesSan);
-      }
-  }
 
   return { selectedMoveSan, selectedStats, selectedEngineCp, lichessCp, chessdbCp, evalSource, candidateMoves, enginePvs };
 }
