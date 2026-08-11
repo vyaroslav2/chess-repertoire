@@ -16,6 +16,7 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
   let totalWhiteTraps = 0;
   let totalWhiteThreats = 0;
   let totalBlackMovesEvaluated = 0;
+  let totalSkippedMoves = 0;
   let totalNaEvals = 0;
 
   let user = await prisma.user.findUnique({ where: { username: "Yaroslav" } });
@@ -99,8 +100,8 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
 
     for (const whiteMove of whiteCandidates) {
       if (whiteMove.reason === "Mainline") totalWhiteMainlines++;
-      else if (whiteMove.reason === "Amateur Trap") totalWhiteTraps++;
-      else if (whiteMove.reason === "Master Threat") totalWhiteThreats++;
+      else if (whiteMove.reason.startsWith("Amateur Trap")) totalWhiteTraps++;
+      else if (whiteMove.reason.startsWith("Master Threat")) totalWhiteThreats++;
 
       console.log(`\nEvaluating White Move: ${whiteMove.san} (Reason: ${whiteMove.reason}, Prob: ${whiteMove.probability ? (whiteMove.probability*100).toFixed(1) : 0}%)`);
       const tempChess = new Chess(node.fen);
@@ -154,6 +155,7 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
             history: [...newHistory, dbBlackMove.san]
           });
           
+          totalSkippedMoves++;
           continue; 
         }
       }
@@ -292,6 +294,7 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
   console.log(`  - Master Threats:       ${totalWhiteThreats}`);
   console.log(`  - Amateur Traps:        ${totalWhiteTraps}`);
   console.log(`Total Black Responses:    ${totalBlackMovesEvaluated}`);
+  console.log(`Total Skipped (In DB):    ${totalSkippedMoves}`);
   console.log(`Total N/A Evals (Null):   ${totalNaEvals}`);
   console.log("========================================================\n");
   console.log("Generation Complete!");

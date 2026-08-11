@@ -5,7 +5,7 @@ const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 async function main() {
     try {
-        await generateRepertoire(START_FEN, 4);
+        await generateRepertoire(START_FEN, 3);
     } catch (e) {
         console.error("Fatal Error:", e);
     } finally {

@@ -154,12 +154,12 @@ async function main() {
   const qgdLines = lines.filter(l => l.sanArray.join(" ").startsWith("d4 d5 c4"));
   qgdLines.sort((a, b) => b.sanArray.length - a.sanArray.length);
 
-  console.log("=== ADVANCE CARO-KANN LINES (DEEPEST) ===\n");
+  console.log("=== ADVANCE CARO-KANN LINES ===\n");
   for (const l of caroLines.slice(0, 3)) {
     console.log(formatLine(l));
   }
 
-  console.log("=== QUEEN'S GAMBIT LINES (DEEPEST) ===\n");
+  console.log("=== QUEEN'S GAMBIT LINES ===\n");
   for (const l of qgdLines.slice(0, 3)) {
     console.log(formatLine(l));
   }
