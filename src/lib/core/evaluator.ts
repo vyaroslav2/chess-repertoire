@@ -126,7 +126,7 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
     const weightedBlackWins = (m.mastersBlackWin * 5) + m.onlineBlackWin;
     const weightedDraws = (m.mastersDraws * 5) + m.onlineDraws;
     
-    const priorWins = 50 * 0.52; // 26
+    const priorWins = 50 * 0.48; // 24
     const smoothedCount = weightedCount + 50;
     const score = (weightedBlackWins + (0.5 * weightedDraws) + priorWins) / smoothedCount;
     
