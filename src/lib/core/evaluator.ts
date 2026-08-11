@@ -268,7 +268,10 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
   if (!selectedMoveSan && candidateMoves.length > 0) {
       let localEngineRun = false;
       let localEnginePvs: any[] = [];
-      const currentBestCp = enginePvs.length > 0 ? getCp(enginePvs[0]) : 0;
+      
+      // Separate the baseline CP for each engine source
+      const lichessBestCp = enginePvs.length > 0 ? getCp(enginePvs[0]) : 0;
+      const chessdbBestCp = chessdbPvs.length > 0 ? getCp(chessdbPvs[0]) : 0;
       
       for (const candidate of candidateMoves) {
           try {
@@ -277,8 +280,8 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
               const lan = moveResult.lan; 
               const currentTolerance = getCpTolerance(moveNumber, false);
   
-              // 1. Check Lichess PVs
-              let status = checkPvTolerance(lan, enginePvs, currentBestCp, currentTolerance);
+              // 1. Check Lichess PVs (using lichessBestCp)
+              let status = checkPvTolerance(lan, enginePvs, lichessBestCp, currentTolerance);
               if (status === 'VALID') {
                   selectedMoveSan = candidate.san;
                   selectedStats = candidate;
@@ -287,8 +290,8 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
               }
               if (status === 'REJECTED') continue;
   
-              // 2. Check ChessDB PVs
-              status = checkPvTolerance(lan, chessdbPvs, currentBestCp, currentTolerance);
+              // 2. Check ChessDB PVs (using chessdbBestCp)
+              status = checkPvTolerance(lan, chessdbPvs, chessdbBestCp, currentTolerance);
               if (status === 'VALID') {
                   selectedMoveSan = candidate.san;
                   selectedStats = candidate;
@@ -305,9 +308,10 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
                   localEngineRun = true;
               }
   
-              const localTolerance = getCpTolerance(moveNumber, true); // Fluctuation allowance active
-              const localBestCp = localEnginePvs.length > 0 ? getCp(localEnginePvs[0]) : currentBestCp;
+              const localTolerance = getCpTolerance(moveNumber, true); 
+              const localBestCp = localEnginePvs.length > 0 ? getCp(localEnginePvs[0]) : lichessBestCp;
               
+              // (using localBestCp)
               status = checkPvTolerance(lan, localEnginePvs, localBestCp, localTolerance);
               if (status === 'VALID') {
                   selectedMoveSan = candidate.san;
@@ -316,8 +320,6 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
                   evalSource = 'Local Stockfish';
                   break;
               }
-              
-              // If REJECTED or still NEED_DEEPER_SEARCH (highly unlikely at MultiPV 15), move to next candidate.
           } catch(e) {}
       }
   }

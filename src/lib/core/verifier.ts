@@ -13,7 +13,6 @@ export function getCpTolerance(moveNumber: number, isLocalEngine = false): numbe
 export const getCp = (pv: any) => pv.cp !== undefined ? pv.cp : (pv.mate > 0 ? 10000 - pv.mate : -10000 - pv.mate);
 
 export async function runLocalStockfish(fen: string, multiPv = 15, depth = 18): Promise<any[]> {
-    // Note: Adjust this path if your executable is named differently or you are on Linux/Mac
     const enginePath = path.resolve(process.cwd(), 'bin', 'stockfish.exe');
     const engine = new Engine(enginePath);
     
@@ -24,15 +23,18 @@ export async function runLocalStockfish(fen: string, multiPv = 15, depth = 18): 
     const result = await engine.go({ depth });
     await engine.quit();
     
-    // Map node-uci output to match Lichess/ChessDB format
+    // Convert side-to-move perspective to absolute White perspective
+    const isBlackToMove = fen.includes(' b ');
+    const multiplier = isBlackToMove ? -1 : 1;
+    
     return result.info
         .filter((info: any) => info.pv)
         .map((info: any) => ({
-            cp: info.score.value,
-            mate: info.score.unit === 'mate' ? info.score.value : null,
+            cp: info.score.value !== undefined ? info.score.value * multiplier : 0,
+            mate: info.score.unit === 'mate' ? info.score.value * multiplier : null,
             moves: info.pv
         }))
-        .sort((a: any, b: any) => getCp(b) - getCp(a)); // Sort highest to lowest CP
+        .sort((a: any, b: any) => getCp(b) - getCp(a)); 
 }
 
 export function checkPvTolerance(candidateLan: string, pvs: any[], bestCp: number, tolerance: number): 'VALID' | 'REJECTED' | 'NEED_DEEPER_SEARCH' {
