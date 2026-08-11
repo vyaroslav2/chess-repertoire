@@ -25,8 +25,30 @@ export function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: numbe
     const aDraw = aTotal > 0 ? amateurData.draws / aTotal : 0;
     const aLoss = aTotal > 0 ? amateurData.black / aTotal : 0;
 
+    let isAmateurTrap = false;
+    let isMasterThreat = false;
+
     if (totalAmateurGames > 0) {
       const amateurWhiteWinRate = aTotal > 0 ? amateurData.white / aTotal : 0;
+      
+      const masterSmoothed = getSmoothedWinRate(
+        mTotal > 0 ? mastersData.white : 0, 
+        mTotal > 0 ? mastersData.draws : 0, 
+        mTotal, 50, 0.52
+      );
+      
+      const amateurSmoothed = getSmoothedWinRate(
+        aTotal > 0 ? amateurData.white : 0, 
+        aTotal > 0 ? amateurData.draws : 0, 
+        aTotal, 50, 0.52
+      );
+
+      if (mTotal >= 15 && masterSmoothed >= 0.58) {
+          isMasterThreat = true;
+      }
+      if (aTotal >= 15 && amateurSmoothed >= 0.58 && !isMasterThreat) {
+          isAmateurTrap = true;
+      }
 
       let requiredProbability = 0.15; 
       if (currentMoveNumber <= 4) requiredProbability = 0.05;
@@ -35,24 +57,20 @@ export function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: numbe
       if (probability >= requiredProbability) {
           include = true;
           reason = "Mainline";
-      } else if (probability >= 0.01 && amateurWhiteWinRate >= 0.55) {
+      } else if (isMasterThreat) {
           include = true;
-          reason = "Amateur Trap (Pending Eval)";
-      } else if (probability > 0) {
-          const masterSmoothed = getSmoothedWinRate(
-            mTotal > 0 ? mastersData.white : 0, 
-            mTotal > 0 ? mastersData.draws : 0, 
-            mTotal, 50, 0.52
-          );
-          if (mTotal >= 15 && masterSmoothed >= 0.58) {
-              include = true;
-              reason = "Master Threat (Pending Eval)";
-          }
+          reason = "Master Threat";
+          isTrap = true;
+      } else if (isAmateurTrap || (probability >= 0.01 && amateurWhiteWinRate >= 0.55)) {
+          include = true;
+          reason = "Amateur Trap";
+          isTrap = true;
+          isAmateurTrap = true; // ensure it's flagged even if it only hit the 55% raw filter
       }
     }
 
     return { 
-      include, reason, isTrap, probability,
+      include, reason, isTrap, isAmateurTrap, isMasterThreat, probability,
       mastersGames: mTotal, mastersWin: mWin, mastersDraw: mDraw, mastersLoss: mLoss,
       lichessGames: aTotal, lichessWin: aWin, lichessDraw: aDraw, lichessLoss: aLoss
     };

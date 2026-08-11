@@ -113,8 +113,8 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
     totalWhiteMovesFound += whiteCandidates.length;
 
     for (const whiteMove of whiteCandidates) {
-      let isTrap = false;
-      let isThreat = false;
+      let isTrap = whiteMove.isAmateurTrap;
+      let isThreat = whiteMove.isMasterThreat;
       let isMainline = whiteMove.reason === "Mainline";
       let tag = whiteMove.reason.startsWith("Amateur Trap") ? "[TRAP] " : (whiteMove.reason.startsWith("Master Threat") ? "[THREAT] " : "");
 
@@ -132,6 +132,15 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
       let posAfterWhiteNode = await getRepertoireNode(repertoire.id, newPgn);
       if (!posAfterWhiteNode) {
           posAfterWhiteNode = await createRepertoireNode(repertoire.id, fenAfterWhite, newPgn, incomingPathProb);
+          if (isTrap || isThreat) {
+              posAfterWhiteNode = await prisma.repertoireNode.update({
+                  where: { id: posAfterWhiteNode.id },
+                  data: { isMasterThreat: isThreat, isAmateurTrap: isTrap }
+              });
+              let finalTag = isThreat ? '[THREAT]' : '[TRAP]';
+              let finalLabel = isThreat ? 'Master Threat' : 'Amateur Trap';
+              console.log(`${finalTag} Flagged ${whiteMove.san} as ${finalLabel}! (Saved to DB)`);
+          }
       } else {
           await prisma.repertoireNode.update({
               where: { id: posAfterWhiteNode.id },
@@ -161,9 +170,6 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
           tempChess.move(dbBlackMove.san);
           const fenAfterBlack = tempChess.fen();
           
-          if (posAfterWhiteNode.isAmateurTrap) isTrap = true;
-          if (posAfterWhiteNode.isMasterThreat) isThreat = true;
-          
           if (isMainline) totalWhiteMainlines++;
           if (isTrap) {
               totalWhiteTraps++;
@@ -189,45 +195,7 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
       }
 
       const algoResult = await evaluateBlackMove(fenAfterWhite, tempChess, node.currentMoveNumber, newHistory);
-      
-      const evalIsSafe = algoResult.selectedEngineCp !== null && algoResult.selectedEngineCp >= -200 && algoResult.selectedEngineCp <= 60;
 
-      if (evalIsSafe) {
-          const masterSmoothed = getSmoothedWinRate(
-              whiteMove.mastersWin * whiteMove.mastersGames,
-              whiteMove.mastersDraw * whiteMove.mastersGames,
-              whiteMove.mastersGames,
-              50, 0.52 
-          );
-          
-          const amateurSmoothed = getSmoothedWinRate(
-              whiteMove.lichessWin * whiteMove.lichessGames,
-              whiteMove.lichessDraw * whiteMove.lichessGames,
-              whiteMove.lichessGames,
-              50, 0.52
-          );
-
-          let isMasterThreat = false;
-          let isAmateurTrap = false;
-
-          if (whiteMove.mastersGames >= 15 && masterSmoothed >= 0.58) {
-              isMasterThreat = true;
-          }
-          
-          if (whiteMove.lichessGames >= 15 && amateurSmoothed >= 0.58 && !isMasterThreat) {
-              isAmateurTrap = true;
-          }
-
-          if (isMasterThreat || isAmateurTrap) {
-              await prisma.repertoireNode.update({
-                  where: { id: posAfterWhiteNode.id },
-                  data: { isMasterThreat, isAmateurTrap }
-              });
-              let finalTag = isMasterThreat ? '[THREAT]' : '[TRAP]';
-              let finalLabel = isMasterThreat ? 'Master Threat' : 'Amateur Trap';
-              console.log(`${finalTag} Flagged ${whiteMove.san} as ${finalLabel}! (Eval: ${algoResult.selectedEngineCp})`);
-          }
-      }
 
       if (!algoResult.selectedMoveSan) {
         console.log(`[ALERT - ERROR] No valid Black move found after ${newPgn}. Stopping branch.`);
@@ -300,9 +268,7 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
         }
       });
 
-      if (posAfterWhiteNode.isAmateurTrap) isTrap = true;
-      if (posAfterWhiteNode.isMasterThreat) isThreat = true;
-      
+
       if (isMainline) totalWhiteMainlines++;
       if (isTrap) totalWhiteTraps++;
       if (isThreat) totalWhiteThreats++;
