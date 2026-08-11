@@ -82,8 +82,8 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
       totalBranchesAborted++;
       continue;
     }
-    if (node.trapDepth >= 3) {
-      console.log(`[ABORTED] Trap refutation limit reached (3). Stopping branch (0 White moves processed for this node).`);
+    if (node.trapDepth >= 8) {
+      console.log(`[ABORTED] Trap refutation limit reached (8). Stopping branch (0 White moves processed for this node).`);
       totalBranchesAborted++;
       continue;
     }
@@ -129,11 +129,41 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
       await getOrCreatePositionCache(fenAfterWhite, undefined, newHistory);
       
       const incomingPathProb = node.cumulativeProb * (whiteMove.probability || 1.0);
-      let posAfterWhiteNode = await getRepertoireNode(repertoire.id, newPgn);
+      let posAfterWhiteNode = await prisma.repertoireNode.findFirst({
+          where: { repertoireId: repertoire.id, fen: fenAfterWhite },
+          include: { stats: true }
+      });
+      
+      if (posAfterWhiteNode && posAfterWhiteNode.stats.length > 0) {
+          console.log(`[TRANSPOSITION] FEN already fully expanded: ${fenAfterWhite}. Merging tree...`);
+          
+          await createRepertoireMove({
+              repertoireId: repertoire.id,
+              fromNodeId: node.nodeId,
+              toNodeId: posAfterWhiteNode.id,
+              san: whiteMove.san,
+              playerTurn: "OPPONENT",
+              prob: whiteMove.probability,
+              trueProbability: incomingPathProb
+          });
+          
+          await prisma.repertoireNode.update({
+              where: { id: posAfterWhiteNode.id },
+              data: { cumulativeProb: Math.max(posAfterWhiteNode.cumulativeProb, incomingPathProb) }
+          });
+          
+          if (isMainline) totalWhiteMainlines++;
+          if (isTrap) totalWhiteTraps++;
+          if (isThreat) totalWhiteThreats++;
+          
+          totalSkippedMoves++;
+          continue; 
+      }
+      
       if (!posAfterWhiteNode) {
           posAfterWhiteNode = await createRepertoireNode(repertoire.id, fenAfterWhite, newPgn, incomingPathProb);
           if (isTrap || isThreat) {
-              posAfterWhiteNode = await prisma.repertoireNode.update({
+              await prisma.repertoireNode.update({
                   where: { id: posAfterWhiteNode.id },
                   data: { isMasterThreat: isThreat, isAmateurTrap: isTrap }
               });
@@ -141,11 +171,6 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
               let finalLabel = isThreat ? 'Master Threat' : 'Amateur Trap';
               console.log(`${finalTag} Flagged ${whiteMove.san} as ${finalLabel}! (Saved to DB)`);
           }
-      } else {
-          await prisma.repertoireNode.update({
-              where: { id: posAfterWhiteNode.id },
-              data: { cumulativeProb: Math.max(posAfterWhiteNode.cumulativeProb, incomingPathProb) }
-          });
       }
 
       await createRepertoireMove({
