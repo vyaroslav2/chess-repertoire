@@ -108,6 +108,7 @@ model RepertoireMove {
   lichessCp       Float?
   chessdbCp       Float?
   engineSource    String?
+  isDeepVerified  Boolean  @default(false)
 
   fromNode        RepertoireNode @relation("OutgoingMoves", fields: [fromNodeId], references: [id], onDelete: Cascade)
   toNode          RepertoireNode @relation("IncomingMoves", fields: [toNodeId], references: [id], onDelete: Cascade)

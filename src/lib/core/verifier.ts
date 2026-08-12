@@ -12,7 +12,7 @@ export function getCpTolerance(moveNumber: number, isLocalEngine = false): numbe
 // Safely handles both CP and Forced Mates (using 30000 as extreme baseline)
 export const getCp = (pv: any) => pv.mate !== null ? (pv.mate > 0 ? 30000 - pv.mate : -30000 - pv.mate) : (pv.cp !== undefined ? pv.cp : 0);
 
-export async function runLocalStockfish(fen: string, multiPv = 15, depth = 18): Promise<any[]> {
+export async function runLocalStockfish(fen: string, multiPv = 15, depth = 18, searchmoves?: string): Promise<any[]> {
     const enginePath = path.resolve(process.cwd(), 'bin', 'stockfish.exe');
     const engine = new Engine(enginePath);
     
@@ -20,7 +20,12 @@ export async function runLocalStockfish(fen: string, multiPv = 15, depth = 18): 
     await engine.setoption('MultiPV', multiPv.toString());
     await engine.position(fen);
     
-    const result = await engine.go({ depth });
+    const goParams: any = { depth };
+    if (searchmoves) {
+        goParams.searchmoves = searchmoves;
+    }
+    
+    const result = await engine.go(goParams);
     await engine.quit();
     
     // Convert side-to-move perspective to absolute White perspective
