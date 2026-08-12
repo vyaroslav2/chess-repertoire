@@ -2,7 +2,7 @@ import * as readline from 'readline/promises';
 import { stdin as processStdin, stdout as processStdout } from 'process';
 
 export const GlobalState = {
-    useLichessEval: true
+    lichessCloudEvals: false
 };
 
 export const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
@@ -39,7 +39,7 @@ export async function fetchWithRetry(url: string, retries = 10, useToken = true,
             console.log("Stopping script.");
             process.exit(0);
         } else if (choice === 'c' && apiType === 'eval') {
-            GlobalState.useLichessEval = false;
+            GlobalState.lichessCloudEvals = false;
             return null;
         } else if (choice === 'n') {
             return null;
@@ -62,7 +62,7 @@ export async function fetchWithRetry(url: string, retries = 10, useToken = true,
               console.log("Stopping script.");
               process.exit(0);
           } else if (choice === 'c' && apiType === 'eval') {
-              GlobalState.useLichessEval = false;
+              GlobalState.lichessCloudEvals = false;
               return null;
           } else if (choice === 'n') {
               return null;

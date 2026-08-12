@@ -177,7 +177,7 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
     await delay(1000);
     try {
       let cloudData: any = null;
-      if (GlobalState.useLichessEval) {
+      if (GlobalState.lichessCloudEvals) {
         const cloudUrl = `https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(normFen)}&multiPv=5`;
         cloudData = await fetchWithRetry(cloudUrl, 10, false, 'eval');
       }
