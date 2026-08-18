@@ -42,7 +42,9 @@ Notes:
     Third, write into it: which script made it, its process id, and the date and time it started.
 
     Fourth, on refusal, read the file back and ask the operating system whether that process is still alive. Dead means the lock is stranded — clear it and carry on. Alive means refuse, and print what the file says, with the date included and the full path of the file: `treegen (process 8412) has been running since 2026-08-15 09:42. Lock file: <path>`.
-
+    
+    Fifth, make removal check the name: read which script created the lockfile and delete it only if it is this script's own. Today removal deletes the file no matter what, and is safe only because of where it happens to be called from. The check makes it safe by design, so a script added later cannot remove a lockfile belonging to a run in progress.
+		
     Known limitation, accepted rather than overlooked: process ids get reused, so a stranded lock naming an id that some unrelated program now holds will look live for ever. Checking the recorded start time against the process's real start time would catch that, but it means running a Windows command and reading its output, which is more machinery than it is worth here. So the check can be wrong in two ways, and neither leaves things worse than they are today: wrongly saying dead lets two scripts run together, which is exactly what happens now if you start two by hand; wrongly saying alive means deleting the file by hand, which is what every stranded lock needs today.
 
     Which is why the last call stays with you, by design. A lockfile must never be cleared on a guess — deleting one while a run really is going means two programs writing to the same database. The code clears it only on evidence that the owner is gone; where there is no evidence it refuses and prints enough for you to judge. If the message says something is running and you know nothing is, check for open terminal windows, and delete the file at the path printed. After a reboot, any lockfile still present is certainly stranded. Printing the path is what makes that a five-second job rather than a hunt.
