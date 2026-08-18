@@ -1,6 +1,6 @@
 ---
 tags:
-  - in-progress
+  - processed
 ---
 ### R.06 — Send messages to the log
 
@@ -18,7 +18,7 @@ This one step is what makes the log complete. Nothing else in the project writes
 
 The error channel being left alone means errors never reach the log. When a run crashes, the failure is printed through that channel: it appears on screen, and the log simply stops mid-sentence. Then the cleanup step adds the closing marker anyway, so the file reads like a run that finished normally.[^1]
 
-==Because each line is written and waited for, the log is always complete up to the moment of a crash — nothing is lost in a buffer. The cost is thousands of small writes.[^2]==
+Because each line is written and waited for, the log is always complete up to the moment of a crash — nothing is lost in a buffer. The cost is thousands of small writes.[^2]
 
 If the log file ever becomes unwritable while a run is going — the folder deleted, moved, or locked by the syncing — then the next message printed fails, and that failure travels back to whatever was printing. The run stops. So a problem with the log can end a run that was otherwise going perfectly well.[^3]
 

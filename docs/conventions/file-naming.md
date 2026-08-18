@@ -1,4 +1,6 @@
-Folders carry the category. Filenames stay plain: ASCII only, hyphens instead of spaces, and none of the typographic characters — no en or em dashes (– —), no accents. They are awkward to type in a terminal and have to be quoted in commands. Lower case everywhere except codes and IDs, which keep their capitals because the capital is part of the name: R, A1, B2 for diagrams, R.01, A4.12 for box notes. Every note is a Markdown file (.md). Obsidian adds the extension itself; it is never typed in a link.
+Folders carry the category. Filenames stay plain: ASCII only, hyphens instead of spaces, and none of the typographic characters — no en or em dashes (– —), no accents. They are awkward to type in a terminal and have to be quoted in commands. Lower case everywhere except codes and IDs, which keep their capitals because the capital is part of the name: R, A1, B2 for diagrams, R.01, A4.12 for box notes. Every note is a Markdown file (.md). Obsidian adds the extension itself; it is never typed in a link. 
+
+Probabilities are written as percentages in the notes; the code stores them as fractions of one.
 
 conventions/  how we work — this file, tag-vocabulary
 diagrams/     the verified diagrams, one per letter code (R, A1, B2 …)
@@ -11,6 +13,9 @@ Box notes are named by their ID alone, because the ID is the name and it is
 what every cross-reference points at. Never rename one. Moving one between
 folders is safe — Obsidian links by name, not by path — but changing the
 name breaks every link to it.
+
+Diagram files carry the .excalidraw suffix in their name; the plain code (A2, PC)
+belongs to the diagram's intention note, so [[A2]] always means the note.
 
 Each intentions folder holds a note named after the diagram (R.md, A1.md)
 carrying its purpose in one sentence, plus anything decided about the
