@@ -31,5 +31,5 @@ Notes:
 
 [^2]: #note Taking from the front, so that short lines finish before long ones start, is the decision that shapes the whole tree. It is made in [[A1.16]], where items are taken off — this box only seeds the queue.
 
-[^3]: #question One counter, two flags. Amateur traps and master threats each have their own flag on a node, but they share a single counter — the code calls it the trap depth, and either kind raises it. The limit of eight in [[A2.17]] therefore applies to both together. Open, because the threat idea may be dropped; if it is, one counter and one flag is the natural result and the naming stops being confusing. Not for the near future. 
+ 
 

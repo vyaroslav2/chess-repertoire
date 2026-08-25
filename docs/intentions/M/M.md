@@ -253,7 +253,7 @@ The current helper calculates:
 (total games + 50)
 ```
 
-#question White smoothing is not currently confirmed as intended policy. Its formula and numbers need revisiting if White filtering needs smoothing again.
+#deferred White smoothing is not currently confirmed as intended policy. Its formula and numbers need revisiting if White filtering needs smoothing again.
 
 Do not refactor White and Black smoothing into one shared formula merely because their current maths looks similar.
 
