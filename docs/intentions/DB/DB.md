@@ -2,1029 +2,2440 @@
 tags:
   - processed
 ---
-
 # DB — Database structure and ownership
-
+  
 ## Intention
+
+
 
 The database should separate four different kinds of data clearly:
 
+  
+
 ```text
+
 permanent chess-position identity
+
 repertoire-specific tree structure
+
 temporary human-data snapshots
+
 reusable engine evaluations
+
 ```
+
+  
 
 These parts may refer to the same chess position, but they have different lifetimes and must not accidentally delete or invalidate one another.
 
+  
+
 The current database mixes some of these responsibilities. In particular, `PositionCache` currently owns `RepertoireNode` rows through a cascading foreign key, so deleting cached position data can delete repertoire structure and study data. That ownership direction is not intended.
+
+  
 
 ## DB.01 — User
 
+  
+
 One row represents one user.
+
+  
 
 Stores:
 
+  
+
 ```text
+
 id
+
 username
+
 ```
+
+  
 
 A user may own many repertoires.
 
+  
+
 ## DB.02 — Repertoire
+
+  
 
 One row represents one independent repertoire and study set.
 
+  
+
 Stores at least:
 
+  
+
 ```text
+
 id
+
 title
+
 colour: White or Black
+
 user
+
+generationStatus
+
 ```
+
+  
+
+`generationStatus` records whether the repertoire is currently being generated:
+
+  
+
+```text
+
+IDLE
+
+GENERATING
+
+```
+
+  
+
+While `generationStatus = GENERATING`, the app must block the user from interacting with the repertoire being rebuilt. The backend must enforce the same lock rather than relying only on disabled UI controls.
+
+  
+
+The exact crash/interruption recovery mechanism for a stale `GENERATING` state will be settled separately; it must not leave the repertoire permanently unusable.
+
+  
 
 A repertoire always starts from the normal chess starting position.
 
+  
+
 There is no custom starting-position mode.
+
+  
 
 The repertoire colour is fixed for the lifetime of that repertoire:
 
+  
+
 ```text
+
 White repertoire
+
 → White moves are RESPONSE
+
 → Black moves are OPPONENT
 
+  
+
 Black repertoire
+
 → Black moves are RESPONSE
+
 → White moves are OPPONENT
+
 ```
+
+  
 
 If the opposite colour is wanted, that is a different repertoire.
 
+  
+
 SRS progress is also repertoire-specific. Two repertoires may happen to contain the same `PositionKey + RESPONSE`, but they still have separate cards and study progress.
+
+  
 
 ### Human-explorer settings
 
+  
+
 #roadmap Rating-range, time-control and similar human-explorer settings are future repertoire-definition options and are out of scope for the current implementation.
+
+  
 
 When those options eventually exist, a different set of human-explorer settings should be treated as a different repertoire/study set rather than modifying an existing repertoire in place.
 
+  
+
 ## DB.03 — Position
+
+  
 
 Replace the current disposable `PositionCache` concept with a permanent global `Position`.
 
+  
+
 One row represents one unique [[position-key]] across the whole application.
 
+  
+
 ```text
+
 Position
+
 → global
+
 → one row per PositionKey
+
 ```
+
+  
 
 Stores:
 
+  
+
 ```text
+
 PositionKey
+
 ECO, if known
+
 openingName, if known
+
 ```
+
+  
 
 `ECO` and `openingName` belong to the unique normalised position and therefore live here.
 
+  
+
 Wikibooks text does **not** belong here. Wikibooks information is history-specific and follows the behaviour already established in [[W]].
 
+  
+
 ### Lifetime
+
+  
 
 A `Position` is permanent shared chess identity.
 
+  
+
 Deleting:
 
+  
+
 ```text
+
 a repertoire
+
 a repertoire node
+
 a branch
+
 a flashcard
+
 human cache data
+
 ```
+
+  
 
 must not delete the `Position`.
 
-Likewise, deleting human cache data must not delete reusable engine evaluations attached to that position.
+  
+
+Likewise, deleting human cache data must not delete reusable engine evaluations.
+
+  
 
 The intended relationship is:
 
+  
+
 ```text
+
 Position
-→ shared chess identity
+
+→ shared PositionKey identity
+
+  
 
 RepertoireNode
+
 → repertoire structure that uses that position
 
+  
+
 human cache
-→ temporary statistics about that position
+
+→ temporary statistics about that PositionKey
+
+  
 
 engine cache
-→ reusable evaluations of that position
+
+→ reusable evaluation of an exact FullFen
+
 ```
 
-None of those cache lifetimes should own the repertoire tree.
+  
+
+The engine cache may still refer back to the shared `Position` for grouping or lookup, but `PositionKey` alone is not sufficient engine-cache identity.
+
+  
+
+None of these cache lifetimes should own the repertoire tree.
+
+  
 
 ## DB.04 — HumanDataSnapshot
 
+  
+
 One row represents one coherent period of human-explorer data for one repertoire.
+
+  
 
 Stores at least:
 
+  
+
 ```text
+
 id
+
 repertoireId
+
 startedAt
+
 ```
+
+  
 
 When explorer population settings are eventually implemented, the snapshot also records the exact frozen settings used for that dataset.
 
+  
+
 A snapshot belongs to one repertoire, not globally to every repertoire.
+
+  
 
 This is necessary because human move statistics may later depend on repertoire-specific choices such as:
 
+  
+
 ```text
+
 rating range
+
 time controls
+
 other explorer filters
+
 ```
+
+  
 
 Two repertoires may therefore legitimately have different human statistics for the same `PositionKey`.
 
+  
+
 ### Snapshot lifetime
+
+  
 
 A human snapshot is reusable for **one week or longer**.
 
+  
+
 Seven days does not mean:
 
+  
+
 ```text
+
 168 hours reached
+
 → data instantly expires
+
 ```
+
+  
 
 Instead:
 
+  
+
 ```text
+
 snapshot age < 7 days
+
 → definitely reuse
 
+  
+
 snapshot age >= 7 days
+
 → eligible for replacement
+
 → keep using until a deliberate fresh build starts
+
 ```
+
+  
 
 This prevents a repertoire generation from crossing an expiry boundary halfway through and mixing two human datasets.
 
-When a fresh snapshot is deliberately started:
+  
+
+### Starting a fresh snapshot
+
+  
+
+Starting a fresh human-data snapshot is a complete repertoire-tree rebuild, not an in-place conversion of the old tree.
+
+  
+
+The intended sequence is:
+
+  
 
 ```text
-delete all old human move data for this repertoire
-→ create new HumanDataSnapshot
-→ start generation from root
-→ fetch human data as positions are reached
-→ attach everything to the new snapshot
+
+lock the repertoire for generation
+
+→ keep existing flashcards/SRS temporarily
+
+→ delete the old generated repertoire tree
+
+→ delete the old human move data for this repertoire
+
+→ create the new HumanDataSnapshot
+
+→ generate again from the normal root position
+
+→ fetch new human data as positions are reached
+
+→ attach every new node and move to the new snapshot
+
 ```
 
-If generation stops halfway through, that simply means the new snapshot is incomplete. Missing positions are fetched when generation resumes.
+  
 
-There is no need to preserve the previous human snapshot as a fallback copy.
+Reusable engine caches are independent and remain intact.
+
+  
+
+The current generated tree must never contain a mixture of nodes or moves from two human-data snapshots. The invariant is:
+
+  
+
+```text
+
+every node and move in the current generated repertoire tree
+
+→ belongs to the repertoire's current HumanDataSnapshot
+
+```
+
+  
+
+If generation stops halfway through, the new snapshot and tree are simply incomplete. Generation resumes using that same snapshot and fetches missing human data as required.
+
+  
+
+The previous generated tree is not kept as a fallback copy.
+
+  
+
+### Flashcards during a fresh rebuild
+
+  
+
+Existing flashcards are not deleted merely because the old tree is removed.
+
+  
+
+During rebuilding:
+
+  
+
+```text
+
+same repertoire
+
++ same PositionKey
+
++ same RESPONSE
+
+→ keep the existing flashcard
+
+→ keep all SRS progress
+
+```
+
+  
+
+```text
+
+same PositionKey
+
++ different RESPONSE
+
+→ old card is obsolete
+
+→ create a fresh card for the new RESPONSE
+
+```
+
+  
+
+Cards that have not reappeared must remain temporarily until the rebuild completes successfully.
+
+  
+
+Only after successful completion:
+
+  
+
+```text
+
+old flashcard not represented in the finished new tree
+
+→ delete the flashcard
+
+→ delete its SRS state
+
+```
+
+  
+
+This prevents an interrupted rebuild from destroying study progress for positions that would have reappeared later.
+
+  
+
+After success or an explicitly handled stop/failure, the generation lock is released.
+
+  
+
+There is no need to preserve the previous human snapshot historically.
+
+  
 
 ## DB.05 — HumanExplorerFetch
 
+  
+
 One row records that one human database was successfully queried for one position under one snapshot.
+
+  
 
 Conceptually:
 
+  
+
 ```text
+
 Position
+
 + HumanDataSnapshot
+
 + database type
+
 → successful fetch record
+
 ```
+
+  
 
 Database type:
 
+  
+
 ```text
+
 Masters
+
 Elite
+
 Amateur
+
 ```
+
+  
 
 This replaces the fake `_EMPTY_` move.
 
+  
+
 The distinction becomes:
 
+  
+
 ```text
+
 no HumanExplorerFetch
+
 → this source has not been fetched
+
 ```
 
+  
+
 ```text
+
 HumanExplorerFetch exists
+
 + zero human move rows
+
 → source was fetched successfully
+
 → genuinely no moves were returned
+
 ```
 
+  
+
 ```text
+
 HumanExplorerFetch exists
+
 + move rows exist
+
 → source was fetched successfully
+
 → use those moves
+
 ```
+
+  
 
 The successful fetch marker and its move rows represent one complete fetch result.
 
+  
+
 ## DB.06 — ExplorerMoveCache
+
+  
 
 One row stores the human-game statistics for one actual chess move returned by one human database.
 
+  
+
 Identity:
 
+  
+
 ```text
+
 Position
+
 + HumanDataSnapshot
+
 + database type
+
 + UCI/LAN move
+
 ```
+
+  
 
 Stores:
 
+  
+
 ```text
+
 UCI/LAN move
+
 SAN
+
 games
+
 White wins
+
 draws
+
 Black wins
+
 ```
+
+  
 
 Human explorer APIs may return SAN.
 
+  
+
 The cache converts that SAN to UCI/LAN using the exact source position before storing the move.
 
+  
+
 ```text
+
 API SAN
+
 → validate against Position
+
 → convert to UCI/LAN
+
 → UCI/LAN becomes authoritative identity
+
 → keep SAN as source/display text
+
 ```
+
+  
 
 This keeps human-cache move identity consistent with the rest of the project.
 
+  
+
 If even one returned SAN cannot be legally converted from the exact source position:
 
+  
+
 ```text
+
 → reject the complete database fetch
+
 → store none of its move rows
+
 → do not mark the fetch successful
+
 → report/log the invalid response
+
 ```
+
+  
 
 Do not silently drop one broken move and preserve a partial statistical dataset.
 
+  
+
 ### Lifetime
+
+  
 
 Human move rows are temporary.
 
+  
+
 They belong to one `HumanDataSnapshot`.
+
+  
 
 Starting a fresh snapshot for that repertoire removes the previous human move cache.
 
+  
+
 They are reusable only within the lifetime of their snapshot.
+
+  
 
 ## DB.07 — RemoteEngineEvalCache
 
+  
+
 Remote engine/API evaluations are independent of human snapshots and are reusable indefinitely.
+
+  
 
 This cache is for remote sources such as:
 
+  
+
 ```text
+
 Lichess Cloud Evaluation
+
 ChessDB
+
 ```
+
+  
+
+Engine-cache identity must use the exact concrete `FullFen` that was evaluated.
+
+  
 
 One current entry is kept per:
 
+  
+
 ```text
-Position
+
+FullFen
+
 + UCI/LAN move
+
 + source
+
 ```
 
-The cache keeps the latest available evaluation for that source rather than preserving historical versions.
+  
 
-Stores conceptually:
+Do not identify an engine evaluation only by `PositionKey`.
+
+  
+
+Two concrete progressions may share one `PositionKey` while having different rule-sensitive FEN state, particularly the half-move clock.
+
+  
+
+For example:
+
+  
 
 ```text
-Position
-UCI/LAN move
-SAN, if useful
-cp or mate
-rank, if supplied/useful
-source
-sourceVersion, if the provider exposes one
+
+same PositionKey
+
+half-move clock = 0
+
 ```
 
-`sourceVersion` is metadata, not part of cache identity.
-
-If a newer result from the same source is stored:
-
-```text
-same Position
-+ same move
-+ same source
-→ replace old result
-→ retain newest result
-```
-
-Engine evaluations have no routine expiry.
-
-Human snapshot refreshes do not delete them.
-
-## DB.08 — RemoteEngineFetch
-
-Remote engine/API fetch status is tracked independently from stored evaluation rows.
-
-Conceptually:
-
-```text
-Position
-+ source
-→ successfully fetched
-```
-
-This distinguishes:
-
-```text
-not fetched
-```
-
-from:
-
-```text
-fetched successfully but nothing usable returned
-```
-
-Local Deep Stockfish does not participate in this remote-fetch status.
-
-This also prevents the old behaviour where the existence of some unrelated engine-cache row could incorrectly suppress a needed API fetch.
-
-## DB.09 — LocalDeepEvalCache
-
-Local Deep Stockfish has a separate cache because its result has a different meaning and shape from remote engine rows.
-
-Only **deep** local Stockfish results are stored.
-
-There is no shallow local-engine cache.
-
-One Local Deep Stockfish result always contains two explicit evaluations:
-
-```text
-checked move
-+ checked move evaluation
-
-top move
-+ top move evaluation
-```
-
-They belong together.
-
-Stores conceptually:
-
-```text
-Position
-
-checked UCI/LAN move
-checked cp or mate
-
-top UCI/LAN move
-top cp or mate
-
-Stockfish version
-```
-
-If the checked move itself is also Stockfish's top move, both halves are still stored explicitly:
-
-```text
-checked move = e7e5
-checked evaluation = +0.20
-
-top move = e7e5
-top evaluation = +0.20
-```
-
-Do not rely on implied equality.
-
-A Local Deep Stockfish cache entry is invalid if either half is missing.
-
-### Version behaviour
-
-The cache keeps one current Local Deep Stockfish result per checked position/move.
-
-If the local engine version changes and the move is evaluated again:
-
-```text
-old result
-→ replaced
-
-new result
-→ stored with current Stockfish version
-```
-
-Historical engine versions are not retained as separate cache records.
-
-## DB.10 — RepertoireNode
-
-One row represents one genuine stored progression in one repertoire.
-
-Stores conceptually:
-
-```text
-id
-repertoireId
-
-FullFen
-PositionKey
-exact history/PGN
-
-cumulativeProb
-isTransposition
-humanDataSnapshotId
-```
-
-The old:
-
-```text
-isAmateurTrap
-isMasterThreat
-```
-
-fields are removed from the intended node model.
-
-### FullFen and PositionKey
-
-A node stores both:
-
-```text
-FullFen
-→ authoritative concrete progression state
-
-PositionKey
-→ shared chess-position identity
-```
-
-The invariant is:
-
-```text
-positionKeyFromFen(fullFen) === positionKey
-```
-
-The node must not reconstruct its `FullFen` from a shortened position key.
-
-### Exact history
-
-Keep the exact PGN/history on every `RepertoireNode`.
-
-This is useful for:
-
-```text
-exact progression lookup
-debugging
-history-specific behaviour
-Wikibooks
-transposition handling
-```
-
-The graph of move edges represents the repertoire structure, but the node's exact history remains valuable persistent state.
-
-### Identity
-
-Within one repertoire:
-
-```text
-repertoireId + exact history
-→ exact progression lookup
-```
+  
 
 and:
 
-```text
-repertoireId + PositionKey
-→ one canonical shared chess position
-```
-
-Different histories may reach the same `PositionKey`.
-
-The first surviving progression owns the canonical node from the transposition point onward.
-
-A later line:
+  
 
 ```text
-keeps all of its genuine nodes before the merge
-→ reaches the existing PositionKey
-→ final edge points to existing canonical node
-→ duplicate continuation stops
+
+same PositionKey
+
+half-move clock = 99
+
 ```
 
-### Transposition flag
+  
 
-`isTransposition` is derived from the current repertoire graph.
+must not automatically share one cached engine evaluation.
 
-`2 or more distinct incoming routes → true`
+  
 
-`0 or 1 distinct incoming route → false`
+The cache keeps the latest available evaluation for that exact `FullFen + move + source` rather than preserving historical versions.
 
-It exists for convenient querying and UI use.
-
-The graph is the source of truth. If rerunning or rebuilding the repertoire changes the incoming routes, this flag must be updated so that stale transposition state is never left behind.
-### Cache independence
-
-`RepertoireNode` must not be destructively owned by `Position` or any cache row.
-
-Deleting cached data must never cascade into:
-
-```text
-repertoire nodes
-repertoire moves
-flashcards
-SRS progress
-```
-
-### cumulativeProb
-
-`cumulativeProb` remains physically stored on the node for fast access.
-
-It is derived from incoming route probabilities:
-
-```text
-node.cumulativeProb
-= sum of incoming unique routeProbability contributions
-```
-
-The root is the special starting case:
-
-```text
-root cumulativeProb = 1.0
-```
-
-The incoming route data is the source of truth; the node field is a cached aggregate.
-
-## DB.11 — RepertoireMove
-
-One row represents one move/edge between two repertoire nodes.
+  
 
 Stores conceptually:
 
-```text
-id
-repertoireId
+  
 
-fromNodeId
-toNodeId
+```text
+
+FullFen
+
+Position, if useful as a shared-position reference
 
 UCI/LAN move
+
+SAN, if useful
+
+cp or mate
+
+rank, if supplied/useful
+
+source
+
+sourceVersion, if the provider exposes one
+
+```
+
+  
+
+`sourceVersion` is metadata, not part of cache identity.
+
+  
+
+If a newer result from the same source is stored:
+
+  
+
+```text
+
+same FullFen
+
++ same move
+
++ same source
+
+→ replace old result
+
+→ retain newest result
+
+```
+
+  
+
+Engine evaluations have no routine expiry.
+
+  
+
+Human snapshot refreshes do not delete them.
+
+  
+
+## DB.08 — RemoteEngineFetch
+
+  
+
+Remote engine/API fetch status is tracked independently from stored evaluation rows.
+
+  
+
+Fetch status also belongs to the exact concrete FEN that was queried.
+
+  
+
+Conceptually:
+
+  
+
+```text
+
+FullFen
+
++ source
+
+→ successfully fetched
+
+```
+
+  
+
+This distinguishes:
+
+  
+
+```text
+
+not fetched
+
+```
+
+  
+
+from:
+
+  
+
+```text
+
+fetched successfully but nothing usable returned
+
+```
+
+  
+
+A successful fetch for another `FullFen` with the same `PositionKey` must not suppress a required fetch for this concrete `FullFen`.
+
+  
+
+Local Deep Stockfish does not participate in this remote-fetch status.
+
+  
+
+This also prevents the old behaviour where the existence of some unrelated engine-cache row could incorrectly suppress a needed API fetch.
+
+  
+
+## DB.09 — LocalDeepEvalCache
+
+  
+
+Local Deep Stockfish has a separate cache because its result has a different meaning and shape from remote engine rows.
+
+  
+
+Only **deep** local Stockfish results are stored.
+
+  
+
+There is no shallow local-engine cache.
+
+  
+
+Local Deep Stockfish cache identity uses the exact `FullFen` supplied to Stockfish.
+
+  
+
+One result is identified conceptually by:
+
+  
+
+```text
+
+FullFen
+
++ checked UCI/LAN move
+
+```
+
+  
+
+Do not identify a Local Deep Stockfish result only by `PositionKey`.
+
+  
+
+Two repertoire nodes may share one `PositionKey` but have different concrete `FullFen` values. Their engine results must not be treated as interchangeable when the discarded FEN fields can affect rule-sensitive evaluation.
+
+  
+
+One Local Deep Stockfish result always contains two explicit evaluations:
+
+  
+
+```text
+
+checked move
+
++ checked move evaluation
+
+  
+
+top move
+
++ top move evaluation
+
+```
+
+  
+
+They belong together.
+
+  
+
+Stores conceptually:
+
+  
+
+```text
+
+FullFen
+
+Position, if useful as a shared-position reference
+
+  
+
+checked UCI/LAN move
+
+checked cp or mate
+
+  
+
+top UCI/LAN move
+
+top cp or mate
+
+  
+
+Stockfish version
+
+```
+
+  
+
+If the checked move itself is also Stockfish's top move, both halves are still stored explicitly:
+
+  
+
+```text
+
+checked move = e7e5
+
+checked evaluation = +0.20
+
+  
+
+top move = e7e5
+
+top evaluation = +0.20
+
+```
+
+  
+
+Do not rely on implied equality.
+
+  
+
+A Local Deep Stockfish cache entry is invalid if either half is missing.
+
+  
+
+### Version behaviour
+
+  
+
+The cache keeps one current Local Deep Stockfish result per exact `FullFen + checked move`.
+
+  
+
+If the local engine version changes and the same concrete position/move is evaluated again:
+
+  
+
+```text
+
+old result
+
+→ replaced
+
+  
+
+new result
+
+→ stored with current Stockfish version
+
+```
+
+  
+
+Historical engine versions are not retained as separate cache records.
+
+  
+
+## DB.10 — RepertoireNode
+
+  
+
+One row represents one genuine stored progression in one repertoire.
+
+  
+
+Stores conceptually:
+
+  
+
+```text
+
+id
+
+repertoireId
+
+  
+
+FullFen
+
+PositionKey
+
+exact history/PGN
+
+  
+
+cumulativeProb
+
+isTransposition
+
+humanDataSnapshotId
+
+```
+
+  
+
+The old:
+
+  
+
+```text
+
+isAmateurTrap
+
+isMasterThreat
+
+```
+
+  
+
+fields are removed from the intended node model.
+
+  
+
+### FullFen and PositionKey
+
+  
+
+A node stores both:
+
+  
+
+```text
+
+FullFen
+
+→ authoritative concrete progression state
+
+  
+
+PositionKey
+
+→ shared chess-position identity
+
+```
+
+  
+
+The invariant is:
+
+  
+
+```text
+
+positionKeyFromFen(fullFen) === positionKey
+
+```
+
+  
+
+The node must not reconstruct its `FullFen` from a shortened position key.
+
+  
+
+### Exact history
+
+  
+
+Keep the exact PGN/history on every `RepertoireNode`.
+
+  
+
+This is useful for:
+
+  
+
+```text
+
+exact progression lookup
+
+debugging
+
+history-specific behaviour
+
+Wikibooks
+
+transposition handling
+
+```
+
+  
+
+The graph of move edges represents the repertoire structure, but the node's exact history remains valuable persistent state.
+
+  
+
+### Identity
+
+  
+
+Within one repertoire:
+
+  
+
+```text
+
+repertoireId + exact history
+
+→ exact progression lookup
+
+```
+
+  
+
+and:
+
+  
+
+```text
+
+repertoireId + PositionKey
+
+→ one canonical shared chess position
+
+```
+
+  
+
+Different histories may reach the same `PositionKey`.
+
+  
+
+`RepertoireNode.id` is disposable structural row identity. It must not be used as the stable identity of a repertoire position by long-lived or user-facing features.
+
+  
+
+The stable repertoire-position identity is:
+
+  
+
+```text
+
+repertoireId + PositionKey
+
+```
+
+  
+
+Flashcards, SRS, annotations, bookmarks, saved UI references and similar long-lived data should use stable repertoire-position identity rather than depending on a particular `RepertoireNode.id`.
+
+  
+
+The first surviving progression owns the canonical node from the transposition point onward.
+
+  
+
+A later line:
+
+  
+
+```text
+
+keeps all of its genuine nodes before the merge
+
+→ reaches the existing PositionKey
+
+→ final edge points to existing canonical node
+
+→ duplicate continuation stops
+
+```
+
+  
+
+The canonical node's exact `FullFen` and history belong to that surviving route. They are authoritative for the one shared continuation after the merge.
+
+  
+
+A later transposing route keeps its own exact history and concrete state only up to its incoming transposition edge. It does not create a second continuation merely because its exact `FullFen` differs.
+
+  
+
+If the branch that owns the canonical node is later deleted, that canonical node and its downstream continuation are deleted with it. Do not mutate the old canonical node in place to make another route its owner.
+
+  
+
+Any surviving route that later reaches the same `PositionKey` during regeneration creates/rebuilds the canonical node from its own exact `FullFen` and history. The generator then revisits depth and expansion decisions from that rebuilt position.
+
+  
+
+### Transposition flag
+
+  
+
+`isTransposition` is derived from the current repertoire graph.
+
+  
+
+```text
+
+2 or more distinct incoming routes
+
+→ true
+
+  
+
+0 or 1 distinct incoming route
+
+→ false
+
+```
+
+  
+
+It exists for convenient querying and UI use.
+
+  
+
+The graph is the source of truth. If rerunning or rebuilding the repertoire changes the incoming routes, this flag must be updated so that stale transposition state is never left behind.
+
+  
+
+### Cache independence
+
+  
+
+`RepertoireNode` must not be destructively owned by `Position` or any cache row.
+
+  
+
+Deleting cached data must never cascade into:
+
+  
+
+```text
+
+repertoire nodes
+
+repertoire moves
+
+flashcards
+
+SRS progress
+
+```
+
+  
+
+### cumulativeProb
+
+  
+
+`cumulativeProb` remains physically stored on the node for fast access.
+
+  
+
+It is derived from incoming route probabilities:
+
+  
+
+```text
+
+node.cumulativeProb
+
+= sum of incoming unique routeProbability contributions
+
+```
+
+  
+
+The root is the special starting case:
+
+  
+
+```text
+
+root cumulativeProb = 1.0
+
+```
+
+  
+
+The incoming route data is the source of truth; the node field is a cached aggregate.
+
+  
+
+## DB.11 — RepertoireMove
+
+  
+
+One row represents one move/edge between two repertoire nodes.
+
+  
+
+Stores conceptually:
+
+  
+
+```text
+
+id
+
+repertoireId
+
+  
+
+fromNodeId
+
+toNodeId
+
+  
+
+UCI/LAN move
+
 cached SAN
 
+  
+
 playerTurn:
+
 OPPONENT or RESPONSE
 
+  
+
 routeHistory
+
 routeProbability
+
 stopReason
+
 humanDataSnapshotId
+
 ```
+
+  
 
 A move is identified by:
 
+  
+
 ```text
+
 fromNodeId + UCI/LAN move
+
 ```
+
+  
 
 not SAN.
 
+  
+
 SAN is derived/cached display metadata.
+
+  
 
 ### stopReason
 
+  
+
 A move edge may record why generation deliberately stopped following that route.
+
+  
 
 For a route that merges into an already-existing canonical node:
 
-`stopReason = "Transposition"`
+  
+
+```text
+
+stopReason = "Transposition"
+
+```
+
+  
 
 This value belongs to the incoming transposition edge.
 
+  
+
 It is derived from the current structure. If a rerun changes the route so that it is no longer a transposition termination, the old value must be cleared or replaced.
+
+  
+
 ### routeHistory
+
+  
 
 Every move edge stores its full `routeHistory`.
 
+  
+
 Within a repertoire:
 
+  
+
 ```text
+
 repertoireId + routeHistory
+
 → unique exact route
+
 ```
+
+  
 
 `routeHistory` is immutable.
 
+  
+
 If the route history changes:
 
+  
+
 ```text
+
 old edge
+
 → remove
 
+  
+
 new history
+
 → create different edge
+
 ```
+
+  
 
 At a transposition:
 
+  
+
 ```text
+
 move.routeHistory
+
 may differ from
+
 toNode.history
+
 ```
+
+  
 
 because the later transposing route keeps its own exact history on the incoming edge while the target node keeps the surviving canonical history.
 
+  
+
 ### routeProbability
+
+  
 
 Rename the old `trueProbability` concept to:
 
+  
+
 ```text
+
 routeProbability
+
 ```
+
+  
 
 Every move edge stores it.
 
+  
+
 For an OPPONENT move:
 
+  
+
 ```text
+
 new routeProbability
+
 = parent routeProbability × prob
+
 ```
+
+  
 
 For a RESPONSE:
 
+  
+
 ```text
+
 new routeProbability
+
 = parent routeProbability
+
 ```
+
+  
 
 The RESPONSE explicitly carries the probability forward so the following OPPONENT move can read it directly from its parent edge.
 
+  
+
+#note The probability model after several routes merge into one canonical transposition position is being refined during the architecture review. The intended behaviour already agreed is that the shared continuation must use the combined probability reaching the canonical node rather than losing one of the incoming route contributions.
+
+  
+
 ### OPPONENT-specific data
+
+  
 
 An OPPONENT edge stores:
 
+  
+
 ```text
+
 prob
+
 routeProbability
+
 ```
+
+  
 
 and may eventually have:
 
+  
+
 ```text
+
 cp or mate
+
 source
+
 ```
+
+  
 
 for UI evaluation.
 
+  
+
 Missing OPPONENT evaluation is not a repertoire-generation error.
+
+  
 
 ### RESPONSE-specific data
 
+  
+
 A RESPONSE edge stores its exact selected evaluation and provenance:
 
+  
+
 ```text
+
 cp or mate
+
 source
+
 selectionMethod
+
 moveOrigin
+
 selectionReason
+
 deepVerified
+
 ```
+
+  
 
 `source` is the source whose evaluation currently justifies the selected RESPONSE.
 
+  
+
 Controlled `selectionMethod` values include:
 
+  
+
 ```text
+
 "Ordinary API"
+
 "Corrected after Deep Verification"
+
 "Local Engine Fallback"
+
 "Hardcoded Opening"
+
 ```
+
+  
 
 Controlled `moveOrigin` values:
 
+  
+
 ```text
+
 "Human Move"
+
 "Engine Move"
+
 ```
+
+  
 
 `deepVerified = true` means the exact current stored RESPONSE has survived Local Deep Stockfish verification.
 
+  
+
 ## DB.12 — Evaluation representation
+
+  
 
 All stored repertoire and engine evaluations use one project-wide sign convention.
 
+  
+
 Centipawns:
 
+  
+
 ```text
+
 positive
+
 → better for White
 
+  
+
 negative
+
 → better for Black
+
 ```
+
+  
 
 Mate:
 
+  
+
 ```text
+
 positive mate
+
 → White mates
 
+  
+
 negative mate
+
 → Black mates
+
 ```
+
+  
 
 Examples:
 
+  
+
 ```text
+
 #1
+
 → White mates in 1
 
+  
+
 #-3
+
 → Black mates in 3
+
 ```
+
+  
 
 `mate = 0` is invalid.
 
+  
+
 For any one evaluation:
 
+  
+
 ```text
+
 cp present
+
 → mate absent
+
 ```
+
+  
 
 or:
 
+  
+
 ```text
+
 mate present
+
 → cp absent
+
 ```
+
+  
 
 Never convert mate into an artificial centipawn value.
 
+  
+
 ## DB.13 — Transposition structure
+
+  
 
 A transposition is not represented by a special transposition node.
 
+  
+
 It is an ordinary `RepertoireMove` whose:
 
+  
+
 ```text
+
 toNodeId
+
 ```
+
+  
 
 points to an already-existing canonical node with the reached `PositionKey`.
 
+  
+
 Example:
 
+  
+
 ```text
+
 Line A
+
 → ... → X → Y → Z
 
+  
+
 Line B
+
 → ... → final edge → X
+
 → B stops
+
 ```
+
+  
 
 Line B remains a genuine stored line before X.
 
+  
+
 Its final edge stores B's own:
 
+  
+
 ```text
+
 routeHistory
+
 routeProbability
+
 ```
 
-while X keeps A's surviving node history.
+  
+
+and:
+
+  
+
+```text
+
+stopReason = "Transposition"
+
+```
+
+  
+
+while X keeps the surviving canonical route's:
+
+  
+
+```text
+
+FullFen
+
+history
+
+```
+
+  
+
+X's canonical `FullFen` is the concrete state used for the one shared continuation after X, including move generation and engine evaluation.
+
+  
+
+The later transposition route keeps its own exact progression information only up to the incoming transposition edge. It does not create another continuation after X.
+
+  
+
+X is marked:
+
+  
+
+```text
+
+isTransposition = true
+
+```
+
+  
+
+while two or more distinct incoming routes currently reach it.
+
+  
 
 There is only one continuation after X.
 
+  
+
+### Canonical branch deletion
+
+  
+
+If the branch that owns X is deleted:
+
+  
+
+```text
+
+X
+
++ its canonical downstream continuation
+
+→ delete with that branch
+
+```
+
+  
+
+Incoming transposition edges that pointed to the deleted structure disappear according to the normal structural deletion rules.
+
+  
+
+The old X is not retained and rewritten to belong to another route.
+
+  
+
+When a surviving route is walked again and reaches that same `PositionKey`:
+
+  
+
+```text
+
+create/rebuild X
+
+→ use that route's exact FullFen
+
+→ use that route's exact history
+
+→ recalculate probability
+
+→ re-run depth/expansion decisions
+
+→ rebuild or extend the continuation as required
+
+```
+
+  
+
+Any newly created RESPONSE starts with the normal fresh verification state. Old `deepVerified` state from the deleted canonical continuation does not survive the deletion.
+
+  
+
 ## DB.14 — RepertoirePositionStat / flashcard
+
+  
 
 A flashcard is a repertoire-specific training item.
 
+  
+
 Its stable chess identity is:
 
+  
+
 ```text
+
 repertoireId
+
 + PositionKey
+
 + target RESPONSE UCI/LAN
+
 ```
+
+  
 
 It must **not** depend for its existence on a particular:
 
+  
+
 ```text
+
 RepertoireNode.id
+
 RepertoireMove.id
+
 ```
 
-because tree rows may be reorganised or recreated while the learned item itself remains unchanged.
+  
+
+because tree rows may be reorganised, deleted or recreated while the learned item itself remains unchanged.
+
+  
 
 ### Same training item
 
+  
+
 If regeneration produces:
 
+  
+
 ```text
+
 same repertoire
+
 + same PositionKey
+
 + same RESPONSE
+
 ```
+
+  
 
 then:
 
+  
+
 ```text
+
 keep existing card
+
 keep all SRS progress
+
 do nothing
+
 ```
+
+  
 
 ### RESPONSE changed
 
+  
+
 If regeneration produces:
 
+  
+
 ```text
+
 same PositionKey
+
 + different RESPONSE
+
 ```
+
+  
 
 then the move the user has to play has changed.
 
+  
+
 Therefore:
 
+  
+
 ```text
+
 delete old card
+
 → create new card
+
 → fresh SRS state
+
 ```
+
+  
 
 Do not simply point the old SRS record at the new response.
 
+  
+
+### Position removed by a completed rebuild
+
+  
+
+If a position from the previous repertoire does not exist in the successfully completed rebuilt tree:
+
+  
+
+```text
+
+old position absent from finished tree
+
+→ delete its flashcard
+
+→ delete its SRS state
+
+```
+
+  
+
+Do not perform this cleanup at the start of the rebuild.
+
+  
+
+Existing cards remain temporarily available as preservation candidates while generation is in progress. Obsolete cards are removed only after the new tree has completed successfully, so an interrupted rebuild cannot prematurely destroy reusable SRS progress.
+
+  
+
 ### Separate repertoires
+
+  
 
 Even if two repertoires contain identical:
 
+  
+
 ```text
+
 PositionKey + RESPONSE
+
 ```
+
+  
 
 they have separate flashcards and separate SRS progress.
 
+  
+
 ## DB.15 — Study data
+
+  
 
 A flashcard stores the FSRS/SRS information required by the study system, such as:
 
+  
+
 ```text
+
 due
+
 stability
+
 difficulty
+
 elapsed days
+
 scheduled days
+
 reps
+
 lapses
+
 state
+
 last review
+
 createdAt
+
 ```
+
+  
 
 Any explanatory text or tags that remain useful may also live with the card, but they are not part of its chess identity.
 
+  
+
 ## Initial learning order
+
+  
 
 #roadmap Order newly added flashcards by `cumulativeProb`, highest first, so the most probable positions enter the **initial learning queue** first.
 
+  
+
 Once those cards enter ordinary SRS scheduling:
 
+  
+
 ```text
+
 day-to-day reviews
+
 → follow SRS scheduling
+
 → do not remain globally ordered by cumulativeProb
+
 ```
+
+  
 
 `cumulativeProb` affects the order in which new material is introduced, not the normal review sequence.
 
+  
+
 ## Cache lifetime summary
 
+  
+
 ```text
+
 Position
+
 → global
+
 → permanent
+
+→ one row per PositionKey
+
 ```
 
+  
+
 ```text
+
 human move cache
+
 → repertoire-specific
+
 → belongs to one HumanDataSnapshot
+
+→ keyed through shared PositionKey identity
+
 → reusable for one week+
+
 → deliberately nuked when a fresh snapshot begins
+
 ```
 
+  
+
 ```text
+
 remote engine cache
-→ global by Position/move/source
+
+→ global
+
+→ keyed by exact FullFen + move + source
+
 → reusable indefinitely
-→ keep latest result per source
+
+→ keep latest result per exact FullFen/move/source
+
 ```
 
+  
+
 ```text
+
 Local Deep Stockfish cache
-→ global by Position/checked move
+
+→ global
+
+→ keyed by exact FullFen + checked move
+
 → reusable indefinitely
+
 → keep current deep checked-vs-top result
+
 ```
 
+  
+
 ```text
+
 repertoire tree
+
 → belongs to one repertoire
-→ independent of all cache lifetimes
+
+→ every current node/move belongs to one current HumanDataSnapshot
+
+→ rebuilt from root when a fresh human snapshot starts
+
+→ independent of engine-cache lifetimes
+
 ```
 
+  
+
 ```text
+
 flashcards/SRS
+
 → belong to one repertoire
+
 → stable by PositionKey + RESPONSE
+
 → independent of transient node/move row IDs
+
+→ preserved provisionally during rebuild
+
+→ obsolete cards deleted only after successful rebuild completion
+
 ```
+
+  
 
 ## Main changes from the current database
 
+  
+
 The intended DB architecture therefore changes the current model substantially:
 
-- replace `PositionCache` with permanent global `Position`
-    
-- remove destructive cache → repertoire ownership
-    
-- keep `ECO` and `openingName` on global `Position`
-    
-- keep Wikibooks text off global `Position`
-    
-- add repertoire-specific `HumanDataSnapshot`
-    
-- use one-week+ human snapshot lifetime
-    
-- delete old human data deliberately when starting a fresh snapshot
-    
-- remove `_EMPTY_` fake move rows
-    
-- add explicit successful human-fetch status
-    
-- identify human moves by UCI/LAN rather than SAN
-    
-- keep SAN as returned/display metadata
-    
-- separate remote engine cache from Local Deep Stockfish cache
-    
-- keep one current result per position/move/source for remote engines
-    
-- store source/provider version when available
-    
-- store only deep local-engine results
-    
-- store checked move + top move evaluations together for Local Deep Stockfish
-    
-- keep exact `FullFen`, `PositionKey` and exact history on `RepertoireNode`
-    
-- remove Amateur Trap and Master Threat node fields
-    
-- keep `cumulativeProb` stored as a derived cached aggregate
-    
-- change repertoire move identity to `fromNodeId + UCI/LAN`
-    
-- rename `trueProbability` to `routeProbability`
-    
-- store `routeHistory` and `routeProbability` on every move
-    
-- separate OPPONENT and RESPONSE-specific meaning cleanly
-    
-- make flashcard identity independent of node/move database row IDs
-    
-- identify the learned item by `repertoireId + PositionKey + RESPONSE`
-    
-- preserve SRS only when both the position and RESPONSE remain unchanged
-    
+  
 
-These changes turn DB from a cache-centred ownership model into a model where permanent chess identity, repertoire structure, human statistical snapshots, engine evidence, and study state each have their own clear lifecycle.
+- replace `PositionCache` with permanent global `Position`
+
+- remove destructive cache → repertoire ownership
+
+- keep `ECO` and `openingName` on global `Position`
+
+- keep Wikibooks text off global `Position`
+
+- add repertoire-specific `HumanDataSnapshot`
+
+- use one-week+ human snapshot lifetime
+
+- delete old human data deliberately when starting a fresh snapshot
+
+- remove `_EMPTY_` fake move rows
+
+- add explicit successful human-fetch status
+
+- identify human moves by UCI/LAN rather than SAN
+
+- keep SAN as returned/display metadata
+
+- separate remote engine cache from Local Deep Stockfish cache
+
+- key all engine evaluations by exact `FullFen`, not only `PositionKey`
+
+- key remote fetch status by exact `FullFen + source`
+
+- keep one current result per exact FullFen/move/source for remote engines
+
+- store source/provider version when available
+
+- store only deep local-engine results
+
+- key Local Deep Stockfish results by exact `FullFen + checked move`
+
+- store checked move + top move evaluations together for Local Deep Stockfish
+
+- keep exact `FullFen`, `PositionKey` and exact history on `RepertoireNode`
+
+- remove Amateur Trap and Master Threat node fields
+
+- keep `cumulativeProb` stored as a derived cached aggregate
+
+- store derived `isTransposition` metadata on canonical nodes
+
+- store `stopReason = "Transposition"` on incoming transposition edges
+
+- change repertoire move identity to `fromNodeId + UCI/LAN`
+
+- rename `trueProbability` to `routeProbability`
+
+- store `routeHistory` and `routeProbability` on every move
+
+- separate OPPONENT and RESPONSE-specific meaning cleanly
+
+- make flashcard identity independent of node/move database row IDs
+
+- identify the learned item by `repertoireId + PositionKey + RESPONSE`
+
+- preserve SRS only when both the position and RESPONSE remain unchanged
+
+- rebuild the generated repertoire tree completely when a fresh human snapshot starts
+
+- never mix nodes or moves from different human snapshots in the current tree
+
+- treat `RepertoireNode.id` as disposable row identity and `repertoireId + PositionKey` as stable repertoire-position identity
+
+- keep the canonical route's exact `FullFen` as the concrete state for the shared continuation after a transposition
+
+- delete a canonical node with its owning branch rather than promoting another route in place
+
+- let a surviving route rebuild that position from its own exact `FullFen` and history when encountered again
+
+- preserve old flashcards provisionally during a rebuild and delete absent cards only after successful completion
+
+- persist generation state and enforce a backend/UI lock while generation is running
+
+  
+
+These changes turn DB from a cache-centred ownership model into a model where permanent chess identity, repertoire structure, human statistical snapshots, exact-FEN engine evidence, and study state each have their own clear lifecycle.
