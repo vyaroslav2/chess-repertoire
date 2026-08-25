@@ -240,7 +240,7 @@ GENERATING
 
   
 
-→ the repertoire is being built, rebuilt, resumed or is incomplete after an interruption
+→ the repertoire is being built or is incomplete after an interruption
 
   
 
@@ -260,7 +260,11 @@ The backend must enforce the lock rather than relying only on disabled UI contro
 
   
 
-A generator crash or interruption does **not** clear the lock. The repertoire is still transitional and must remain unavailable for normal study/editing until generation resumes and completes successfully.
+A generator crash or interruption does **not** clear the lock. The repertoire is still transitional and must remain unavailable for normal study/editing.
+
+  
+
+The next generation attempt does not resume the partial tree. It discards that partial generated structure and starts again from the root.
 
   
 
@@ -564,11 +568,7 @@ None of these cache lifetimes should own the repertoire tree.
 
   
 
-  
-
 One row represents one coherent period of human-explorer data for one repertoire.
-
-  
 
   
 
@@ -576,33 +576,17 @@ Stores at least:
 
   
 
-  
-
 ```text
-
-  
 
 id
 
-  
-
 repertoireId
-
-  
 
 startedAt
 
-  
+explorerRequestProfile / equivalent frozen request settings
 
 ```
-
-  
-
-  
-
-When explorer population settings are eventually implemented, the snapshot also records the exact frozen settings used for that dataset.
-
-  
 
   
 
@@ -610,39 +594,47 @@ A snapshot belongs to one repertoire, not globally to every repertoire.
 
   
 
-  
-
-This is necessary because human move statistics may later depend on repertoire-specific choices such as:
-
-  
+Its compatibility depends only on settings that change the human-explorer request itself, for example:
 
   
 
 ```text
 
-  
-
 rating range
-
-  
 
 time controls
 
-  
+population/database filters
 
-other explorer filters
-
-  
+other explorer request filters
 
 ```
 
   
 
-  
-
-Two repertoires may therefore legitimately have different human statistics for the same `PositionKey`.
+General generation-policy settings do **not** make the raw human snapshot incompatible.
 
   
+
+For example, changing:
+
+  
+
+```text
+
+depth limits
+
+mainline popularity thresholds
+
+Masters weighting
+
+engine tolerances
+
+```
+
+  
+
+may change derived repertoire decisions, but the same compatible human source data may still be reused.
 
   
 
@@ -650,11 +642,7 @@ Two repertoires may therefore legitimately have different human statistics for t
 
   
 
-  
-
 A human snapshot is reusable for **one week or longer**.
-
-  
 
   
 
@@ -662,23 +650,13 @@ Seven days does not mean:
 
   
 
-  
-
 ```text
-
-  
 
 168 hours reached
 
-  
-
 → data instantly expires
 
-  
-
 ```
-
-  
 
   
 
@@ -686,55 +664,37 @@ Instead:
 
   
 
-  
-
 ```text
 
-  
-
 snapshot age < 7 days
-
-  
 
 → definitely reuse
 
   
 
-  
-
 snapshot age >= 7 days
 
-  
+→ eligible for deliberate replacement
 
-→ eligible for replacement
-
-  
-
-→ keep using until a deliberate fresh build starts
-
-  
+→ keep using until a fresh human-data snapshot is deliberately started
 
 ```
 
   
 
-  
-
-This prevents a repertoire generation from crossing an expiry boundary halfway through and mixing two human datasets.
+A generation failure does not itself invalidate the snapshot.
 
   
 
-  
-
-### Starting a fresh snapshot
+### Rebuild model
 
   
 
-  
-
-Starting a fresh human-data snapshot is a complete repertoire-tree rebuild, not an in-place conversion of the old tree.
+Every repertoire generation/recalculation rebuilds the generated repertoire tree from the root.
 
   
+
+The generated tree is derived state and is disposable.
 
   
 
@@ -742,137 +702,39 @@ The intended sequence is:
 
   
 
-  
-
 ```text
 
-  
-
-generationStatus = GENERATING
+generation requested
 
   
 
-→ keep existing flashcards/SRS temporarily
+→ generationStatus = GENERATING
 
-  
+→ block normal user interaction
 
-→ delete the old generated repertoire tree
+→ read and validate the current central config
 
-  
+→ compute configHash
 
-→ delete the old human move data for this repertoire
+→ freeze those effective config values in memory for this build
 
-  
+→ keep existing flashcards/SRS provisionally
 
-→ create the new HumanDataSnapshot
+→ delete the current generated repertoire tree
 
-  
+→ choose/reuse a compatible HumanDataSnapshot
 
 → generate again from the normal root position
 
-  
+→ fetch missing human data into that snapshot as positions are reached
 
-→ fetch human data as positions are reached
-
-  
-
-→ attach every new node and move to the new snapshot
-
-  
+→ reuse compatible engine caches
 
 ```
 
   
 
-  
-
-Reusable engine caches are independent and remain intact.
-
-  
-
-  
-
-The current generated tree must never contain a mixture of nodes or moves from two human-data snapshots:
-
-  
-
-  
-
-```text
-
-  
-
-every node and move in the current generated repertoire tree
-
-  
-
-→ belongs to the repertoire's current HumanDataSnapshot
-
-  
-
-```
-
-  
-
-  
-
-If generation stops or crashes halfway through:
-
-  
-
-  
-
-```text
-
-  
-
-partial new tree
-
-  
-
-→ keep
-
-  
-
-  
-
-current HumanDataSnapshot
-
-  
-
-→ keep
-
-  
-
-  
-
-generationStatus
-
-  
-
-→ remain GENERATING
-
-  
-
-  
-
-normal user interaction
-
-  
-
-→ remain blocked
-
-  
-
-```
-
-  
-
-  
-
-Generation later resumes using that same snapshot and fills the missing structure. Do not start another fresh snapshot merely because the previous generator process was interrupted.
-
-  
+There is no parallel old-tree/new-tree versioning system.
 
   
 
@@ -880,143 +742,167 @@ The previous generated tree is not kept as a fallback copy.
 
   
 
-  
-
-### Flashcards during a fresh rebuild
+### If generation fails or is interrupted
 
   
 
-  
-
-Existing flashcards are not deleted merely because the old tree is removed.
-
-  
-
-  
-
-During rebuilding:
-
-  
+If generation stops or crashes halfway through:
 
   
 
 ```text
 
-  
+partial generated tree
 
-same repertoire
+→ may remain temporarily in the database
 
-  
+→ is not valid repertoire state
 
-+ same PositionKey
-
-  
-
-+ same RESPONSE
+→ is disposable
 
   
 
-→ keep the existing flashcard
+generationStatus
+
+→ remain GENERATING
 
   
 
-→ keep all SRS progress
+normal user interaction
+
+→ remain blocked
 
   
+
+compatible HumanDataSnapshot
+
+→ keep
+
+  
+
+compatible engine caches
+
+→ keep
+
+  
+
+flashcards/SRS
+
+→ keep provisionally
 
 ```
 
   
 
+The next generation attempt does **not** continue or repair that partial tree.
+
+  
+
+Instead:
+
   
 
 ```text
 
-  
+next attempt
 
-same PositionKey
+→ read and validate the current config again
 
-  
+→ compute the current configHash
 
-+ different RESPONSE
+→ discard the partial generated tree
 
-  
+→ start again from the root
 
-→ old card is obsolete
+→ reuse the compatible HumanDataSnapshot
 
-  
-
-→ create a fresh card for the new RESPONSE
-
-  
+→ reuse compatible engine caches
 
 ```
 
   
 
-  
-
-Cards that have not reappeared must remain temporarily until the rebuild completes successfully.
+There is no persisted full `configSnapshot` required for resumability, because partial-tree resumability is not part of the intended design.
 
   
 
-  
-
-Only after successful completion:
+### Starting a fresh human-data snapshot
 
   
+
+A new HumanDataSnapshot is needed only when a deliberate refresh is requested or the existing snapshot is incompatible with the current human-explorer request settings.
+
+  
+
+Then:
 
   
 
 ```text
 
-  
+generationStatus = GENERATING
 
-old flashcard not represented in the finished new tree
+→ keep flashcards/SRS provisionally
 
-  
+→ delete current generated tree
 
-→ delete the flashcard
+→ delete/replace the old human move data for this repertoire
 
-  
+→ create the new HumanDataSnapshot
 
-→ delete its SRS state
+→ regenerate from the root
 
-  
+→ fetch human data as positions are reached
+
+→ reuse compatible engine caches
 
 ```
 
   
 
-  
-
-Then perform final consistency checks and:
+Reusable engine caches are independent and remain intact.
 
   
+
+### Successful completion
+
+  
+
+Only after the rebuild finishes successfully:
 
   
 
 ```text
 
-  
+→ reconcile flashcards against the finished tree
 
-generationStatus = IDLE
+→ preserve cards for same repertoire + PositionKey + RESPONSE
 
-  
+→ replace cards where the RESPONSE changed
+
+→ delete old cards absent from the finished tree
+
+→ run final consistency checks
+
+→ store configHash for the completed repertoire
+
+→ generationStatus = IDLE
 
 → unlock normal user interaction
 
-  
-
 ```
 
   
 
-  
-
-There is no need to preserve the previous human snapshot historically.
+The completed `configHash` is provenance for the current finished tree.
 
   
+
+The database does not need to persist a full generation config snapshot or GenerationRun resume state.
+
+  
+
+There is no need to preserve previous human snapshots historically.
 
   
 
@@ -5230,6 +5116,24 @@ The intended DB architecture therefore changes the current model substantially:
 - add `moveOrigin = "Hardcoded Move"`
 
 - remove persistent `selectionReason`
+
+  
+
+- rebuild the generated repertoire tree from the root on every generation/recalculation
+
+- discard partial generated trees instead of resuming them
+
+- keep compatible HumanDataSnapshot and engine caches across failed/restarted builds
+
+- make HumanDataSnapshot compatibility depend only on human-explorer request settings
+
+- keep config values frozen only in memory for one active build
+
+- store only the completed repertoire's configHash as config provenance
+
+- remove persisted full configSnapshot / GenerationRun resume state
+
+- do not maintain parallel old-tree/new-tree versions
 
   
 

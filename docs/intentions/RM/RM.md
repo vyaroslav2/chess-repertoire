@@ -514,239 +514,179 @@ The node's `humanDataSnapshotId` identifies the human-data snapshot from which i
 
   
 
-  
-
-Human statistics are a time-dependent snapshot rather than permanent chess truth.
+Human statistics are source data, not generated repertoire structure.
 
   
 
-  
-
-One human-data snapshot period lasts one week.
+A HumanDataSnapshot is compatible when its human-explorer request settings match the request context required by the repertoire.
 
   
 
-  
-
-During that period:
-
-  
+Compatibility depends on source-request settings such as:
 
   
 
 ```text
 
-  
+rating range
 
-existing human data from this snapshot
+time controls
 
-  
+population/database filters
 
-→ reuse
-
-  
-
-  
-
-new required position
-
-  
-
-→ fetch
-
-  
-
-→ attach current humanDataSnapshotId
-
-  
+other explorer request filters
 
 ```
 
   
 
-  
-
-If the repertoire is deliberately recalculated after that period, a fresh snapshot starts a complete generated-tree rebuild from the root.
+It does not depend on the whole generation config.
 
   
 
-  
-
-The intended sequence is:
-
-  
+Therefore changes to derived-policy settings such as:
 
   
 
 ```text
 
+depth limits
+
+mainline thresholds
+
+Masters weighting
+
+engine tolerances
+
+```
+
   
+
+do not by themselves require new human data.
+
+  
+
+A snapshot younger than one week is definitely reusable. An older compatible snapshot remains usable until a deliberate fresh human-data build starts.
+
+  
+
+## Rebuild lifecycle
+
+  
+
+Every generation/recalculation rebuilds the derived repertoire tree from the root.
+
+  
+
+RM does not support resuming a partially generated tree.
+
+  
+
+The lifecycle is:
+
+  
+
+```text
 
 generationStatus = GENERATING
 
-  
+→ normal user interaction locked
 
-→ retain existing flashcards/SRS provisionally
+→ retain flashcards/SRS provisionally
 
-  
+→ delete current generated repertoire tree
 
-→ delete the old generated repertoire tree
+→ use current in-memory validated config for this build
 
-  
+→ reuse compatible HumanDataSnapshot
 
-→ delete old human move data for this repertoire
+→ reuse compatible engine caches
 
-  
-
-→ create new HumanDataSnapshot
-
-  
-
-→ regenerate from the normal root position
-
-  
-
-→ fetch new human data as positions are reached
-
-  
-
-→ attach every new node and move to the new snapshot
-
-  
+→ rebuild nodes and moves from the root
 
 ```
 
   
 
-  
-
-The current generated repertoire tree must never mix snapshot periods:
+The old generated tree is not retained as a fallback copy and there is no parallel old-tree/new-tree version.
 
   
 
-  
-
-```text
-
-  
-
-every current RepertoireNode
-
-  
-
-and every current RepertoireMove
-
-  
-
-→ belongs to the current HumanDataSnapshot
-
-  
-
-```
-
-  
-
-  
-
-If generation stops or crashes before completion:
-
-  
+If generation fails or is interrupted:
 
   
 
 ```text
-
-  
 
 partial tree
 
-  
-
-→ keep
-
-  
-
-  
-
-current HumanDataSnapshot
-
-  
-
-→ keep
-
-  
+→ invalid/disposable
 
   
 
 generationStatus
 
-  
-
 → remain GENERATING
-
-  
 
   
 
 normal user interaction
 
-  
-
 → remain blocked
 
   
+
+compatible HumanDataSnapshot
+
+→ keep
+
+  
+
+compatible engine caches
+
+→ keep
+
+  
+
+flashcards/SRS
+
+→ keep provisionally
 
 ```
 
   
 
-  
-
-Resume the same incomplete generation with the same snapshot. Do not start a new snapshot merely because the generator process was interrupted.
+The next attempt:
 
   
 
-  
+```text
 
-Old human-data snapshots are replaced rather than retained historically.
+→ reads and validates the current config again
 
-  
+→ deletes any partial generated tree
 
-  
+→ starts again from the root
 
-Reusable engine evaluations are independent of this human-data snapshot and survive repertoire rebuilds.
+→ reuses compatible source/cache data
 
-  
-
-  
-
-### Generation lock
+```
 
   
 
-  
-
-`generationStatus = IDLE` means the repertoire is complete and safe for normal use.
+It does **not** continue the partial structure.
 
   
 
-  
-
-`generationStatus = GENERATING` means the repertoire is transitional or incomplete and must remain locked against normal user interaction.
+A failed build does not itself invalidate the HumanDataSnapshot.
 
   
 
-  
-
-The backend must enforce the lock as well as the UI.
+A new snapshot is created only when the human source data is deliberately refreshed or when the current explorer-request settings are incompatible with that snapshot.
 
   
 
-  
-
-A failed generator does **not** make the repertoire ready for the user. It stays locked until generation is resumed and completes successfully.
-
-  
+### Successful completion
 
   
 
@@ -754,57 +694,37 @@ Only after:
 
   
 
-  
-
 ```text
-
-  
 
 tree generation completes
 
-  
-
 → flashcards are reconciled
-
-  
 
 → obsolete cards are removed
 
-  
-
 → final consistency checks pass
-
-  
 
 ```
 
   
 
-  
-
-may the generation workflow set:
-
-  
+may the generation workflow:
 
   
 
 ```text
 
-  
+store the completed configHash
 
-generationStatus = IDLE
+→ generationStatus = IDLE
 
-  
+→ unlock the repertoire
 
 ```
 
   
 
-  
-
-and unlock the repertoire.
-
-  
+The full config snapshot is not persisted for resume purposes.
 
   
 
@@ -1294,7 +1214,7 @@ lower cumulativeProb
 
   
 
-An ordinary rerun should therefore converge towards the same structure a clean generation would produce from the same current human-data snapshot and configuration.
+A generation always rebuilds from the root, so the resulting structure should be the clean result of the current compatible human-data snapshot and current validated configuration.
 
   
 
@@ -4582,6 +4502,22 @@ The present RM diagram/code will eventually need to change substantially:
 - invalidate `deepVerified` when its relevant Local Deep evidence is replaced
 
 - keep `deepVerified` when only remote evidence changes and RESPONSE, canonical FullFen and Local Deep evidence remain unchanged
+
+  
+
+- rebuild the generated tree from the root for every generation/recalculation
+
+- never resume a partial generated tree
+
+- keep the repertoire locked after failure until a later full rebuild succeeds
+
+- reuse compatible HumanDataSnapshot and engine caches across rebuild attempts
+
+- make HumanDataSnapshot compatibility depend only on explorer-request settings
+
+- do not maintain parallel old/new generated trees
+
+- store completed configHash provenance without persisted full configSnapshot / GenerationRun resume state
 
   
 
