@@ -457,6 +457,7 @@ PositionKey
 exact history/PGN
 
 cumulativeProb
+isTransposition
 humanDataSnapshotId
 ```
 
@@ -534,6 +535,17 @@ keeps all of its genuine nodes before the merge
 → duplicate continuation stops
 ```
 
+### Transposition flag
+
+`isTransposition` is derived from the current repertoire graph.
+
+`2 or more distinct incoming routes → true`
+
+`0 or 1 distinct incoming route → false`
+
+It exists for convenient querying and UI use.
+
+The graph is the source of truth. If rerunning or rebuilding the repertoire changes the incoming routes, this flag must be updated so that stale transposition state is never left behind.
 ### Cache independence
 
 `RepertoireNode` must not be destructively owned by `Position` or any cache row.
@@ -587,6 +599,7 @@ OPPONENT or RESPONSE
 
 routeHistory
 routeProbability
+stopReason
 humanDataSnapshotId
 ```
 
@@ -600,6 +613,17 @@ not SAN.
 
 SAN is derived/cached display metadata.
 
+### stopReason
+
+A move edge may record why generation deliberately stopped following that route.
+
+For a route that merges into an already-existing canonical node:
+
+`stopReason = "Transposition"`
+
+This value belongs to the incoming transposition edge.
+
+It is derived from the current structure. If a rerun changes the route so that it is no longer a transposition termination, the old value must be cleared or replaced.
 ### routeHistory
 
 Every move edge stores its full `routeHistory`.

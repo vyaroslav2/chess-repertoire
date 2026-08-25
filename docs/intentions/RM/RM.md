@@ -1,6 +1,6 @@
 ---
 tags:
-  - processed
+  - in-progress
 ---
 # RM — Repertoire nodes and moves
 
@@ -448,6 +448,26 @@ one flashcard/SRS state
 A later transposing route inherits that RESPONSE rather than running response selection again.
 
 Its `routeProbability` is added as another unique contribution to the canonical node's `cumulativeProb`.
+
+### Transposition metadata
+
+A canonical node may store `isTransposition = true` when two or more distinct repertoire routes currently reach that node.
+
+This is derived metadata, not permanent historical truth.
+
+`2 or more distinct incoming routes → isTransposition = true`
+
+`0 or 1 distinct incoming route → isTransposition = false`
+
+Whenever a rerun, branch deletion, RESPONSE replacement or other structural change adds or removes an incoming route, RM must update `isTransposition` so that it matches the current graph.
+
+A node must not remain marked as a transposition merely because it was one in an earlier version of the repertoire.
+
+A route that stops because it merges into an already-existing canonical node records `stopReason = "Transposition"` on the incoming transposition edge.
+
+If a later rerun changes that route so that it no longer ends in a transposition, the old `stopReason` must be cleared or replaced.
+
+The stored metadata must always describe the current repertoire structure.
 
 ## Probability propagation after a transposition
 
