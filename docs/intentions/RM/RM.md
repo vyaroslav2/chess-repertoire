@@ -6,7 +6,11 @@ tags:
 
   
 
+  
+
 ## Intention
+
+  
 
   
 
@@ -14,7 +18,11 @@ RM owns the database operations for repertoire nodes and repertoire moves.
 
   
 
+  
+
 It should keep the stored repertoire graph internally consistent. Higher-level algorithm logic such as A4 decides _what_ should happen; RM checks that the requested database operation is valid and performs it safely.
+
+  
 
   
 
@@ -22,15 +30,25 @@ The database model distinguishes three related identities:
 
   
 
+  
+
 - `history` / PGN identifies a concrete stored progression
 
+  
+
 - `PositionKey` identifies the chess position shared across transpositions
+
+  
 
 - `routeHistory` identifies one exact route represented by a move edge
 
   
 
+  
+
 A repertoire can therefore contain several genuine histories that reach the same chess position, while storing only one canonical node and continuation after the transposition.
+
+  
 
   
 
@@ -64,9 +82,9 @@ Within one repertoire:
 
 ```text
 
-repertoireId + history
+repertoireId + canonical UCI/LAN history
 
-→ unique concrete progression
+→ unique concrete canonical progression
 
 ```
 
@@ -83,6 +101,26 @@ repertoireId + PositionKey
 → unique canonical chess position
 
 ```
+
+  
+
+Canonical `history` is a deterministic sequence of UCI/LAN moves, not arbitrary PGN text.
+
+  
+
+For example:
+
+  
+
+```text
+
+e2e4 e7e5 g1f3 b8c6
+
+```
+
+  
+
+PGN/SAN history is derived/display metadata. Formatting, annotations, comments or move-number presentation must never change progression identity.
 
   
 
@@ -110,6 +148,10 @@ Flashcards, SRS, annotations, bookmarks and similar saved app state must not dep
 
   
 
+`ECO` and `openingName` are progression-specific metadata. They belong to the canonical progression/node rather than the global `Position`, because different move orders can legitimately transpose into the same `PositionKey` with different opening classifications.
+
+  
+
 ## RM.01–RM.03 — Look up a node
 
   
@@ -124,7 +166,7 @@ RM provides two node lookups.
 
 ```text
 
-repertoireId + exact history/PGN
+repertoireId + canonical UCI/LAN history
 
 → existing node or nothing
 
@@ -136,7 +178,7 @@ This answers:
 
   
 
-> "Have we already stored this exact progression?"
+> "Have we already stored this exact move sequence as the canonical progression?"
 
   
 
@@ -162,7 +204,7 @@ This answers:
 
   
 
-RM only performs the lookup. A4 decides whether an existing shared position constitutes a transposition.
+RM only performs the lookup. A4 decides whether an existing shared position constitutes a transposition or whether the same-route repetition rule applies.
 
   
 
@@ -178,13 +220,15 @@ If a `PositionKey` lookup finds an existing canonical node, RM returns it with i
 
 - `PositionKey`
 
-- surviving history/PGN
+- canonical UCI/LAN history
+
+- progression-specific ECO/opening metadata, if present
 
 - database identity
 
   
 
-unchanged. A later transposing route must not overwrite the surviving progression with its own history.
+unchanged. A later transposing route must not overwrite the surviving progression with its own history or opening classification.
 
   
 
@@ -222,11 +266,13 @@ Before creation:
 
 1. derive PositionKey from FullFen
 
-2. look up repertoireId + exact history
+2. construct/validate canonical UCI/LAN history
 
-3. if absent, look up repertoireId + PositionKey
+3. look up repertoireId + canonical history
 
-4. create only if neither exists
+4. if absent, look up repertoireId + PositionKey
+
+5. create only if neither exists
 
 ```
 
@@ -248,13 +294,19 @@ fullFen
 
 positionKey
 
-history
+canonical UCI/LAN history
+
+ECO/openingName, if known
 
 cumulativeProb
 
 humanDataSnapshotId
 
 ```
+
+  
+
+PGN/SAN may be cached for display, but it is not progression identity.
 
   
 
@@ -310,7 +362,7 @@ The intended sequence is:
 
 ```text
 
-lock repertoire for generation
+generationStatus = GENERATING
 
 → retain existing flashcards/SRS provisionally
 
@@ -346,7 +398,39 @@ and every current RepertoireMove
 
   
 
-If generation stops before completion, the new tree is simply incomplete. Resume with the same current snapshot rather than mixing the previous snapshot back in.
+If generation stops or crashes before completion:
+
+  
+
+```text
+
+partial tree
+
+→ keep
+
+  
+
+current HumanDataSnapshot
+
+→ keep
+
+  
+
+generationStatus
+
+→ remain GENERATING
+
+  
+
+normal user interaction
+
+→ remain blocked
+
+```
+
+  
+
+Resume the same incomplete generation with the same snapshot. Do not start a new snapshot merely because the generator process was interrupted.
 
   
 
@@ -362,35 +446,53 @@ Reusable engine evaluations are independent of this human-data snapshot and surv
 
   
 
-While the generator is running, the repertoire is locked against user interaction that could conflict with generation.
+`generationStatus = IDLE` means the repertoire is complete and safe for normal use.
 
   
 
-Conceptually:
+`generationStatus = GENERATING` means the repertoire is transitional or incomplete and must remain locked against normal user interaction.
+
+  
+
+The backend must enforce the lock as well as the UI.
+
+  
+
+A failed generator does **not** make the repertoire ready for the user. It stays locked until generation is resumed and completes successfully.
+
+  
+
+Only after:
 
   
 
 ```text
 
-generationStatus = GENERATING
+tree generation completes
 
-→ block study/edit/regenerate/delete operations for this repertoire
+→ flashcards are reconciled
 
-→ enforce the lock in the backend as well as the UI
+→ obsolete cards are removed
 
-  
-
-generation finishes successfully
-
-or stops/fails through the defined recovery path
-
-→ generationStatus = IDLE
+→ final consistency checks pass
 
 ```
 
   
 
-The exact stale-lock/crash recovery mechanism will be settled separately. A crashed generator must not be allowed to leave the repertoire permanently locked.
+may the generation workflow set:
+
+  
+
+```text
+
+generationStatus = IDLE
+
+```
+
+  
+
+and unlock the repertoire.
 
   
 
@@ -398,7 +500,7 @@ The exact stale-lock/crash recovery mechanism will be settled separately. A cras
 
   
 
-Use three probability concepts only.
+Use three probability concepts.
 
   
 
@@ -406,7 +508,7 @@ Use three probability concepts only.
 
   
 
-Local probability of an OPPONENT move at its immediate position.
+Local probability of an OPPONENT move at its immediate source position.
 
   
 
@@ -414,11 +516,47 @@ Local probability of an OPPONENT move at its immediate position.
 
   
 
-Probability carried by one exact repertoire route.
+Keep the existing name, but define it as:
 
   
 
-This replaces the old name `trueProbability`.
+> the probability mass carried by this move edge from its source node
+
+  
+
+It is not always the probability of one original exact route.
+
+  
+
+For an OPPONENT move:
+
+  
+
+```text
+
+routeProbability
+
+= fromNode.cumulativeProb × prob
+
+```
+
+  
+
+For a RESPONSE:
+
+  
+
+```text
+
+routeProbability
+
+= fromNode.cumulativeProb
+
+```
+
+  
+
+Before a transposition, this naturally equals the probability of the single route that reached the edge.
 
   
 
@@ -426,7 +564,11 @@ This replaces the old name `trueProbability`.
 
   
 
-Sum of all unique route probabilities reaching one `PositionKey`.
+Combined probability mass reaching one canonical `PositionKey`.
+
+  
+
+For every non-root canonical node:
 
   
 
@@ -434,97 +576,123 @@ Sum of all unique route probabilities reaching one `PositionKey`.
 
 cumulativeProb
 
-= sum of unique routeProbability contributions
+= sum of routeProbability
+
+  on incoming non-repetition edges
 
 ```
 
   
 
-For example:
-
-  
-
-```text
-
-root = 1.0
-
-  
-
-OPPONENT move:
-
-prob = 0.20
-
-routeProbability = 0.20
-
-  
-
-later OPPONENT move:
-
-prob = 0.50
-
-routeProbability = 0.20 × 0.50
-
-                 = 0.10
-
-  
-
-another route reaches the same PositionKey:
-
-routeProbability = 0.03
-
-  
-
-cumulativeProb = 0.10 + 0.03
-
-               = 0.13
-
-```
-
-  
-
-`routeProbability` is stored on every move edge.
-
-  
-
-For OPPONENT:
-
-  
-
-```text
-
-routeProbability
-
-= parent routeProbability × prob
-
-```
-
-  
-
-For RESPONSE:
-
-  
-
-```text
-
-routeProbability
-
-= parent routeProbability
-
-```
-
-  
-
-The RESPONSE therefore carries the same route probability forward explicitly, making the next calculation straightforward.
-
-  
-
-The root is the one special starting case:
+The root is the special starting case:
 
   
 
 ```text
 
 root cumulativeProb = 1.0
+
+```
+
+  
+
+### Example with a transposition
+
+  
+
+```text
+
+Route A reaches X
+
+→ incoming routeProbability = 0.10
+
+  
+
+Route B reaches X
+
+→ incoming routeProbability = 0.03
+
+  
+
+X.cumulativeProb
+
+= 0.10 + 0.03
+
+= 0.13
+
+```
+
+  
+
+The shared continuation after X starts from the **combined** `0.13`.
+
+  
+
+For a RESPONSE from X:
+
+  
+
+```text
+
+routeProbability = 0.13
+
+```
+
+  
+
+If the following OPPONENT move has:
+
+  
+
+```text
+
+prob = 0.50
+
+```
+
+  
+
+then:
+
+  
+
+```text
+
+routeProbability
+
+= 0.13 × 0.50
+
+= 0.065
+
+```
+
+  
+
+Do not continue propagating only Route A's `0.10` or Route B's `0.03` after the merge.
+
+  
+
+### Repetition exclusion
+
+  
+
+A same-route repetition terminal is not another probability contribution into the earlier repeated node.
+
+  
+
+It may record the probability mass that reached its terminal move for logging/UI if useful, but:
+
+  
+
+```text
+
+stopReason = "Repetition"
+
+→ exclude from destination cumulativeProb
+
+→ no destination node
+
+→ no further propagation
 
 ```
 
@@ -552,7 +720,7 @@ node.cumulativeProb
 
 = sum of routeProbability
 
-  on its unique incoming move routes
+  on its incoming non-repetition move edges
 
 ```
 
@@ -570,7 +738,57 @@ node.cumulativeProb += x
 
   
 
-RM owns the operation that updates a route contribution and then recomputes the destination node's total atomically. This prevents the same transposition route from being counted repeatedly on reruns.
+RM owns the operation that changes incoming contributions and recomputes the destination node's total atomically.
+
+  
+
+This prevents one transposition contribution from being counted repeatedly on reruns and ensures removed routes stop contributing.
+
+  
+
+Whenever `cumulativeProb` changes, the downstream probability state and depth decisions must be revisited.
+
+  
+
+If it increases:
+
+  
+
+```text
+
+higher cumulativeProb
+
+→ recompute downstream edge probabilities
+
+→ recompute descendant cumulativeProb
+
+→ extend generation where the new depth budget requires it
+
+```
+
+  
+
+If it decreases:
+
+  
+
+```text
+
+lower cumulativeProb
+
+→ recompute downstream edge probabilities
+
+→ recompute descendant cumulativeProb
+
+→ recalculate effective depth limits
+
+→ prune continuation that is now deeper than the current rules justify
+
+```
+
+  
+
+An ordinary rerun should therefore converge towards the same structure a clean generation would produce from the same current human-data snapshot and configuration.
 
   
 
@@ -578,49 +796,63 @@ RM owns the operation that updates a route contribution and then recomputes the 
 
   
 
-Every repertoire move stores:
+Canonical exact progression identity lives on `RepertoireNode.history` as a deterministic UCI/LAN move sequence.
+
+  
+
+Ordinary shared continuation edges are already identified by:
 
   
 
 ```text
 
-routeHistory
-
-routeProbability
-
-humanDataSnapshotId
+fromNodeId + UCI/LAN move
 
 ```
 
   
 
-`routeHistory` is the full exact history up to and including that edge.
-
-  
-
-It is immutable.
-
-  
-
-Within a repertoire:
+Their exact canonical history can be derived from:
 
   
 
 ```text
 
-repertoireId + routeHistory
+fromNode.history
 
-→ unique route
++ move UCI/LAN
 
 ```
 
   
 
-If the history changes, it is a different route: remove the old edge and create the new one.
+They do not need to pretend to carry the history of every route that reaches the source node.
 
   
 
-This is especially important at transpositions.
+### Terminal routeHistory
+
+  
+
+`routeHistory` is kept where an exact non-canonical incoming route deliberately stops.
+
+  
+
+It is required for:
+
+  
+
+```text
+
+stopReason = "Transposition"
+
+stopReason = "Repetition"
+
+```
+
+  
+
+and stores the full canonical UCI/LAN sequence up to and including that terminal move.
 
   
 
@@ -642,19 +874,21 @@ Line A
 
 Line B
 
-→ has its own nodes and flashcards
-
 → later reaches the same PositionKey X
 
-→ its final edge points to X
+→ final B edge stores B's routeHistory
 
-→ B stops there
+→ final B edge points to X
+
+→ stopReason = "Transposition"
+
+→ B stops
 
 ```
 
   
 
-The final B edge keeps B's complete `routeHistory`, even though X retains A's surviving node history.
+The final B edge keeps B's exact route history, while X retains A's canonical node history.
 
   
 
@@ -664,7 +898,7 @@ Therefore:
 
 ```text
 
-move.routeHistory
+terminal transposition edge.routeHistory
 
 may differ from
 
@@ -674,7 +908,11 @@ toNode.history
 
   
 
-at a transposition.
+After X, shared continuation edges rely on X's canonical history. They do not claim to represent both A and B histories.
+
+  
+
+A repetition terminal similarly stores the exact UCI/LAN route that returned to an earlier `PositionKey`, but it has no `toNodeId` and cannot create a cycle.
 
   
 
@@ -682,15 +920,25 @@ at a transposition.
 
   
 
+  
+
 A move edge is identified by:
+
+  
 
   
 
 ```text
 
+  
+
 fromNodeId + UCI/LAN move
 
+  
+
 ```
+
+  
 
   
 
@@ -698,7 +946,33 @@ not SAN.
 
   
 
+  
+
 `toNodeId` is destination data, not part of edge identity.
+
+  
+
+For an ordinary continuation or transposition, `toNodeId` is required.
+
+  
+
+For a same-route repetition terminal:
+
+  
+
+```text
+
+stopReason = "Repetition"
+
+→ toNodeId = null
+
+```
+
+  
+
+so the final move may be preserved without creating a directed cycle back to an ancestor.
+
+  
 
   
 
@@ -706,21 +980,37 @@ SAN is persisted only as cached display metadata.
 
   
 
+  
+
 ```text
 
+  
+
 UCI/LAN
+
+  
 
 → authoritative
 
   
 
+  
+
 SAN
+
+  
 
 → derive from fromNode.fullFen + UCI/LAN
 
+  
+
 → cache for UI/logging
 
+  
+
 ```
+
+  
 
   
 
@@ -728,7 +1018,11 @@ A stale SAN mismatch is repaired automatically.
 
   
 
+  
+
 An illegal UCI/LAN move or a move that cannot be applied to the source `FullFen` is a hard error.
+
+  
 
   
 
@@ -736,7 +1030,11 @@ An illegal UCI/LAN move or a move that cannot be applied to the source `FullFen`
 
   
 
+  
+
 Creation and ordinary replacement/update use one complete validated move state rather than arbitrary optional patches.
+
+  
 
   
 
@@ -744,15 +1042,27 @@ RM must not silently preserve stale values merely because the current caller omi
 
   
 
+  
+
 ```text
+
+  
 
 build complete state
 
+  
+
 → validate
+
+  
 
 → write atomically
 
+  
+
 ```
+
+  
 
   
 
@@ -760,7 +1070,11 @@ The stored edge must never contain a mixture of old and new semantic state.
 
   
 
+  
+
 A narrowly scoped operation may still exist where its meaning is inherently narrow, for example later filling only the missing exact evaluation of an OPPONENT move.
+
+  
 
   
 
@@ -768,7 +1082,11 @@ A narrowly scoped operation may still exist where its meaning is inherently narr
 
   
 
+  
+
 RM derives the move's `repertoireId` from `fromNode.repertoireId`.
+
+  
 
   
 
@@ -776,19 +1094,35 @@ It verifies:
 
   
 
+  
+
 ```text
+
+  
 
 fromNode.repertoireId
 
+  
+
 =
+
+  
 
 toNode.repertoireId
 
+  
+
 =
+
+  
 
 move.repertoireId
 
+  
+
 ```
+
+  
 
   
 
@@ -796,7 +1130,11 @@ A cross-repertoire edge is a hard error.
 
   
 
+  
+
 `repertoireId` may remain stored on the move as useful checked redundancy, but it is not caller-authoritative.
+
+  
 
   
 
@@ -804,17 +1142,29 @@ A cross-repertoire edge is a hard error.
 
   
 
+  
+
 RM derives `playerTurn` from:
+
+  
 
   
 
 ```text
 
+  
+
 repertoire colour
+
+  
 
 + side to move in fromNode.fullFen
 
+  
+
 ```
+
+  
 
   
 
@@ -822,7 +1172,11 @@ The caller does not decide it.
 
   
 
+  
+
 The stored value may be retained for convenient querying, but RM derives and validates it whenever the move is created or rewritten.
+
+  
 
   
 
@@ -830,7 +1184,7 @@ The stored value may be retained for convenient querying, but RM derives and val
 
   
 
-Before writing an edge, RM verifies both nodes internally:
+Before writing an edge, RM verifies the source node internally:
 
   
 
@@ -844,7 +1198,15 @@ positionKeyFromFen(fromNode.fullFen)
 
   
 
-and:
+RM independently plays the authoritative UCI/LAN move from `fromNode.fullFen`.
+
+  
+
+The move must be legal for the side to move.
+
+  
+
+For a normal continuation, RM also verifies:
 
   
 
@@ -858,15 +1220,7 @@ positionKeyFromFen(toNode.fullFen)
 
   
 
-Then RM independently plays the authoritative UCI/LAN move from `fromNode.fullFen`.
-
-  
-
-The move must be legal for the side to move.
-
-  
-
-For a normal continuation:
+and:
 
   
 
@@ -878,7 +1232,7 @@ resulting FullFen
 
   
 
-resulting history
+resulting canonical UCI/LAN history
 
 === toNode.history
 
@@ -886,11 +1240,11 @@ resulting history
 
   
 
-An already-existing node may be reused as a normal continuation during rerun/resume only if it represents that exact same progression.
+An already-existing node may be reused as a normal continuation during rerun/resume only if it represents that exact same canonical progression.
 
   
 
-For a transposition:
+For an ordinary transposition:
 
   
 
@@ -916,7 +1270,7 @@ need not equal toNode.fullFen
 
   
 
-new routeHistory
+incoming routeHistory
 
 need not equal toNode.history
 
@@ -928,15 +1282,47 @@ because the existing canonical node keeps its own surviving progression.
 
   
 
-A transposition target must already exist. The caller/A4 explicitly tells RM whether the edge is a normal continuation or a transposition; RM validates that claim rather than deciding transposition policy itself.
+A transposition target must already exist.
 
   
 
-## Transpositions
+For a same-route repetition:
 
   
 
-A transposition is an ordinary repertoire move edge:
+```text
+
+resulting PositionKey
+
+= a PositionKey already seen earlier on the current route
+
+  
+
+stopReason = "Repetition"
+
+toNodeId = null
+
+```
+
+  
+
+RM validates the legal resulting position but must not create or point to a destination node for that repetition terminal.
+
+  
+
+The caller/A4 explicitly tells RM whether the edge is a normal continuation, ordinary transposition or repetition termination; RM validates that claim rather than deciding higher-level generation policy itself.
+
+  
+
+## Transpositions and repetitions
+
+  
+
+### Ordinary transposition
+
+  
+
+A normal transposition is an ordinary repertoire move edge:
 
   
 
@@ -952,11 +1338,11 @@ fromNodeId
 
   
 
-There is no duplicate "transposition node".
+There is no duplicate transposition node.
 
   
 
-The later line remains a genuine stored line up to that edge, with its own nodes, flashcards and `routeHistory`. It simply stops once it points into the already-existing canonical position.
+The later line remains a genuine stored line up to that edge, with its own preceding nodes and exact terminal `routeHistory`. It stops once it points into the already-existing canonical position.
 
   
 
@@ -968,7 +1354,11 @@ The canonical position has:
 
 one PositionKey
 
-one canonical FullFen/history
+one canonical FullFen
+
+one canonical UCI/LAN history
+
+one canonical opening classification
 
 one canonical RESPONSE
 
@@ -986,11 +1376,61 @@ The canonical node's surviving `FullFen` is authoritative for the one shared con
 
   
 
-The later transposing route preserves its own exact progression only up to the incoming transposition edge. Its resulting `FullFen` need only produce the same `PositionKey`; it does not create a second continuation because its discarded FEN fields differ.
+The later transposing route preserves its own exact progression only up to the incoming transposition edge. Its resulting `FullFen` need only produce the same `PositionKey`; it does not create a second continuation because discarded FEN fields or opening classification differ.
 
   
 
-Its `routeProbability` is added as another unique contribution to the canonical node's `cumulativeProb`.
+Its incoming `routeProbability` is added as another contribution to the canonical node's `cumulativeProb`.
+
+  
+
+### Repetition is not a transposition
+
+  
+
+Before treating a reached `PositionKey` as an ordinary transposition, the generator must check whether that same `PositionKey` already occurred earlier on the **current route**.
+
+  
+
+If yes:
+
+  
+
+```text
+
+stopReason = "Repetition"
+
+→ store terminal move if required
+
+→ store exact terminal routeHistory
+
+→ toNodeId = null
+
+→ do not add probability back into the earlier node
+
+→ do not continue generation
+
+```
+
+  
+
+This prevents directed cycles such as:
+
+  
+
+```text
+
+X → Y → X
+
+```
+
+  
+
+from entering the repertoire graph or probability model.
+
+  
+
+This is a structural anti-cycle rule. It does not implement full threefold-repetition adjudication.
 
   
 
@@ -998,7 +1438,7 @@ Its `routeProbability` is added as another unique contribution to the canonical 
 
   
 
-A canonical node may store `isTransposition = true` when two or more distinct repertoire routes currently reach that node.
+A canonical node may store `isTransposition = true` when two or more distinct non-repetition repertoire routes currently reach that node.
 
   
 
@@ -1006,11 +1446,15 @@ This is derived metadata, not permanent historical truth.
 
   
 
-`2 or more distinct incoming routes → isTransposition = true`
+`2 or more distinct incoming non-repetition routes → isTransposition = true`
 
   
 
-`0 or 1 distinct incoming route → isTransposition = false`
+`0 or 1 distinct incoming non-repetition route → isTransposition = false`
+
+  
+
+Repetition terminals do not count.
 
   
 
@@ -1022,11 +1466,23 @@ A node must not remain marked as a transposition merely because it was one in an
 
   
 
-A route that stops because it merges into an already-existing canonical node records `stopReason = "Transposition"` on the incoming transposition edge.
+A route that stops because it merges into an already-existing canonical node records:
 
   
 
-If a later rerun changes that route so that it no longer ends in a transposition, the old `stopReason` must be cleared or replaced.
+```text
+
+stopReason = "Transposition"
+
+```
+
+  
+
+on that incoming edge.
+
+  
+
+If a later rerun changes the route so that the reason no longer applies, the old `stopReason` must be cleared or replaced.
 
   
 
@@ -1058,7 +1514,7 @@ Any transposition edges that pointed into the deleted structure disappear throug
 
   
 
-Do not keep X and mutate its `FullFen` or history in place to promote another route.
+Do not keep X and mutate its `FullFen`, history or opening classification in place to promote another route.
 
   
 
@@ -1072,7 +1528,9 @@ create/rebuild X from that surviving route
 
 → use its exact FullFen
 
-→ use its exact history
+→ use its canonical UCI/LAN history
+
+→ use its progression-specific ECO/openingName
 
 → recompute cumulative probability
 
@@ -1092,11 +1550,15 @@ Because the previous canonical continuation was deleted, its old RESPONSE verifi
 
   
 
-If a new transposition raises an already-processed node's `cumulativeProb`, merely updating that node is insufficient.
+When a transposition changes an already-processed node's `cumulativeProb`, merely updating that node is insufficient.
 
   
 
-The increase is propagated through the existing downstream structure:
+The canonical shared continuation always starts from the node's **combined** `cumulativeProb`.
+
+  
+
+If a new incoming route raises X:
 
   
 
@@ -1104,21 +1566,43 @@ The increase is propagated through the existing downstream structure:
 
 X cumulativeProb increases
 
-→ recompute affected downstream routeProbability values
+→ recompute existing outgoing routeProbability from X
 
 → recompute affected descendant cumulativeProb values
 
 → re-run expansion/depth decisions
 
+→ extend where the higher probability now justifies additional depth
+
 ```
 
   
 
-If this reaches another transposition, update that shared node too and continue through its surviving downstream structure.
+If an incoming route disappears and lowers X:
 
   
 
-Existing moves are not rebuilt just because probability increased. New generation occurs only where the higher probability now justifies additional depth.
+```text
+
+X cumulativeProb decreases
+
+→ recompute existing outgoing routeProbability from X
+
+→ recompute affected descendant cumulativeProb values
+
+→ re-run expansion/depth decisions
+
+→ prune structure that is now deeper than the current probability budget justifies
+
+```
+
+  
+
+If propagation reaches another transposition, recompute that shared node from all of its current incoming non-repetition contributions and continue through its canonical downstream structure.
+
+  
+
+Do not propagate one original incoming route's probability through the shared continuation after a merge.
 
   
 
@@ -1140,8 +1624,6 @@ prob
 
 routeProbability
 
-routeHistory
-
 humanDataSnapshotId
 
 optional cp or mate
@@ -1152,11 +1634,25 @@ optional evaluationSource
 
   
 
+A terminating transposition/repetition edge also stores its exact `routeHistory` and `stopReason`.
+
+  
+
 `prob` is required.
 
   
 
-`routeProbability` is required.
+`routeProbability` is required and is calculated from the source node's combined probability:
+
+  
+
+```text
+
+routeProbability
+
+= fromNode.cumulativeProb × prob
+
+```
 
   
 
@@ -1240,8 +1736,6 @@ cached SAN
 
 routeProbability
 
-routeHistory
-
 humanDataSnapshotId
 
   
@@ -1266,6 +1760,24 @@ deepVerified
 
   
 
+A terminating transposition/repetition RESPONSE edge, if such a terminal case occurs, also stores its exact `routeHistory` and `stopReason`.
+
+  
+
+A normal RESPONSE carries the source node's combined probability:
+
+  
+
+```text
+
+routeProbability
+
+= fromNode.cumulativeProb
+
+```
+
+  
+
 A RESPONSE must have an exact evaluation before it is finalised.
 
   
@@ -1274,23 +1786,39 @@ A RESPONSE must have an exact evaluation before it is finalised.
 
   
 
+  
+
 All stored evaluations use one colour-absolute convention.
+
+  
 
   
 
 ```text
 
+  
+
 positive cp
+
+  
 
 → better for White
 
   
 
+  
+
 negative cp
+
+  
 
 → better for Black
 
+  
+
 ```
+
+  
 
   
 
@@ -1298,19 +1826,33 @@ Mate uses signed `#N` semantics:
 
   
 
+  
+
 ```text
 
+  
+
 #1  → White mates in 1
+
+  
 
 #3  → White mates in 3
 
   
 
+  
+
 #-1 → Black mates in 1
+
+  
 
 #-4 → Black mates in 4
 
+  
+
 ```
+
+  
 
   
 
@@ -1318,7 +1860,11 @@ Internally `mate` may be a signed integer; `#` is display notation.
 
   
 
+  
+
 `mate = 0` is invalid.
+
+  
 
   
 
@@ -1326,23 +1872,41 @@ Internally `mate` may be a signed integer; `#` is display notation.
 
   
 
+  
+
 ```text
+
+  
 
 normal evaluation
 
+  
+
 → cp present
+
+  
 
 → mate null
 
   
 
+  
+
 forced mate
+
+  
 
 → cp null
 
+  
+
 → mate non-zero
 
+  
+
 ```
+
+  
 
   
 
@@ -1350,11 +1914,15 @@ Never convert mate to an artificial centipawn value.
 
   
 
+  
+
 Whenever an evaluation exists, its source is required and written atomically with it.
 
   
 
-Controlled source values include:
+  
+
+Controlled evaluation-source values are:
 
   
 
@@ -1366,9 +1934,13 @@ Controlled source values include:
 
 "Local Deep Stockfish"
 
-"Hardcoded Opening"
-
 ```
+
+  
+
+`"Hardcoded Opening"` is not an evaluation source. It belongs only to `selectionMethod`, because it explains how the RESPONSE was chosen rather than where its evaluation came from.
+
+  
 
   
 
@@ -1376,7 +1948,11 @@ Controlled source values include:
 
   
 
+  
+
 Keep two separate controlled concepts.
+
+  
 
   
 
@@ -1384,13 +1960,23 @@ Keep two separate controlled concepts.
 
   
 
+  
+
 ```text
+
+  
 
 "Human Move"
 
+  
+
 "Engine Move"
 
+  
+
 ```
+
+  
 
   
 
@@ -1398,7 +1984,11 @@ Keep two separate controlled concepts.
 
   
 
+  
+
 "Engine Move" means no human candidate survived and the engine supplied the response.
+
+  
 
   
 
@@ -1406,17 +1996,49 @@ Keep two separate controlled concepts.
 
   
 
+  
+
 ```text
+
+  
 
 "Ordinary API"
 
+  
+
 "Corrected after Deep Verification"
+
+  
 
 "Local Engine Fallback"
 
+  
+
 "Hardcoded Opening"
 
+  
+
 ```
+
+  
+
+For a hardcoded opening RESPONSE:
+
+  
+
+```text
+
+selectionMethod = "Hardcoded Opening"
+
+source = actual evaluation source
+
+```
+
+  
+
+The evaluation source must still be Lichess, ChessDB or Local Deep Stockfish. A hardcoded move is not finalised without the exact evaluation required of every RESPONSE.
+
+  
 
   
 
@@ -1424,17 +2046,29 @@ These concepts are independent.
 
   
 
+  
+
 For example:
+
+  
 
   
 
 ```text
 
+  
+
 selectionMethod = "Corrected after Deep Verification"
+
+  
 
 moveOrigin = "Human Move"
 
+  
+
 ```
+
+  
 
   
 
@@ -1442,17 +2076,29 @@ is valid if deep verification vetoed the previous response but a different human
 
   
 
+  
+
 Likewise:
+
+  
 
   
 
 ```text
 
+  
+
 selectionMethod = "Corrected after Deep Verification"
+
+  
 
 moveOrigin = "Engine Move"
 
+  
+
 ```
+
+  
 
   
 
@@ -1460,7 +2106,11 @@ is valid if no human candidate survived and Local Deep Stockfish supplied the re
 
   
 
+  
+
 `selectionReason` also belongs only to RESPONSE moves.
+
+  
 
   
 
@@ -1468,7 +2118,11 @@ is valid if no human candidate survived and Local Deep Stockfish supplied the re
 
   
 
+  
+
 For a newly selected RESPONSE, `source` identifies the evaluation source whose result currently justifies that response.
+
+  
 
   
 
@@ -1476,17 +2130,31 @@ If the RESPONSE later survives Local Deep Stockfish verification:
 
   
 
+  
+
 ```text
+
+  
 
 same RESPONSE survives tolerance
 
+  
+
 → keep original stored evaluation
+
+  
 
 → keep original source
 
+  
+
 → deepVerified = true
 
+  
+
 ```
+
+  
 
   
 
@@ -1494,7 +2162,11 @@ Do not overwrite a valid Lichess/ChessDB selection evaluation merely because Loc
 
   
 
+  
+
 This preserves useful provenance: the original source/evaluation still explains why that RESPONSE entered the repertoire.
+
+  
 
   
 
@@ -1502,17 +2174,31 @@ If deep verification vetoes the RESPONSE, replacement is a separate workflow. Af
 
   
 
+  
+
 ```text
+
+  
 
 source = "Local Deep Stockfish"
 
+  
+
 selectionMethod = "Corrected after Deep Verification"
+
+  
 
 moveOrigin = "Human Move" or "Engine Move"
 
+  
+
 deepVerified = true
 
+  
+
 ```
+
+  
 
   
 
@@ -1520,7 +2206,11 @@ depending on whether the new response came from the rebuilt HCM list or from the
 
   
 
+  
+
 ## Deep-verification correction
+
+  
 
   
 
@@ -1528,19 +2218,33 @@ A DV veto does not automatically change the repertoire.
 
   
 
+  
+
 The human candidate list is rebuilt exactly as ordinary generation builds it:
+
+  
 
   
 
 ```text
 
+  
+
 current human-move cache
+
+  
 
 → same HCM filtering
 
+  
+
 → same HCM ranking/order
 
+  
+
 ```
+
+  
 
   
 
@@ -1548,25 +2252,43 @@ The API verification layer is skipped.
 
   
 
+  
+
 Local Deep Stockfish assesses the HCMs in that original order.
+
+  
 
   
 
 ```text
 
+  
+
 first HCM that survives local tolerance
+
+  
 
 → proposed replacement Human Move
 
   
 
+  
+
 no HCM survives
+
+  
 
 → top Local Deep Stockfish move
 
+  
+
 → proposed replacement Engine Move
 
+  
+
 ```
+
+  
 
   
 
@@ -1574,15 +2296,25 @@ The script stops and waits for the user's decision.
 
   
 
+  
+
 If rejected:
+
+  
 
   
 
 ```text
 
+  
+
 → database repertoire remains unchanged
 
+  
+
 ```
+
+  
 
   
 
@@ -1590,19 +2322,35 @@ If approved:
 
   
 
+  
+
 ```text
+
+  
 
 → delete old RESPONSE edge
 
+  
+
 → delete everything after it
+
+  
 
 → create replacement RESPONSE fresh
 
+  
+
 → stop at the replacement
+
+  
 
 → later generator run rebuilds the missing continuation
 
+  
+
 ```
+
+  
 
   
 
@@ -1610,7 +2358,11 @@ No archive or audit copy of the removed subtree is kept.
 
   
 
+  
+
 ## Destructive truncation and reruns
+
+  
 
   
 
@@ -1618,35 +2370,59 @@ The repertoire deliberately favours simple destructive regeneration over complic
 
   
 
+  
+
 When the selected RESPONSE actually changes:
+
+  
 
   
 
 ```text
 
+  
+
 old RESPONSE
 
+  
+
 → delete
+
+  
 
   
 
 everything downstream
 
+  
+
 → delete
+
+  
 
   
 
 replacement
 
+  
+
 → create
+
+  
 
   
 
 later run
 
+  
+
 → rebuild gaps
 
+  
+
 ```
+
+  
 
   
 
@@ -1654,7 +2430,11 @@ Transposition connections into deleted nodes disappear with the deleted structur
 
   
 
+  
+
 A missing continuation after such deletion is an ordinary unfinished branch, not corruption.
+
+  
 
   
 
@@ -1662,7 +2442,11 @@ No persistent `finalised` marker is required.
 
   
 
+  
+
 Every ordinary generator rerun re-walks the repertoire using the current configuration and the current human-data snapshot.
+
+  
 
   
 
@@ -1670,13 +2454,23 @@ If recomputation chooses the same UCI/LAN RESPONSE:
 
   
 
+  
+
 ```text
+
+  
 
 → keep downstream tree
 
+  
+
 → update current source/evaluation/provenance if current recomputation differs
 
+  
+
 ```
+
+  
 
   
 
@@ -1684,15 +2478,27 @@ If it chooses a different UCI/LAN RESPONSE:
 
   
 
+  
+
 ```text
+
+  
 
 → delete old RESPONSE + everything downstream
 
+  
+
 → create new RESPONSE
+
+  
 
 → rebuild
 
+  
+
 ```
+
+  
 
   
 
@@ -1700,25 +2506,47 @@ Similarly, the stored OPPONENT branch set must match the recomputed set:
 
   
 
+  
+
 ```text
 
+  
+
 still selected
+
+  
 
 → keep/recompute
 
   
 
+  
+
 no longer selected
+
+  
 
 → delete edge + downstream
 
   
 
+  
+
 newly selected
+
+  
 
 → create and generate
 
+  
+
 ```
+
+  
+
+  
+
+If recomputation changes incoming probability contributions, RM also propagates the new `cumulativeProb` values. Increased probability may extend a branch; decreased probability may prune continuation that is now deeper than the current depth budget allows.
 
   
 
@@ -1726,7 +2554,11 @@ A deliberate **new human-data snapshot** is different from an ordinary rerun. It
 
   
 
+  
+
 Repertoire-tree deletion does not delete reusable engine caches.
+
+  
 
   
 
@@ -1734,7 +2566,11 @@ Repertoire-tree deletion does not delete reusable engine caches.
 
   
 
+  
+
 ## Flashcards and SRS
+
+  
 
   
 
@@ -1742,19 +2578,35 @@ Flashcard identity follows `PositionKey`, not exact move history or transient da
 
   
 
+  
+
 ```text
+
+  
 
 different histories
 
+  
+
 → same PositionKey
+
+  
 
 → same training position
 
+  
+
 → same flashcard
+
+  
 
 → same SRS progress
 
+  
+
 ```
+
+  
 
   
 
@@ -1762,19 +2614,33 @@ One `PositionKey` must therefore have one canonical RESPONSE.
 
   
 
+  
+
 The stable learned-item identity is:
+
+  
 
   
 
 ```text
 
+  
+
 repertoireId
+
+  
 
 + PositionKey
 
+  
+
 + RESPONSE UCI/LAN
 
+  
+
 ```
+
+  
 
   
 
@@ -1782,7 +2648,11 @@ A `RepertoireNode.id` or `RepertoireMove.id` must not be required for a card to 
 
   
 
+  
+
 ### During a fresh human-data rebuild
+
+  
 
   
 
@@ -1790,7 +2660,11 @@ Deleting the old generated tree must not immediately delete all flashcards.
 
   
 
+  
+
 Keep existing cards provisionally while the new tree is being generated.
+
+  
 
   
 
@@ -1798,19 +2672,35 @@ When a rebuilt position appears:
 
   
 
+  
+
 ```text
+
+  
 
 same PositionKey
 
+  
+
 + same RESPONSE
+
+  
 
 → preserve flashcard
 
+  
+
 → preserve all SRS progress
+
+  
 
 → update current statistical metadata as needed
 
+  
+
 ```
+
+  
 
   
 
@@ -1818,19 +2708,35 @@ If the rebuilt position uses a different RESPONSE:
 
   
 
+  
+
 ```text
+
+  
 
 same PositionKey
 
+  
+
 + different RESPONSE
+
+  
 
 → delete old card
 
+  
+
 → create new card
+
+  
 
 → fresh SRS state
 
+  
+
 ```
+
+  
 
   
 
@@ -1838,21 +2744,37 @@ If an old position has not appeared yet, do not delete its card merely because g
 
   
 
+  
+
 Only after the new repertoire tree completes successfully:
+
+  
 
   
 
 ```text
 
+  
+
 old card has no matching PositionKey + RESPONSE
+
+  
 
 in the finished new tree
 
+  
+
 → delete old card
+
+  
 
 → delete its SRS state
 
+  
+
 ```
+
+  
 
   
 
@@ -1860,7 +2782,11 @@ This makes interrupted generation safe for existing study progress.
 
   
 
+  
+
 #roadmap Order newly added flashcards by `cumulativeProb`, highest first, so the most probable positions enter the initial learning queue first. After cards enter normal SRS scheduling, day-to-day reviews should follow the SRS schedule rather than `cumulativeProb`.
+
+  
 
   
 
@@ -1868,55 +2794,119 @@ This makes interrupted generation safe for existing study progress.
 
   
 
+  
+
 The present RM diagram/code will eventually need to change substantially:
+
+  
 
   
 
 - replace shortened-FEN-only node storage with canonical `FullFen` + `PositionKey`
 
+  
+
 - add canonical-position lookup by `repertoireId + PositionKey`
+
+  
 
 - enforce unique `repertoireId + PositionKey`
 
+  
+
 - remove trap/threat fields
+
+  
 
 - add `humanDataSnapshotId`
 
+  
+
 - change move identity from `fromNodeId + SAN` to `fromNodeId + UCI/LAN`
 
-- keep SAN only as derived cached metadata
+  
 
-- rename `trueProbability` to `routeProbability`
+- keep SAN/PGN only as derived display metadata and use canonical UCI/LAN sequences for progression identity
 
-- store `routeProbability` and full `routeHistory` on every move edge
+  
 
-- make `repertoireId + routeHistory` unique
+- rename `trueProbability` to `routeProbability` and define it as probability mass carried from `fromNode.cumulativeProb`
+
+  
+
+- store `routeProbability` on move edges; keep full `routeHistory` on terminating transposition/repetition routes
+
+  
+
+- use `repertoireId + canonical node history` for exact canonical progression identity
+
+  
 
 - derive `playerTurn` and move `repertoireId` rather than trusting caller values
 
+  
+
 - replace source-specific repertoire evaluation fields with generic `cp`, `mate` and controlled `source`
+
+  
 
 - add RESPONSE provenance fields `selectionMethod` and `moveOrigin`
 
+  
+
 - use complete validated atomic move writes instead of loose optional-field upserts
+
+  
 
 - centralise route contribution updates and `cumulativeProb` recomputation in RM
 
+  
+
 - treat `RepertoireNode.id` as disposable structural identity and `repertoireId + PositionKey` as stable repertoire-position identity
+
+  
 
 - rebuild the entire generated tree when a fresh human-data snapshot begins
 
+  
+
 - never mix current tree rows from different human-data snapshots
+
+  
 
 - use the canonical route's exact `FullFen` for the shared continuation after a transposition
 
+  
+
 - delete a canonical node with its owning branch rather than promoting another route in place
+
+  
 
 - allow a surviving route to rebuild that PositionKey from its own exact `FullFen` and history
 
+  
+
 - preserve flashcards provisionally during a full rebuild and remove obsolete cards only after successful completion
 
-- persist and enforce a generation lock while the generator is running
+  
+
+- persist and enforce a generation lock until generation completes successfully; interruptions remain locked
+
+- exclude `"Hardcoded Opening"` from evaluation sources and keep it only as RESPONSE `selectionMethod`
+
+- keep `ECO` and `openingName` on the concrete canonical progression rather than global `Position`
+
+- treat same-route repeated PositionKey as terminal `stopReason = "Repetition"` rather than a transposition
+
+- allow repetition terminal moves to have no `toNodeId`, preventing graph cycles
+
+- exclude repetition terminals from canonical-node `cumulativeProb`
+
+- propagate the combined canonical `cumulativeProb` after transpositions rather than one original route probability
+
+- propagate probability decreases as well as increases and prune depth that is no longer justified
+
+  
 
   
 

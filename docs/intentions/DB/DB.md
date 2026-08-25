@@ -3,26 +3,42 @@ tags:
   - processed
 ---
 # DB — Database structure and ownership
-  
+
 ## Intention
 
-
+  
+  
+  
 
 The database should separate four different kinds of data clearly:
 
   
 
+  
+
 ```text
+
+  
 
 permanent chess-position identity
 
+  
+
 repertoire-specific tree structure
+
+  
 
 temporary human-data snapshots
 
+  
+
 reusable engine evaluations
 
+  
+
 ```
+
+  
 
   
 
@@ -30,7 +46,11 @@ These parts may refer to the same chess position, but they have different lifeti
 
   
 
+  
+
 The current database mixes some of these responsibilities. In particular, `PositionCache` currently owns `RepertoireNode` rows through a cascading foreign key, so deleting cached position data can delete repertoire structure and study data. That ownership direction is not intended.
+
+  
 
   
 
@@ -38,7 +58,11 @@ The current database mixes some of these responsibilities. In particular, `Posit
 
   
 
+  
+
 One row represents one user.
+
+  
 
   
 
@@ -46,17 +70,29 @@ Stores:
 
   
 
+  
+
 ```text
+
+  
 
 id
 
+  
+
 username
+
+  
 
 ```
 
   
 
+  
+
 A user may own many repertoires.
+
+  
 
   
 
@@ -88,7 +124,7 @@ generationStatus
 
   
 
-`generationStatus` records whether the repertoire is currently being generated:
+`generationStatus` records whether the repertoire is currently safe for normal use:
 
   
 
@@ -102,11 +138,43 @@ GENERATING
 
   
 
-While `generationStatus = GENERATING`, the app must block the user from interacting with the repertoire being rebuilt. The backend must enforce the same lock rather than relying only on disabled UI controls.
+The meaning is strict:
 
   
 
-The exact crash/interruption recovery mechanism for a stale `GENERATING` state will be settled separately; it must not leave the repertoire permanently unusable.
+```text
+
+IDLE
+
+→ the generated repertoire is complete
+
+→ normal user interaction is allowed
+
+```
+
+  
+
+```text
+
+GENERATING
+
+→ the repertoire is being built, rebuilt, resumed or is incomplete after an interruption
+
+→ normal user interaction is blocked
+
+```
+
+  
+
+The backend must enforce the lock rather than relying only on disabled UI controls.
+
+  
+
+A generator crash or interruption does **not** clear the lock. The repertoire is still transitional and must remain unavailable for normal study/editing until generation resumes and completes successfully.
+
+  
+
+Only successful generation completion may return the repertoire to `IDLE`, after final tree checks and flashcard reconciliation have completed.
 
   
 
@@ -194,19 +262,19 @@ Stores:
 
 PositionKey
 
-ECO, if known
-
-openingName, if known
-
 ```
 
   
 
-`ECO` and `openingName` belong to the unique normalised position and therefore live here.
+Only information that is genuinely position-global belongs here.
 
   
 
-Wikibooks text does **not** belong here. Wikibooks information is history-specific and follows the behaviour already established in [[W]].
+`ECO` and `openingName` do **not** belong to the global `Position`. Opening classification can depend on the move sequence that reached the board position, so it belongs to the concrete repertoire progression instead.
+
+  
+
+Wikibooks text also does **not** belong here. Wikibooks information is history-specific and follows the behaviour already established in [[W]].
 
   
 
@@ -260,7 +328,7 @@ Position
 
 RepertoireNode
 
-→ repertoire structure that uses that position
+→ repertoire structure and progression-specific metadata
 
   
 
@@ -400,7 +468,7 @@ The intended sequence is:
 
 ```text
 
-lock the repertoire for generation
+generationStatus = GENERATING
 
 → keep existing flashcards/SRS temporarily
 
@@ -412,7 +480,7 @@ lock the repertoire for generation
 
 → generate again from the normal root position
 
-→ fetch new human data as positions are reached
+→ fetch human data as positions are reached
 
 → attach every new node and move to the new snapshot
 
@@ -424,7 +492,7 @@ Reusable engine caches are independent and remain intact.
 
   
 
-The current generated tree must never contain a mixture of nodes or moves from two human-data snapshots. The invariant is:
+The current generated tree must never contain a mixture of nodes or moves from two human-data snapshots:
 
   
 
@@ -438,7 +506,39 @@ every node and move in the current generated repertoire tree
 
   
 
-If generation stops halfway through, the new snapshot and tree are simply incomplete. Generation resumes using that same snapshot and fetches missing human data as required.
+If generation stops or crashes halfway through:
+
+  
+
+```text
+
+partial new tree
+
+→ keep
+
+  
+
+current HumanDataSnapshot
+
+→ keep
+
+  
+
+generationStatus
+
+→ remain GENERATING
+
+  
+
+normal user interaction
+
+→ remain blocked
+
+```
+
+  
+
+Generation later resumes using that same snapshot and fills the missing structure. Do not start another fresh snapshot merely because the previous generator process was interrupted.
 
   
 
@@ -508,11 +608,17 @@ old flashcard not represented in the finished new tree
 
   
 
-This prevents an interrupted rebuild from destroying study progress for positions that would have reappeared later.
+Then perform final consistency checks and:
 
   
 
-After success or an explicitly handled stop/failure, the generation lock is released.
+```text
+
+generationStatus = IDLE
+
+→ unlock normal user interaction
+
+```
 
   
 
@@ -524,7 +630,11 @@ There is no need to preserve the previous human snapshot historically.
 
   
 
+  
+
 One row records that one human database was successfully queried for one position under one snapshot.
+
+  
 
   
 
@@ -532,17 +642,31 @@ Conceptually:
 
   
 
+  
+
 ```text
+
+  
 
 Position
 
+  
+
 + HumanDataSnapshot
+
+  
 
 + database type
 
+  
+
 → successful fetch record
 
+  
+
 ```
+
+  
 
   
 
@@ -550,15 +674,27 @@ Database type:
 
   
 
+  
+
 ```text
+
+  
 
 Masters
 
+  
+
 Elite
+
+  
 
 Amateur
 
+  
+
 ```
+
+  
 
   
 
@@ -566,45 +702,81 @@ This replaces the fake `_EMPTY_` move.
 
   
 
+  
+
 The distinction becomes:
 
   
 
+  
+
 ```text
+
+  
 
 no HumanExplorerFetch
 
+  
+
 → this source has not been fetched
+
+  
 
 ```
 
   
 
+  
+
 ```text
 
+  
+
 HumanExplorerFetch exists
+
+  
 
 + zero human move rows
 
+  
+
 → source was fetched successfully
 
+  
+
 → genuinely no moves were returned
+
+  
 
 ```
 
   
 
+  
+
 ```text
+
+  
 
 HumanExplorerFetch exists
 
+  
+
 + move rows exist
+
+  
 
 → source was fetched successfully
 
+  
+
 → use those moves
 
+  
+
 ```
+
+  
 
   
 
@@ -612,7 +784,11 @@ The successful fetch marker and its move rows represent one complete fetch resul
 
   
 
+  
+
 ## DB.06 — ExplorerMoveCache
+
+  
 
   
 
@@ -620,21 +796,37 @@ One row stores the human-game statistics for one actual chess move returned by o
 
   
 
+  
+
 Identity:
+
+  
 
   
 
 ```text
 
+  
+
 Position
+
+  
 
 + HumanDataSnapshot
 
+  
+
 + database type
+
+  
 
 + UCI/LAN move
 
+  
+
 ```
+
+  
 
   
 
@@ -642,21 +834,39 @@ Stores:
 
   
 
+  
+
 ```text
+
+  
 
 UCI/LAN move
 
+  
+
 SAN
+
+  
 
 games
 
+  
+
 White wins
+
+  
 
 draws
 
+  
+
 Black wins
 
+  
+
 ```
+
+  
 
   
 
@@ -664,23 +874,41 @@ Human explorer APIs may return SAN.
 
   
 
+  
+
 The cache converts that SAN to UCI/LAN using the exact source position before storing the move.
+
+  
 
   
 
 ```text
 
+  
+
 API SAN
+
+  
 
 → validate against Position
 
+  
+
 → convert to UCI/LAN
+
+  
 
 → UCI/LAN becomes authoritative identity
 
+  
+
 → keep SAN as source/display text
 
+  
+
 ```
+
+  
 
   
 
@@ -688,21 +916,37 @@ This keeps human-cache move identity consistent with the rest of the project.
 
   
 
+  
+
 If even one returned SAN cannot be legally converted from the exact source position:
+
+  
 
   
 
 ```text
 
+  
+
 → reject the complete database fetch
+
+  
 
 → store none of its move rows
 
+  
+
 → do not mark the fetch successful
+
+  
 
 → report/log the invalid response
 
+  
+
 ```
+
+  
 
   
 
@@ -710,7 +954,11 @@ Do not silently drop one broken move and preserve a partial statistical dataset.
 
   
 
+  
+
 ### Lifetime
+
+  
 
   
 
@@ -718,7 +966,11 @@ Human move rows are temporary.
 
   
 
+  
+
 They belong to one `HumanDataSnapshot`.
+
+  
 
   
 
@@ -726,7 +978,11 @@ Starting a fresh snapshot for that repertoire removes the previous human move ca
 
   
 
+  
+
 They are reusable only within the lifetime of their snapshot.
+
+  
 
   
 
@@ -734,7 +990,11 @@ They are reusable only within the lifetime of their snapshot.
 
   
 
+  
+
 Remote engine/API evaluations are independent of human snapshots and are reusable indefinitely.
+
+  
 
   
 
@@ -742,13 +1002,23 @@ This cache is for remote sources such as:
 
   
 
+  
+
 ```text
+
+  
 
 Lichess Cloud Evaluation
 
+  
+
 ChessDB
 
+  
+
 ```
+
+  
 
   
 
@@ -756,19 +1026,33 @@ Engine-cache identity must use the exact concrete `FullFen` that was evaluated.
 
   
 
+  
+
 One current entry is kept per:
+
+  
 
   
 
 ```text
 
+  
+
 FullFen
+
+  
 
 + UCI/LAN move
 
+  
+
 + source
 
+  
+
 ```
+
+  
 
   
 
@@ -776,7 +1060,11 @@ Do not identify an engine evaluation only by `PositionKey`.
 
   
 
+  
+
 Two concrete progressions may share one `PositionKey` while having different rule-sensitive FEN state, particularly the half-move clock.
+
+  
 
   
 
@@ -784,13 +1072,23 @@ For example:
 
   
 
+  
+
 ```text
+
+  
 
 same PositionKey
 
+  
+
 half-move clock = 0
 
+  
+
 ```
+
+  
 
   
 
@@ -798,13 +1096,23 @@ and:
 
   
 
+  
+
 ```text
+
+  
 
 same PositionKey
 
+  
+
 half-move clock = 99
 
+  
+
 ```
+
+  
 
   
 
@@ -812,7 +1120,11 @@ must not automatically share one cached engine evaluation.
 
   
 
+  
+
 The cache keeps the latest available evaluation for that exact `FullFen + move + source` rather than preserving historical versions.
+
+  
 
   
 
@@ -820,25 +1132,47 @@ Stores conceptually:
 
   
 
+  
+
 ```text
+
+  
 
 FullFen
 
+  
+
 Position, if useful as a shared-position reference
+
+  
 
 UCI/LAN move
 
+  
+
 SAN, if useful
+
+  
 
 cp or mate
 
+  
+
 rank, if supplied/useful
+
+  
 
 source
 
+  
+
 sourceVersion, if the provider exposes one
 
+  
+
 ```
+
+  
 
   
 
@@ -846,23 +1180,41 @@ sourceVersion, if the provider exposes one
 
   
 
+  
+
 If a newer result from the same source is stored:
+
+  
 
   
 
 ```text
 
+  
+
 same FullFen
+
+  
 
 + same move
 
+  
+
 + same source
+
+  
 
 → replace old result
 
+  
+
 → retain newest result
 
+  
+
 ```
+
+  
 
   
 
@@ -870,7 +1222,11 @@ Engine evaluations have no routine expiry.
 
   
 
+  
+
 Human snapshot refreshes do not delete them.
+
+  
 
   
 
@@ -878,7 +1234,11 @@ Human snapshot refreshes do not delete them.
 
   
 
+  
+
 Remote engine/API fetch status is tracked independently from stored evaluation rows.
+
+  
 
   
 
@@ -886,19 +1246,33 @@ Fetch status also belongs to the exact concrete FEN that was queried.
 
   
 
+  
+
 Conceptually:
+
+  
 
   
 
 ```text
 
+  
+
 FullFen
+
+  
 
 + source
 
+  
+
 → successfully fetched
 
+  
+
 ```
+
+  
 
   
 
@@ -906,11 +1280,19 @@ This distinguishes:
 
   
 
+  
+
 ```text
+
+  
 
 not fetched
 
+  
+
 ```
+
+  
 
   
 
@@ -918,11 +1300,19 @@ from:
 
   
 
+  
+
 ```text
+
+  
 
 fetched successfully but nothing usable returned
 
+  
+
 ```
+
+  
 
   
 
@@ -930,7 +1320,11 @@ A successful fetch for another `FullFen` with the same `PositionKey` must not su
 
   
 
+  
+
 Local Deep Stockfish does not participate in this remote-fetch status.
+
+  
 
   
 
@@ -938,7 +1332,11 @@ This also prevents the old behaviour where the existence of some unrelated engin
 
   
 
+  
+
 ## DB.09 — LocalDeepEvalCache
+
+  
 
   
 
@@ -946,7 +1344,11 @@ Local Deep Stockfish has a separate cache because its result has a different mea
 
   
 
+  
+
 Only **deep** local Stockfish results are stored.
+
+  
 
   
 
@@ -954,7 +1356,11 @@ There is no shallow local-engine cache.
 
   
 
+  
+
 Local Deep Stockfish cache identity uses the exact `FullFen` supplied to Stockfish.
+
+  
 
   
 
@@ -962,13 +1368,23 @@ One result is identified conceptually by:
 
   
 
+  
+
 ```text
+
+  
 
 FullFen
 
+  
+
 + checked UCI/LAN move
 
+  
+
 ```
+
+  
 
   
 
@@ -976,7 +1392,11 @@ Do not identify a Local Deep Stockfish result only by `PositionKey`.
 
   
 
+  
+
 Two repertoire nodes may share one `PositionKey` but have different concrete `FullFen` values. Their engine results must not be treated as interchangeable when the discarded FEN fields can affect rule-sensitive evaluation.
+
+  
 
   
 
@@ -984,19 +1404,33 @@ One Local Deep Stockfish result always contains two explicit evaluations:
 
   
 
+  
+
 ```text
 
+  
+
 checked move
+
+  
 
 + checked move evaluation
 
   
 
+  
+
 top move
+
+  
 
 + top move evaluation
 
+  
+
 ```
+
+  
 
   
 
@@ -1004,33 +1438,55 @@ They belong together.
 
   
 
+  
+
 Stores conceptually:
+
+  
 
   
 
 ```text
 
+  
+
 FullFen
+
+  
 
 Position, if useful as a shared-position reference
 
   
 
+  
+
 checked UCI/LAN move
+
+  
 
 checked cp or mate
 
   
 
+  
+
 top UCI/LAN move
+
+  
 
 top cp or mate
 
   
 
+  
+
 Stockfish version
 
+  
+
 ```
+
+  
 
   
 
@@ -1038,19 +1494,33 @@ If the checked move itself is also Stockfish's top move, both halves are still s
 
   
 
+  
+
 ```text
 
+  
+
 checked move = e7e5
+
+  
 
 checked evaluation = +0.20
 
   
 
+  
+
 top move = e7e5
+
+  
 
 top evaluation = +0.20
 
+  
+
 ```
+
+  
 
   
 
@@ -1058,7 +1528,11 @@ Do not rely on implied equality.
 
   
 
+  
+
 A Local Deep Stockfish cache entry is invalid if either half is missing.
+
+  
 
   
 
@@ -1066,7 +1540,11 @@ A Local Deep Stockfish cache entry is invalid if either half is missing.
 
   
 
+  
+
 The cache keeps one current Local Deep Stockfish result per exact `FullFen + checked move`.
+
+  
 
   
 
@@ -1074,19 +1552,33 @@ If the local engine version changes and the same concrete position/move is evalu
 
   
 
+  
+
 ```text
 
+  
+
 old result
+
+  
 
 → replaced
 
   
 
+  
+
 new result
+
+  
 
 → stored with current Stockfish version
 
+  
+
 ```
+
+  
 
   
 
@@ -1094,11 +1586,13 @@ Historical engine versions are not retained as separate cache records.
 
   
 
+  
+
 ## DB.10 — RepertoireNode
 
   
 
-One row represents one genuine stored progression in one repertoire.
+One row represents one canonical stored progression in one repertoire.
 
   
 
@@ -1118,7 +1612,15 @@ FullFen
 
 PositionKey
 
-exact history/PGN
+history
+
+displayPgn, if persisted
+
+  
+
+ECO, if known
+
+openingName, if known
 
   
 
@@ -1190,15 +1692,35 @@ The node must not reconstruct its `FullFen` from a shortened position key.
 
   
 
-### Exact history
+### Canonical history
 
   
 
-Keep the exact PGN/history on every `RepertoireNode`.
+`history` is authoritative canonical move-sequence identity, not arbitrary PGN text.
 
   
 
-This is useful for:
+Use a deterministic UCI/LAN move sequence, for example:
+
+  
+
+```text
+
+e2e4 e7e5 g1f3 b8c6
+
+```
+
+  
+
+Formatting differences, comments, annotations, move numbers or SAN spelling must never create different progression identities for the same move sequence.
+
+  
+
+PGN/SAN history is derived/display information. It may be persisted as cached display metadata if useful, but it is not authoritative identity.
+
+  
+
+The canonical history is useful for:
 
   
 
@@ -1206,11 +1728,15 @@ This is useful for:
 
 exact progression lookup
 
+reconstructing the concrete progression
+
 debugging
 
 history-specific behaviour
 
 Wikibooks
+
+opening classification
 
 transposition handling
 
@@ -1218,7 +1744,19 @@ transposition handling
 
   
 
-The graph of move edges represents the repertoire structure, but the node's exact history remains valuable persistent state.
+### Opening classification
+
+  
+
+`ECO` and `openingName` belong to the concrete progression represented by the canonical node, not to the global `Position`.
+
+  
+
+Different move sequences may transpose into the same `PositionKey` while having different legitimate opening classifications.
+
+  
+
+The canonical node therefore keeps the ECO/opening classification appropriate to its surviving canonical history.
 
   
 
@@ -1232,7 +1770,7 @@ Within one repertoire:
 
 ```text
 
-repertoireId + exact history
+repertoireId + canonical UCI/LAN history
 
 → exact progression lookup
 
@@ -1300,11 +1838,11 @@ keeps all of its genuine nodes before the merge
 
   
 
-The canonical node's exact `FullFen` and history belong to that surviving route. They are authoritative for the one shared continuation after the merge.
+The canonical node's exact `FullFen`, canonical UCI/LAN history and progression-specific metadata belong to that surviving route. They are authoritative for the one shared continuation after the merge.
 
   
 
-A later transposing route keeps its own exact history and concrete state only up to its incoming transposition edge. It does not create a second continuation merely because its exact `FullFen` differs.
+A later transposing route keeps its own exact route history and concrete state only up to its incoming transposition edge. It does not create a second continuation merely because its exact `FullFen` or opening classification differs.
 
   
 
@@ -1312,7 +1850,7 @@ If the branch that owns the canonical node is later deleted, that canonical node
 
   
 
-Any surviving route that later reaches the same `PositionKey` during regeneration creates/rebuilds the canonical node from its own exact `FullFen` and history. The generator then revisits depth and expansion decisions from that rebuilt position.
+Any surviving route that later reaches the same `PositionKey` during regeneration creates/rebuilds the canonical node from its own exact `FullFen`, canonical UCI/LAN history and progression metadata. The generator then revisits probability, depth and expansion decisions from that rebuilt position.
 
   
 
@@ -1326,13 +1864,13 @@ Any surviving route that later reaches the same `PositionKey` during regeneratio
 
 ```text
 
-2 or more distinct incoming routes
+2 or more distinct incoming non-repetition routes
 
 → true
 
   
 
-0 or 1 distinct incoming route
+0 or 1 distinct incoming non-repetition route
 
 → false
 
@@ -1340,7 +1878,11 @@ Any surviving route that later reaches the same `PositionKey` during regeneratio
 
   
 
-It exists for convenient querying and UI use.
+A repetition stop does not count as an incoming transposition route.
+
+  
+
+The flag exists for convenient querying and UI use.
 
   
 
@@ -1382,7 +1924,7 @@ SRS progress
 
   
 
-It is derived from incoming route probabilities:
+For every non-root canonical node:
 
   
 
@@ -1390,7 +1932,9 @@ It is derived from incoming route probabilities:
 
 node.cumulativeProb
 
-= sum of incoming unique routeProbability contributions
+= sum of probability contributions
+
+  from its incoming non-repetition move edges
 
 ```
 
@@ -1408,7 +1952,11 @@ root cumulativeProb = 1.0
 
   
 
-The incoming route data is the source of truth; the node field is a cached aggregate.
+Incoming move-edge probability contributions are the source of truth for the node's cached aggregate.
+
+  
+
+A repetition terminal edge never contributes probability back into the earlier node it repeats.
 
   
 
@@ -1416,7 +1964,11 @@ The incoming route data is the source of truth; the node field is a cached aggre
 
   
 
-One row represents one move/edge between two repertoire nodes.
+One row represents one repertoire move/edge.
+
+  
+
+Normally it connects two repertoire nodes. A terminal repetition edge deliberately has no destination node so that the stored repertoire graph remains acyclic.
 
   
 
@@ -1434,7 +1986,7 @@ repertoireId
 
 fromNodeId
 
-toNodeId
+toNodeId, nullable only for a terminal repetition
 
   
 
@@ -1450,7 +2002,7 @@ OPPONENT or RESPONSE
 
   
 
-routeHistory
+routeHistory, for a terminating transposition/repetition route
 
 routeProbability
 
@@ -1486,7 +2038,7 @@ SAN is derived/cached display metadata.
 
   
 
-A move edge may record why generation deliberately stopped following that route.
+A move edge may record why generation deliberately stopped following that line.
 
   
 
@@ -1502,11 +2054,25 @@ stopReason = "Transposition"
 
   
 
-This value belongs to the incoming transposition edge.
+For a move that returns to a `PositionKey` already seen earlier on the same route:
 
   
 
-It is derived from the current structure. If a rerun changes the route so that it is no longer a transposition termination, the old value must be cleared or replaced.
+```text
+
+stopReason = "Repetition"
+
+toNodeId = null
+
+```
+
+  
+
+The repetition move may be stored for completeness, but it must not point back to the earlier node, contribute probability to that node or continue generation. This keeps the stored repertoire graph acyclic.
+
+  
+
+`stopReason` is derived from the current structure. If a rerun changes the route so the reason no longer applies, the old value must be cleared or replaced.
 
   
 
@@ -1514,43 +2080,47 @@ It is derived from the current structure. If a rerun changes the route so that i
 
   
 
-Every move edge stores its full `routeHistory`.
+`routeHistory` is not the identity of every shared continuation edge.
 
   
 
-Within a repertoire:
+Canonical progression identity lives on the source node as its canonical UCI/LAN `history`.
+
+  
+
+For an ordinary canonical continuation:
 
   
 
 ```text
 
-repertoireId + routeHistory
+source node canonical history
 
-→ unique exact route
++ edge UCI/LAN move
+
+→ exact canonical continuation history
 
 ```
 
   
 
-`routeHistory` is immutable.
+No separate full route history is required merely to identify that shared edge.
 
   
 
-If the route history changes:
+For an incoming route that deliberately terminates at a merge or repetition, preserve its exact canonical UCI/LAN route history on that terminal edge:
 
   
 
 ```text
 
-old edge
+stopReason = "Transposition"
 
-→ remove
+or
 
-  
+stopReason = "Repetition"
 
-new history
-
-→ create different edge
+→ routeHistory required
 
 ```
 
@@ -1562,17 +2132,21 @@ At a transposition:
 
 ```text
 
-move.routeHistory
+incoming edge routeHistory
 
 may differ from
 
-toNode.history
+target node canonical history
 
 ```
 
   
 
-because the later transposing route keeps its own exact history on the incoming edge while the target node keeps the surviving canonical history.
+because the later route preserves how it reached the merge while the target node keeps the surviving canonical progression.
+
+  
+
+After the merge, shared continuation edges rely on the canonical node's history. They do not pretend to represent every incoming route that reaches that node.
 
   
 
@@ -1580,19 +2154,11 @@ because the later transposing route keeps its own exact history on the incoming 
 
   
 
-Rename the old `trueProbability` concept to:
+Keep the name `routeProbability`, but define it as the probability mass carried by this move edge from its source node.
 
   
 
-```text
-
-routeProbability
-
-```
-
-  
-
-Every move edge stores it.
+It is not always the probability of one original exact route.
 
   
 
@@ -1602,9 +2168,9 @@ For an OPPONENT move:
 
 ```text
 
-new routeProbability
+routeProbability
 
-= parent routeProbability × prob
+= fromNode.cumulativeProb × prob
 
 ```
 
@@ -1616,19 +2182,63 @@ For a RESPONSE:
 
 ```text
 
-new routeProbability
+routeProbability
 
-= parent routeProbability
+= fromNode.cumulativeProb
 
 ```
 
   
 
-The RESPONSE explicitly carries the probability forward so the following OPPONENT move can read it directly from its parent edge.
+Before any transposition, this naturally equals the probability of the single route reaching that edge.
 
   
 
-#note The probability model after several routes merge into one canonical transposition position is being refined during the architecture review. The intended behaviour already agreed is that the shared continuation must use the combined probability reaching the canonical node rather than losing one of the incoming route contributions.
+At a transposition, several incoming edges may contribute separately to the same canonical node:
+
+  
+
+```text
+
+incoming A = 0.10
+
+incoming B = 0.03
+
+  
+
+X.cumulativeProb = 0.13
+
+```
+
+  
+
+The shared continuation after X starts from the combined value:
+
+  
+
+```text
+
+RESPONSE from X
+
+→ routeProbability = 0.13
+
+  
+
+next OPPONENT move with prob = 0.50
+
+→ routeProbability = 0.13 × 0.50
+
+→ 0.065
+
+```
+
+  
+
+Do not continue propagating only A's `0.10` or B's `0.03` after the merge.
+
+  
+
+A repetition terminal edge may record the probability mass that reached the repeated move for logging/UI if useful, but that value is excluded from the repeated node's `cumulativeProb`.
 
   
 
@@ -1698,7 +2308,27 @@ deepVerified
 
   
 
-`source` is the source whose evaluation currently justifies the selected RESPONSE.
+`source` is only the engine/API source of the stored evaluation.
+
+  
+
+Controlled evaluation-source values are:
+
+  
+
+```text
+
+"Lichess Cloud Evaluation"
+
+"ChessDB"
+
+"Local Deep Stockfish"
+
+```
+
+  
+
+`"Hardcoded Opening"` is not an evaluation source. It belongs only to `selectionMethod`.
 
   
 
@@ -1742,7 +2372,11 @@ Controlled `moveOrigin` values:
 
   
 
+  
+
 All stored repertoire and engine evaluations use one project-wide sign convention.
+
+  
 
   
 
@@ -1750,19 +2384,33 @@ Centipawns:
 
   
 
+  
+
 ```text
 
+  
+
 positive
+
+  
 
 → better for White
 
   
 
+  
+
 negative
+
+  
 
 → better for Black
 
+  
+
 ```
+
+  
 
   
 
@@ -1770,19 +2418,33 @@ Mate:
 
   
 
+  
+
 ```text
 
+  
+
 positive mate
+
+  
 
 → White mates
 
   
 
+  
+
 negative mate
+
+  
 
 → Black mates
 
+  
+
 ```
+
+  
 
   
 
@@ -1790,19 +2452,33 @@ Examples:
 
   
 
+  
+
 ```text
 
+  
+
 #1
+
+  
 
 → White mates in 1
 
   
 
+  
+
 #-3
+
+  
 
 → Black mates in 3
 
+  
+
 ```
+
+  
 
   
 
@@ -1810,17 +2486,29 @@ Examples:
 
   
 
+  
+
 For any one evaluation:
+
+  
 
   
 
 ```text
 
+  
+
 cp present
+
+  
 
 → mate absent
 
+  
+
 ```
+
+  
 
   
 
@@ -1828,13 +2516,23 @@ or:
 
   
 
+  
+
 ```text
+
+  
 
 mate present
 
+  
+
 → cp absent
 
+  
+
 ```
+
+  
 
   
 
@@ -1842,15 +2540,17 @@ Never convert mate into an artificial centipawn value.
 
   
 
-## DB.13 — Transposition structure
+  
+
+## DB.13 — Transposition and repetition structure
 
   
 
-A transposition is not represented by a special transposition node.
+### Ordinary transposition
 
   
 
-It is an ordinary `RepertoireMove` whose:
+A transposition is an ordinary `RepertoireMove` whose:
 
   
 
@@ -1902,16 +2602,6 @@ routeHistory
 
 routeProbability
 
-```
-
-  
-
-and:
-
-  
-
-```text
-
 stopReason = "Transposition"
 
 ```
@@ -1926,7 +2616,9 @@ while X keeps the surviving canonical route's:
 
 FullFen
 
-history
+canonical UCI/LAN history
+
+ECO/openingName, if known
 
 ```
 
@@ -1952,11 +2644,49 @@ isTransposition = true
 
   
 
-while two or more distinct incoming routes currently reach it.
+while two or more distinct non-repetition incoming routes currently reach it.
 
   
 
 There is only one continuation after X.
+
+  
+
+### Repetition stop
+
+  
+
+If a route reaches a `PositionKey` that already occurred earlier on that **same route**, this is not an ordinary transposition.
+
+  
+
+```text
+
+same-route PositionKey already seen
+
+→ stopReason = "Repetition"
+
+→ store terminal move if desired
+
+→ toNodeId = null
+
+→ do not add another contribution to the earlier node
+
+→ do not continue generation
+
+```
+
+  
+
+The final move can be reconstructed from its source `FullFen` and UCI/LAN move, so no duplicate node is required.
+
+  
+
+This rule prevents directed cycles in the stored repertoire graph.
+
+  
+
+It is a structural generation rule only. It does not implement full threefold-repetition adjudication, which remains separate/deferred.
 
   
 
@@ -1998,7 +2728,9 @@ create/rebuild X
 
 → use that route's exact FullFen
 
-→ use that route's exact history
+→ use that route's canonical UCI/LAN history
+
+→ use that route's progression-specific opening metadata
 
 → recalculate probability
 
@@ -2018,7 +2750,11 @@ Any newly created RESPONSE starts with the normal fresh verification state. Old 
 
   
 
+  
+
 A flashcard is a repertoire-specific training item.
+
+  
 
   
 
@@ -2026,15 +2762,27 @@ Its stable chess identity is:
 
   
 
+  
+
 ```text
+
+  
 
 repertoireId
 
+  
+
 + PositionKey
+
+  
 
 + target RESPONSE UCI/LAN
 
+  
+
 ```
+
+  
 
   
 
@@ -2042,13 +2790,23 @@ It must **not** depend for its existence on a particular:
 
   
 
+  
+
 ```text
+
+  
 
 RepertoireNode.id
 
+  
+
 RepertoireMove.id
 
+  
+
 ```
+
+  
 
   
 
@@ -2056,7 +2814,11 @@ because tree rows may be reorganised, deleted or recreated while the learned ite
 
   
 
+  
+
 ### Same training item
+
+  
 
   
 
@@ -2064,15 +2826,27 @@ If regeneration produces:
 
   
 
+  
+
 ```text
+
+  
 
 same repertoire
 
+  
+
 + same PositionKey
+
+  
 
 + same RESPONSE
 
+  
+
 ```
+
+  
 
   
 
@@ -2080,15 +2854,27 @@ then:
 
   
 
+  
+
 ```text
+
+  
 
 keep existing card
 
+  
+
 keep all SRS progress
+
+  
 
 do nothing
 
+  
+
 ```
+
+  
 
   
 
@@ -2096,17 +2882,29 @@ do nothing
 
   
 
+  
+
 If regeneration produces:
+
+  
 
   
 
 ```text
 
+  
+
 same PositionKey
+
+  
 
 + different RESPONSE
 
+  
+
 ```
+
+  
 
   
 
@@ -2114,19 +2912,33 @@ then the move the user has to play has changed.
 
   
 
+  
+
 Therefore:
+
+  
 
   
 
 ```text
 
+  
+
 delete old card
+
+  
 
 → create new card
 
+  
+
 → fresh SRS state
 
+  
+
 ```
+
+  
 
   
 
@@ -2134,7 +2946,11 @@ Do not simply point the old SRS record at the new response.
 
   
 
+  
+
 ### Position removed by a completed rebuild
+
+  
 
   
 
@@ -2142,15 +2958,27 @@ If a position from the previous repertoire does not exist in the successfully co
 
   
 
+  
+
 ```text
+
+  
 
 old position absent from finished tree
 
+  
+
 → delete its flashcard
+
+  
 
 → delete its SRS state
 
+  
+
 ```
+
+  
 
   
 
@@ -2158,7 +2986,11 @@ Do not perform this cleanup at the start of the rebuild.
 
   
 
+  
+
 Existing cards remain temporarily available as preservation candidates while generation is in progress. Obsolete cards are removed only after the new tree has completed successfully, so an interrupted rebuild cannot prematurely destroy reusable SRS progress.
+
+  
 
   
 
@@ -2166,15 +2998,25 @@ Existing cards remain temporarily available as preservation candidates while gen
 
   
 
+  
+
 Even if two repertoires contain identical:
+
+  
 
   
 
 ```text
 
+  
+
 PositionKey + RESPONSE
 
+  
+
 ```
+
+  
 
   
 
@@ -2182,7 +3024,11 @@ they have separate flashcards and separate SRS progress.
 
   
 
+  
+
 ## DB.15 — Study data
+
+  
 
   
 
@@ -2190,29 +3036,55 @@ A flashcard stores the FSRS/SRS information required by the study system, such a
 
   
 
+  
+
 ```text
+
+  
 
 due
 
+  
+
 stability
+
+  
 
 difficulty
 
+  
+
 elapsed days
+
+  
 
 scheduled days
 
+  
+
 reps
+
+  
 
 lapses
 
+  
+
 state
+
+  
 
 last review
 
+  
+
 createdAt
 
+  
+
 ```
+
+  
 
   
 
@@ -2220,7 +3092,11 @@ Any explanatory text or tags that remain useful may also live with the card, but
 
   
 
+  
+
 ## Initial learning order
+
+  
 
   
 
@@ -2228,19 +3104,33 @@ Any explanatory text or tags that remain useful may also live with the card, but
 
   
 
+  
+
 Once those cards enter ordinary SRS scheduling:
+
+  
 
   
 
 ```text
 
+  
+
 day-to-day reviews
+
+  
 
 → follow SRS scheduling
 
+  
+
 → do not remain globally ordered by cumulativeProb
 
+  
+
 ```
+
+  
 
   
 
@@ -2248,105 +3138,195 @@ day-to-day reviews
 
   
 
+  
+
 ## Cache lifetime summary
 
   
 
+  
+
 ```text
+
+  
 
 Position
 
+  
+
 → global
+
+  
 
 → permanent
 
+  
+
 → one row per PositionKey
+
+  
 
 ```
 
   
 
+  
+
 ```text
+
+  
 
 human move cache
 
+  
+
 → repertoire-specific
+
+  
 
 → belongs to one HumanDataSnapshot
 
+  
+
 → keyed through shared PositionKey identity
+
+  
 
 → reusable for one week+
 
+  
+
 → deliberately nuked when a fresh snapshot begins
+
+  
 
 ```
 
   
 
+  
+
 ```text
+
+  
 
 remote engine cache
 
+  
+
 → global
+
+  
 
 → keyed by exact FullFen + move + source
 
+  
+
 → reusable indefinitely
+
+  
 
 → keep latest result per exact FullFen/move/source
 
+  
+
 ```
 
   
 
+  
+
 ```text
+
+  
 
 Local Deep Stockfish cache
 
+  
+
 → global
+
+  
 
 → keyed by exact FullFen + checked move
 
+  
+
 → reusable indefinitely
+
+  
 
 → keep current deep checked-vs-top result
 
+  
+
 ```
 
   
 
+  
+
 ```text
+
+  
 
 repertoire tree
 
+  
+
 → belongs to one repertoire
+
+  
 
 → every current node/move belongs to one current HumanDataSnapshot
 
+  
+
 → rebuilt from root when a fresh human snapshot starts
 
+  
+
 → independent of engine-cache lifetimes
+
+  
 
 ```
 
   
 
+  
+
 ```text
+
+  
 
 flashcards/SRS
 
+  
+
 → belong to one repertoire
+
+  
 
 → stable by PositionKey + RESPONSE
 
+  
+
 → independent of transient node/move row IDs
+
+  
 
 → preserved provisionally during rebuild
 
+  
+
 → obsolete cards deleted only after successful rebuild completion
 
+  
+
 ```
+
+  
 
   
 
@@ -2354,87 +3334,185 @@ flashcards/SRS
 
   
 
+  
+
 The intended DB architecture therefore changes the current model substantially:
+
+  
 
   
 
 - replace `PositionCache` with permanent global `Position`
 
+  
+
 - remove destructive cache → repertoire ownership
 
-- keep `ECO` and `openingName` on global `Position`
+  
+
+- keep global `Position` limited to genuine PositionKey-level identity
+
+  
 
 - keep Wikibooks text off global `Position`
 
+  
+
 - add repertoire-specific `HumanDataSnapshot`
+
+  
 
 - use one-week+ human snapshot lifetime
 
+  
+
 - delete old human data deliberately when starting a fresh snapshot
+
+  
 
 - remove `_EMPTY_` fake move rows
 
+  
+
 - add explicit successful human-fetch status
+
+  
 
 - identify human moves by UCI/LAN rather than SAN
 
+  
+
 - keep SAN as returned/display metadata
+
+  
 
 - separate remote engine cache from Local Deep Stockfish cache
 
+  
+
 - key all engine evaluations by exact `FullFen`, not only `PositionKey`
+
+  
 
 - key remote fetch status by exact `FullFen + source`
 
+  
+
 - keep one current result per exact FullFen/move/source for remote engines
+
+  
 
 - store source/provider version when available
 
+  
+
 - store only deep local-engine results
+
+  
 
 - key Local Deep Stockfish results by exact `FullFen + checked move`
 
+  
+
 - store checked move + top move evaluations together for Local Deep Stockfish
 
-- keep exact `FullFen`, `PositionKey` and exact history on `RepertoireNode`
+  
+
+- keep exact `FullFen`, `PositionKey`, canonical UCI/LAN history and progression-specific ECO/opening metadata on `RepertoireNode`
+
+  
 
 - remove Amateur Trap and Master Threat node fields
 
+  
+
 - keep `cumulativeProb` stored as a derived cached aggregate
+
+  
 
 - store derived `isTransposition` metadata on canonical nodes
 
-- store `stopReason = "Transposition"` on incoming transposition edges
+  
+
+- store `stopReason = "Transposition"` on incoming transposition edges and `stopReason = "Repetition"` on same-route repetition terminals
+
+  
 
 - change repertoire move identity to `fromNodeId + UCI/LAN`
 
+  
+
 - rename `trueProbability` to `routeProbability`
 
-- store `routeHistory` and `routeProbability` on every move
+  
+
+- store `routeProbability` on move edges; keep full `routeHistory` on terminating transposition/repetition routes
+
+  
 
 - separate OPPONENT and RESPONSE-specific meaning cleanly
 
+  
+
 - make flashcard identity independent of node/move database row IDs
+
+  
 
 - identify the learned item by `repertoireId + PositionKey + RESPONSE`
 
+  
+
 - preserve SRS only when both the position and RESPONSE remain unchanged
+
+  
 
 - rebuild the generated repertoire tree completely when a fresh human snapshot starts
 
+  
+
 - never mix nodes or moves from different human snapshots in the current tree
+
+  
 
 - treat `RepertoireNode.id` as disposable row identity and `repertoireId + PositionKey` as stable repertoire-position identity
 
+  
+
 - keep the canonical route's exact `FullFen` as the concrete state for the shared continuation after a transposition
+
+  
 
 - delete a canonical node with its owning branch rather than promoting another route in place
 
+  
+
 - let a surviving route rebuild that position from its own exact `FullFen` and history when encountered again
+
+  
 
 - preserve old flashcards provisionally during a rebuild and delete absent cards only after successful completion
 
-- persist generation state and enforce a backend/UI lock while generation is running
+  
+
+- persist generation state and keep the repertoire locked through interrupted/failed generation until successful completion
+
+- use canonical UCI/LAN move sequences for progression identity and treat PGN/SAN as display metadata
+
+- keep `ECO` and `openingName` on concrete repertoire progressions rather than global `Position`
+
+- define `routeProbability` as probability mass carried from `fromNode.cumulativeProb`
+
+- propagate combined `cumulativeProb` through shared continuation after transpositions
+
+- prevent repertoire graph cycles by terminating same-route repetitions
+
+- exclude repetition terminals from canonical-node `cumulativeProb`
+
+- prune downstream structure when decreased cumulative probability no longer justifies its depth
+
+- keep `"Hardcoded Opening"` only as RESPONSE `selectionMethod`, never as evaluation source
+
+  
 
   
 
