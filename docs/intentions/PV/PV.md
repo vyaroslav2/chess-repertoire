@@ -297,7 +297,7 @@ A move exactly on the threshold survives.
 
 Only a move strictly beyond it is rejected.
 
-The threshold supplied by the caller may differ by verification layer. [[B2]] defines the normal API thresholds and the looser local Stockfish thresholds.
+The threshold supplied by the caller may differ by verification layer. The values live in [[M]]; [[B2]] describes which layer applies when.
 
 PV itself applies whichever valid threshold it is given.
 

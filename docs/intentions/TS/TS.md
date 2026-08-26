@@ -374,25 +374,7 @@ The old fixed `150 cp` rule is discarded.
 
   
 
-DV uses the shared Local Deep Stockfish tolerance bands:
-
-  
-
-  
-
-- moves 1–4: `95 cp`
-
-  
-
-- moves 5–8: `60 cp`
-
-  
-
-- moves 9+: `40 cp`
-
-  
-
-  
+DV uses the shared Local Deep Stockfish tolerance bands defined in [[M]] (the local-engine column, looser than the API column). It does not define its own numbers.
 
 The stored RESPONSE passes DV when it satisfies the appropriate shared local-engine tolerance.
 
