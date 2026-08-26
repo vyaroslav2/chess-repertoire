@@ -80,6 +80,7 @@ export function selectWhiteCandidates(currentMoveNumber: number, mastersList: an
 }
 
 import { fetchAllDatabases } from "../api/lichess";
+import { buildBlackHumanShortlist } from "./black-human-shortlist";
 
 export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: number, previousMovesSan: string[], snapshotId: string): Promise<any> {
   const fullFen = parseFullFen(fen);
@@ -87,51 +88,26 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
   // 1. Check Explorer Cache via lichess.ts
   const [mastersData, eliteData, amateurData] = await fetchAllDatabases(fen, snapshotId);
 
-  let mergedMoves: Record<string, any> = {};
+  const shortlist = buildBlackHumanShortlist(
+    mastersData?.moves || [],
+    eliteData?.moves || [],
+    defaultConfig
+  );
 
-  if (mastersData && mastersData.moves) {
-    for (const m of mastersData.moves) {
-      const total = m.white + m.draws + m.black;
-      mergedMoves[m.san] = {
-        san: m.san, mastersCount: total,
-        mastersBlackWin: m.black, mastersDraws: m.draws, mastersWhiteWin: m.white,
-        onlineCount: 0, onlineBlackWin: 0, onlineDraws: 0, onlineWhiteWin: 0
-      };
-    }
-  }
-
-  if (eliteData && eliteData.moves) {
-    for (const m of eliteData.moves) {
-      const total = m.white + m.draws + m.black;
-      if (mergedMoves[m.san]) {
-        mergedMoves[m.san].onlineCount = total;
-        mergedMoves[m.san].onlineBlackWin = m.black;
-        mergedMoves[m.san].onlineDraws = m.draws;
-        mergedMoves[m.san].onlineWhiteWin = m.white;
-      } else {
-        mergedMoves[m.san] = {
-          san: m.san, mastersCount: 0, mastersBlackWin: 0, mastersDraws: 0, mastersWhiteWin: 0,
-          onlineCount: total, onlineBlackWin: m.black, onlineDraws: m.draws, onlineWhiteWin: m.white
-        };
-      }
-    }
-  }
-
-  const MIN_GAMES_THRESHOLD = defaultConfig.humanMoves.minimumWeightedGames;
-  const candidateMoves = Object.values(mergedMoves).map(m => {
-    const mastersWeight = defaultConfig.humanMoves.mastersWeight;
-    const weightedCount = (m.mastersCount * mastersWeight) + m.onlineCount;
-    const weightedBlackWins = (m.mastersBlackWin * mastersWeight) + m.onlineBlackWin;
-    const weightedDraws = (m.mastersDraws * mastersWeight) + m.onlineDraws;
-    
-    const priorWins = defaultConfig.smoothing.anchorGames * defaultConfig.smoothing.blackPrior;
-    const smoothedCount = weightedCount + defaultConfig.smoothing.anchorGames;
-    const score = (weightedBlackWins + (0.5 * weightedDraws) + priorWins) / smoothedCount;
-    
-    return { ...m, weightedCount, score };
-  }).filter(m => m.weightedCount >= MIN_GAMES_THRESHOLD);
-
-  candidateMoves.sort((a, b) => b.score - a.score);
+  const candidateMoves = shortlist.map(c => ({
+    san: c.san,
+    uci: c.uci, // Added for downstream migration
+    score: c.blackScore,
+    weightedCount: c.weightedGames,
+    mastersCount: c.mastersGames,
+    mastersBlackWin: c.mastersBlackWins,
+    mastersDraws: c.mastersDraws,
+    mastersWhiteWin: c.mastersWhiteWins,
+    onlineCount: c.eliteGames,
+    onlineBlackWin: c.eliteBlackWins,
+    onlineDraws: c.eliteDraws,
+    onlineWhiteWin: c.eliteWhiteWins
+  }));
 
   // 2. Reuse or fetch coherent remote engine results.
   let lichessCp: number | null = null;
@@ -265,9 +241,7 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
       const lichessBestCp = enginePvs.length > 0 ? getLegacyLocalCp(enginePvs[0]) : 0;
       
       for (const candidate of candidateMoves) {
-          const moveResult = chess.move(candidate.san);
-          chess.undo();
-          const lan = moveResult.lan;
+          const lan = candidate.uci || (() => { const mr = chess.move(candidate.san); chess.undo(); return mr.lan; })();
           const currentTolerance = getCpTolerance(moveNumber, false);
   
           // Remote ordinary snapshots use strict PV semantics. A Lichess mate
