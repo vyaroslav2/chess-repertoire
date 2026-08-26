@@ -27,5 +27,5 @@ Likely: the list is in memory because it is a guard against repetition inside a 
 
 Notes:
 
-[^1]: #note The list is emptied when the run ends, so it guards against repeats within one run only. A second run would walk positions it has already seen. Today that stops at the re-run crash in [[R.01]]; when that is fixed, the extend mode described there is what decides whether the earlier work is reused.
+[^1]: #note The list is emptied when the run ends, so it guards against repeats within one run only. That is correct under rebuild-from-root (see [[M]]): every run rebuilds from the root, so there is nothing to carry between runs. Today the re-run crash in [[R.01]] blocks a second run entirely; fixing it only needs to make a clean rebuild reliable.
 

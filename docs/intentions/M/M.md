@@ -434,6 +434,10 @@ Those belong to obsolete behaviour.
 
   
 
+#roadmap This decision is the single source of truth for trap/threat removal, and it overrides every box that still describes trap or threat behaviour as if it were live — across A1, A2, A3 and A4. Those boxes are left unedited on purpose, to avoid touching around thirty dense notes; wherever one describes amateur traps, master threats, their flags, their scoring thresholds, the shared trap-depth counter carried on the queue, or the continuation limit, that description is superseded here and must not be built. When the code is built, strip trap/threat entirely rather than implementing any box that still describes it. The queue item loses its trap-depth field with this removal. The idea is preserved separately for possible future revisiting.
+
+  
+
 ## White smoothing
 
   
