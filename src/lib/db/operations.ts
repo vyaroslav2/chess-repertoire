@@ -158,3 +158,81 @@ export async function createRepertoireMove(data: {
     create: data
   });
 }
+
+export async function getCompatibleHumanDataSnapshot(repertoireId: string, explorerRequestProfile: string) {
+  return prisma.humanDataSnapshot.findFirst({
+    where: {
+      repertoireId,
+      explorerRequestProfile
+    },
+    orderBy: {
+      startedAt: 'desc'
+    }
+  });
+}
+
+export async function getOrCreateHumanDataSnapshot(repertoireId: string, explorerRequestProfile: string) {
+  const existing = await getCompatibleHumanDataSnapshot(repertoireId, explorerRequestProfile);
+  if (existing) {
+    return existing;
+  }
+  return createHumanDataSnapshot(repertoireId, explorerRequestProfile);
+}
+
+export async function createHumanDataSnapshot(repertoireId: string, explorerRequestProfile: string) {
+  return prisma.humanDataSnapshot.create({
+    data: {
+      repertoireId,
+      explorerRequestProfile
+    }
+  });
+}
+
+export type HumanDatabaseType = "MASTERS" | "ELITE" | "AMATEUR";
+
+function validateDatabaseType(dbType: string): asserts dbType is HumanDatabaseType {
+  if (dbType !== "MASTERS" && dbType !== "ELITE" && dbType !== "AMATEUR") {
+    throw new Error(`Invalid human database type: ${dbType}`);
+  }
+}
+
+export async function checkHumanExplorerFetch(snapshotId: string, positionKey: string, databaseType: HumanDatabaseType) {
+  validateDatabaseType(databaseType);
+  return prisma.humanExplorerFetch.findUnique({
+    where: {
+      snapshotId_positionKey_databaseType: {
+        snapshotId,
+        positionKey,
+        databaseType
+      }
+    }
+  });
+}
+
+export async function recordHumanExplorerFetch(snapshotId: string, positionKey: string, databaseType: HumanDatabaseType) {
+  validateDatabaseType(databaseType);
+  return prisma.humanExplorerFetch.upsert({
+    where: {
+      snapshotId_positionKey_databaseType: {
+        snapshotId,
+        positionKey,
+        databaseType
+      }
+    },
+    update: {},
+    create: {
+      snapshotId,
+      positionKey,
+      databaseType
+    }
+  });
+}
+
+export async function getHumanExplorerFetchesForPosition(snapshotId: string, positionKey: string) {
+  return prisma.humanExplorerFetch.findMany({
+    where: {
+      snapshotId,
+      positionKey
+    }
+  });
+}

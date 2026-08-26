@@ -60,7 +60,9 @@ export async function fetchAllDatabases(fen: string) {
   await delay(defaultConfig.api.betweenRequestDelayMs);
 
   try {
-    const eliteUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(fullFen)}&speeds=classical,rapid&ratings=2500`;
+    const eliteSpeeds = defaultConfig.humanExplorerRequest.elite.speeds.join(',');
+    const eliteRatings = defaultConfig.humanExplorerRequest.elite.ratings.join(',');
+    const eliteUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(fullFen)}&speeds=${eliteSpeeds}&ratings=${eliteRatings}`;
     const eData = await fetchWithRetry(eliteUrl, defaultConfig.api.lichessExplorer.retryAttempts);
     if (eData) {
       elite = eData;
@@ -79,7 +81,9 @@ export async function fetchAllDatabases(fen: string) {
   await delay(defaultConfig.api.betweenRequestDelayMs);
 
   try {
-    const amateurUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(fullFen)}&speeds=classical,rapid&ratings=1600,1800,2000`;
+    const amateurSpeeds = defaultConfig.humanExplorerRequest.amateur.speeds.join(',');
+    const amateurRatings = defaultConfig.humanExplorerRequest.amateur.ratings.join(',');
+    const amateurUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(fullFen)}&speeds=${amateurSpeeds}&ratings=${amateurRatings}`;
     const aData = await fetchWithRetry(amateurUrl, defaultConfig.api.lichessExplorer.retryAttempts);
     if (aData) {
       amateur = aData;

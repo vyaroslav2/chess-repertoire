@@ -27,13 +27,39 @@ model Repertoire {
   stats               RepertoirePositionStat[]
   nodes               RepertoireNode[]
   moves               RepertoireMove[]
+  humanSnapshots      HumanDataSnapshot[]
 }
 
 // --- PERMANENT CHESS IDENTITY ---
 
 model Position {
-  positionKey String           @id
-  nodes       RepertoireNode[]
+  positionKey  String               @id
+  nodes        RepertoireNode[]
+  humanFetches HumanExplorerFetch[]
+}
+
+// --- TEMPORARY SNAPSHOTS ---
+
+model HumanDataSnapshot {
+  id                     String   @id @default(uuid())
+  repertoireId           String
+  startedAt              DateTime @default(now())
+  explorerRequestProfile String
+
+  repertoire Repertoire           @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
+  fetches    HumanExplorerFetch[]
+}
+
+model HumanExplorerFetch {
+  id           String @id @default(uuid())
+  snapshotId   String
+  positionKey  String
+  databaseType String // "MASTERS" | "ELITE" | "AMATEUR"
+
+  snapshot HumanDataSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  position Position          @relation(fields: [positionKey], references: [positionKey], onDelete: Restrict)
+
+  @@unique([snapshotId, positionKey, databaseType])
 }
 
 // --- THE CACHE LAYER ---

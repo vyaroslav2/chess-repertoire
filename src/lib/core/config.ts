@@ -16,6 +16,21 @@ export interface Config {
         mastersWeight: number;
         minimumWeightedGames: number;
     };
+    humanExplorerRequest: {
+        masters: {
+            source: string;
+        };
+        elite: {
+            source: string;
+            speeds: string[];
+            ratings: number[];
+        };
+        amateur: {
+            source: string;
+            speeds: string[];
+            ratings: number[];
+        };
+    };
     smoothing: {
         anchorGames: number;
         blackPrior: number;
@@ -90,6 +105,27 @@ export const defaultConfig: Config = {
     humanMoves: {
         mastersWeight: 5,
         minimumWeightedGames: 15
+    },
+
+    // ---------------------------------------------------------
+    // HUMAN EXPLORER REQUEST
+    // Defines the precise dataset parameters queried from Lichess.
+    // These define the explorerRequestProfile for snapshot compatibility.
+    // ---------------------------------------------------------
+    humanExplorerRequest: {
+        masters: {
+            source: "masters"
+        },
+        elite: {
+            source: "lichess",
+            speeds: ["classical", "rapid"],
+            ratings: [2500]
+        },
+        amateur: {
+            source: "lichess",
+            speeds: ["classical", "rapid"],
+            ratings: [1600, 1800, 2000]
+        }
     },
 
     // ---------------------------------------------------------
@@ -182,6 +218,17 @@ export function validateConfig(config: Config) {
     if (!Number.isInteger(config.humanMoves?.minimumWeightedGames) || config.humanMoves.minimumWeightedGames < 1) throw new Error("Invalid humanMoves.minimumWeightedGames");
     if (!Number.isInteger(config.smoothing?.anchorGames) || config.smoothing.anchorGames < 1) throw new Error("Invalid smoothing.anchorGames");
 
+    // Validate human explorer request
+    const her = config.humanExplorerRequest;
+    if (!her) throw new Error("Missing humanExplorerRequest");
+    if (her.masters?.source !== "masters") throw new Error("Invalid humanExplorerRequest.masters.source");
+    if (her.elite?.source !== "lichess") throw new Error("Invalid humanExplorerRequest.elite.source");
+    if (her.amateur?.source !== "lichess") throw new Error("Invalid humanExplorerRequest.amateur.source");
+    if (!Array.isArray(her.elite?.speeds) || her.elite.speeds.length === 0 || her.elite.speeds.some(s => typeof s !== 'string' || s.trim() === '')) throw new Error("Invalid humanExplorerRequest.elite.speeds");
+    if (!Array.isArray(her.elite?.ratings) || her.elite.ratings.length === 0 || her.elite.ratings.some(r => typeof r !== 'number' || !Number.isInteger(r) || r <= 0)) throw new Error("Invalid humanExplorerRequest.elite.ratings");
+    if (!Array.isArray(her.amateur?.speeds) || her.amateur.speeds.length === 0 || her.amateur.speeds.some(s => typeof s !== 'string' || s.trim() === '')) throw new Error("Invalid humanExplorerRequest.amateur.speeds");
+    if (!Array.isArray(her.amateur?.ratings) || her.amateur.ratings.length === 0 || her.amateur.ratings.some(r => typeof r !== 'number' || !Number.isInteger(r) || r <= 0)) throw new Error("Invalid humanExplorerRequest.amateur.ratings");
+
     // Validate engine tolerances
     for (const key of ['early', 'middle', 'late'] as const) {
         const valApi = config.engineVerification?.apiToleranceCp?.[key];
@@ -222,6 +269,11 @@ function canonicalStringify(obj: unknown): string {
 
 export function computeConfigHash(config: Config): string {
     const canonical = canonicalStringify(config);
+    return createHash('sha256').update(canonical).digest('hex');
+}
+
+export function computeExplorerRequestProfile(config: Config): string {
+    const canonical = canonicalStringify(config.humanExplorerRequest);
     return createHash('sha256').update(canonical).digest('hex');
 }
 

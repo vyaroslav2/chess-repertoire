@@ -167,3 +167,59 @@ test('15. central config carries no trap/threat policy', () => {
     assert.strictEqual(keys.includes('trap'), false);
     assert.strictEqual(keys.includes('threat'), false);
 });
+
+test('16. general config changes such as engine tolerance do not change the human explorer profile', () => {
+    const { computeExplorerRequestProfile } = require('./config');
+    const cfgA = JSON.parse(JSON.stringify(defaultConfig));
+    const cfgB = JSON.parse(JSON.stringify(defaultConfig));
+
+    cfgB.engineVerification.apiToleranceCp.early = 1000;
+
+    const profileA = computeExplorerRequestProfile(cfgA);
+    const profileB = computeExplorerRequestProfile(cfgB);
+    assert.strictEqual(profileA, profileB);
+});
+
+test('17. operational request settings such as retryAttempts/delays do not change the human explorer profile', () => {
+    const { computeExplorerRequestProfile } = require('./config');
+    const cfgA = JSON.parse(JSON.stringify(defaultConfig));
+    const cfgB = JSON.parse(JSON.stringify(defaultConfig));
+
+    cfgB.api.lichessExplorer.retryAttempts = 99;
+    cfgB.api.betweenRequestDelayMs = 5000;
+
+    const profileA = computeExplorerRequestProfile(cfgA);
+    const profileB = computeExplorerRequestProfile(cfgB);
+    assert.strictEqual(profileA, profileB);
+});
+
+test('18. request-shaping changes such as ratings/speeds do change the profile', () => {
+    const { computeExplorerRequestProfile } = require('./config');
+    const cfgA = JSON.parse(JSON.stringify(defaultConfig));
+    const cfgB = JSON.parse(JSON.stringify(defaultConfig));
+
+    cfgB.humanExplorerRequest.amateur.ratings.push(2200);
+
+    const profileA = computeExplorerRequestProfile(cfgA);
+    const profileB = computeExplorerRequestProfile(cfgB);
+    assert.notStrictEqual(profileA, profileB);
+
+    const cfgC = JSON.parse(JSON.stringify(defaultConfig));
+    cfgC.humanExplorerRequest.elite.speeds = ["blitz"];
+    const profileC = computeExplorerRequestProfile(cfgC);
+    assert.notStrictEqual(profileA, profileC);
+});
+
+test('19. humanExplorerRequest invalid values rejected', () => {
+    const cfg1 = JSON.parse(JSON.stringify(defaultConfig));
+    cfg1.humanExplorerRequest.elite.speeds = ["   "];
+    assert.throws(() => validateConfig(cfg1), /Invalid humanExplorerRequest.elite.speeds/);
+
+    const cfg2 = JSON.parse(JSON.stringify(defaultConfig));
+    cfg2.humanExplorerRequest.amateur.ratings = [0];
+    assert.throws(() => validateConfig(cfg2), /Invalid humanExplorerRequest.amateur.ratings/);
+
+    const cfg3 = JSON.parse(JSON.stringify(defaultConfig));
+    cfg3.humanExplorerRequest.elite.ratings = [2500.5];
+    assert.throws(() => validateConfig(cfg3), /Invalid humanExplorerRequest.elite.ratings/);
+});
