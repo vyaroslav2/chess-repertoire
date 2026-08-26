@@ -1,5 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { Chess } from "chess.js";
+import { parseFullFen } from "../src/lib/core/fen";
+import { getOrCreatePosition } from "../src/lib/db/operations";
 
 const prisma = new PrismaClient();
 
@@ -33,33 +35,21 @@ async function main() {
   let currentPosId: string | null = null;
 
   // Insert the initial position (empty board)
-  const initialFen = chess.fen().split(" ").slice(0, 4).join(" "); // Strip move counters for uniqueness
-  const startPos = await prisma.position.create({
-    data: { fen: initialFen },
-  });
-  currentPosId = startPos.id;
+  const initialFullFen = parseFullFen(chess.fen());
+  const startPos = await getOrCreatePosition(initialFullFen);
+  currentPosId = startPos.positionKey;
 
   for (const sanMove of movesToPlay) {
     const moveResult = chess.move(sanMove);
-    const newFen = chess.fen().split(" ").slice(0, 4).join(" ");
-
-    // Check if resulting position exists (transpositions)
-    let newPos = await prisma.position.findUnique({
-      where: { fen: newFen },
-    });
-
-    if (!newPos) {
-      newPos = await prisma.position.create({
-        data: { fen: newFen },
-      });
-    }
+    const fullFen = parseFullFen(chess.fen());
+    const newPos = await getOrCreatePosition(fullFen);
 
     // Create the move (the branch)
     const move = await prisma.move.create({
       data: {
         san: moveResult.san,
         fromPositionId: currentPosId!,
-        toPositionId: newPos.id,
+        toPositionId: newPos.positionKey,
       },
     });
 
@@ -76,7 +66,7 @@ async function main() {
       });
     }
 
-    currentPosId = newPos.id;
+    currentPosId = newPos.positionKey;
   }
 
   console.log("Database seeded successfully!");

@@ -46,7 +46,7 @@ async function main() {
         console.log(`[Sweeper] Found ${unverifiedMoves.length} unverified RESPONSE moves.`);
 
         for (const move of unverifiedMoves) {
-            const fen = move.fromNode.fen;
+            const fen = move.fromNode.fullFen;
             console.log(`\nAuditing Move: ${move.san} in FEN ${fen}`);
 
             // 1. Run Stockfish at Depth 24 (MultiPV 1) to find the absolute #1 best engine move

@@ -4,6 +4,17 @@ import { parseFullFen, positionKeyFromFen } from "../core/fen";
 
 export const prisma = new PrismaClient();
 
+export async function getOrCreatePosition(rawFen: string) {
+  const fullFen = parseFullFen(rawFen);
+  const positionKey = positionKeyFromFen(fullFen);
+
+  return prisma.position.upsert({
+    where: { positionKey },
+    update: {},
+    create: { positionKey }
+  });
+}
+
 export async function getOrCreatePositionCache(fen: string, openingMetadata?: { eco: string, name: string }, history?: string[]) {
   const normFen = positionKeyFromFen(parseFullFen(fen));
   let pos = await prisma.positionCache.findUnique({ where: { fen: normFen } });
@@ -104,12 +115,17 @@ export async function getRepertoireNode(repertoireId: string, pgn: string) {
   });
 }
 
-export async function createRepertoireNode(repertoireId: string, fen: string, pgn: string, cumulativeProb: number, isAmateurTrap: boolean = false, isMasterThreat: boolean = false) {
-  const normFen = positionKeyFromFen(parseFullFen(fen));
+export async function createRepertoireNode(repertoireId: string, rawFen: string, pgn: string, cumulativeProb: number, isAmateurTrap: boolean = false, isMasterThreat: boolean = false) {
+  const fullFen = parseFullFen(rawFen);
+  const positionKey = positionKeyFromFen(fullFen);
+
+  await getOrCreatePosition(fullFen);
+
   return prisma.repertoireNode.create({
     data: {
       repertoireId,
-      fen: normFen,
+      fullFen,
+      positionKey,
       pgn,
       cumulativeProb,
       isAmateurTrap,

@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { Chess } from "chess.js";
 import * as readline from "readline";
+import { parseFullFen, positionKeyFromFen } from "../src/lib/core/fen";
 
 const prisma = new PrismaClient();
 const rl = readline.createInterface({
@@ -12,9 +13,6 @@ const question = (query: string): Promise<string> => {
   return new Promise((resolve) => rl.question(query, resolve));
 };
 
-async function getStrippedFen(fen: string) {
-  return fen.split(" ").slice(0, 4).join(" ");
-}
 
 async function main() {
   console.log("=== Interactive Repertoire Tester ===");
@@ -33,11 +31,11 @@ async function main() {
   
   while (true) {
     const fen = chess.fen();
-    const strippedFen = await getStrippedFen(fen);
+    const posKey = positionKeyFromFen(parseFullFen(fen));
     
     // Find current position in DB
     const position = await prisma.position.findUnique({
-      where: { fen: strippedFen }
+      where: { positionKey: posKey }
     });
 
     if (!position) {
@@ -53,7 +51,7 @@ async function main() {
         where: {
           repertoireId_positionId: {
             repertoireId: repertoire.id,
-            positionId: position.id
+            positionId: position.positionKey
           }
         },
         include: { targetMove: true }
@@ -93,7 +91,7 @@ async function main() {
     } else {
       // WHITE'S TURN (Opponent)
       const possibleMoves = await prisma.move.findMany({
-        where: { fromPositionId: position.id }
+        where: { fromPositionId: position.positionKey }
       });
 
       if (possibleMoves.length === 0) {

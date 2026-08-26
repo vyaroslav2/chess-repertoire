@@ -1,5 +1,6 @@
 import { Chess } from "chess.js";
 import { prisma, getOrCreatePositionCache, getRepertoireNode, createRepertoireNode, createRepertoireMove } from "../db/operations";
+import { parseFullFen, positionKeyFromFen } from "./fen";
 import { fetchAllDatabases } from "../api/lichess";
 import { shouldIncludeWhiteMove, evaluateBlackMove } from "./evaluator";
 import { getSmoothedWinRate } from "./math";
@@ -130,17 +131,20 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
       
       const incomingPathProb = node.cumulativeProb * (whiteMove.probability || 1.0);
       let posAfterWhiteNode = await prisma.repertoireNode.findFirst({
-          where: { repertoireId: repertoire.id, fen: fenAfterWhite },
-          include: { stats: true }
+          where: { repertoireId: repertoire.id, positionKey: positionKeyFromFen(parseFullFen(fenAfterWhite)) }
       });
       
-      if (posAfterWhiteNode && posAfterWhiteNode.stats.length > 0) {
-          console.log(`[TRANSPOSITION] FEN already fully expanded: ${fenAfterWhite}. Merging tree...`);
-          
-          await createRepertoireMove({
-              repertoireId: repertoire.id,
-              fromNodeId: node.nodeId,
-              toNodeId: posAfterWhiteNode.id,
+      if (posAfterWhiteNode) {
+          const statsCount = await prisma.repertoirePositionStat.count({
+              where: { repertoireId: repertoire.id, nodeId: posAfterWhiteNode.id }
+          });
+          if (statsCount > 0) {
+              console.log(`[TRANSPOSITION] FEN already fully expanded: ${fenAfterWhite}. Merging tree...`);
+              
+              await createRepertoireMove({
+                  repertoireId: repertoire.id,
+                  fromNodeId: node.nodeId,
+                  toNodeId: posAfterWhiteNode.id,
               san: whiteMove.san,
               playerTurn: "OPPONENT",
               prob: whiteMove.probability,
@@ -158,6 +162,7 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
           
           totalSkippedMoves++;
           continue; 
+      }
       }
       
       if (!posAfterWhiteNode) {
