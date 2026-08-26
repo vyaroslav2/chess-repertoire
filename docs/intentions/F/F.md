@@ -2,240 +2,614 @@
 tags:
   - processed
 ---
-### F — Get human move data
+# F — Get human move data
 
-**What the code does**  
-F receives one chess position as a FEN string and returns three human-move datasets:
+  
 
-- Masters;
-    
-- Elite;
-    
-- Amateur.
-    
+## What the code does
 
-The function first normalises the FEN to the four position-defining fields:
+  
 
-- piece placement;
-    
-- side to move;
-    
-- castling rights;
-    
-- en-passant state.
-    
+F receives one chess position and currently returns three human-move datasets:
 
-The halfmove clock and fullmove number are removed.
+  
 
-This normalised FEN is then used both:
+```text
 
-- as the human-move cache key;
-    
-- in the Lichess Explorer requests.
-    
+Masters
 
-The generator reads cached rows for all three databases:
+Elite
 
-- `"masters"`;
-    
-- `"elite"`;
-    
-- `"amateur"`.
-    
+Amateur
 
-The cache is used only if **all three** have at least one cached row.
+```
 
-An `_EMPTY_` placeholder counts as a cached row, so a database that was successfully queried but genuinely returned no moves can still count as complete.
+  
 
-If all three databases are cached, F rebuilds their move lists from the cache.
+The current implementation normalises the FEN to four fields, reads/writes the existing human cache, and fetches missing data from Lichess Explorer.
 
-Rows whose SAN is `_EMPTY_` are ignored when rebuilding the actual move list.
+  
 
-For each cached move it restores:
+The current cache uses SAN move rows and the special `_EMPTY_` placeholder.
 
-- SAN;
-    
-- White wins;
-    
-- draws;
-    
-- Black wins;
-    
-- total games for that move.
-    
+  
 
-It also calculates each database's `totalGames` by adding the cached game counts of its moves.
+The current implementation can also refetch all three groups when only one is missing, can leave stale SAN rows after a refresh, and can confuse failed requests with empty data.
 
-The three rebuilt datasets are then returned immediately. No Lichess requests are made.
+  
 
-There is one loss of information on this cache path: the reconstructed Masters result contains the moves and counts, but not the Masters `opening` object. So the opening name and ECO code supplied by a fresh Masters response are not reconstructed from this human-move cache.
+Those are current-code behaviours, not the intended cache architecture.
 
-If even **one** of Masters, Elite or Amateur has no cached rows, F does not use the other two cached datasets.
+  
 
-Instead, it prepares empty in-memory defaults for all three and starts fetching all three again.
+## Intended responsibility
 
-For **Masters**, F asks the Lichess Masters Explorer for the normalised position.
+  
 
-If a response is returned, it:
+`Known:` F is the shared human-data source layer.
 
-- keeps the returned Masters data;
-    
-- sets `totalGames` to White wins + draws + Black wins;
-    
-- caches every returned move separately.
-    
+  
 
-For every move, its cached games count is likewise calculated as:
+It should:
 
-White wins + draws + Black wins.
+  
 
-If the Masters request succeeds but its move list is empty, F saves one `_EMPTY_` row instead.
+```text
 
-If the request ultimately fails or returns no usable data, it saves nothing for Masters and leaves the empty in-memory default in place.
+receive the concrete repertoire position
 
-F then waits **1 second**.
+→ identify the current HumanDataSnapshot
 
-For **Elite**, F asks the normal Lichess Explorer for:
+→ read compatible cached human source data
 
-- classical games;
-    
-- rapid games;
-    
-- rating band `2500`.
-    
+→ fetch only genuinely missing required source data
 
-It handles the result in the same way:
+→ validate complete results
 
-- calculate `totalGames`;
-    
-- cache each SAN move and its White/draw/Black counts;
-    
-- or save `_EMPTY_` if the request succeeded but returned no moves.
-    
+→ store them through the human-cache layer
 
-If the request fails or returns nothing, nothing is cached and the default empty result remains.
+→ return the required human datasets
 
-F waits another **1 second**.
+```
 
-For **Amateur**, F asks the Lichess Explorer for:
+  
 
-- classical games;
-    
-- rapid games;
-    
-- ratings `1600`, `1800` and `2000`.
-    
+F does not decide which White moves survive and does not rank Black RESPONSES.
 
-It again:
+  
 
-- calculates `totalGames`;
-    
-- caches every returned move;
-    
-- saves `_EMPTY_` for a successful response with no moves;
-    
-- saves nothing if the request fails or returns nothing.
-    
+Those decisions belong to A/B logic.
 
-There is no extra wait after Amateur because F returns immediately afterwards.
+  
 
-The function finally returns:
+## Position identity
 
-`[masters, elite, amateur]`
+  
 
-The returned data can therefore be mixed.
+Human source data is reusable by chess position inside one compatible HumanDataSnapshot.
+
+  
+
+The stable shared chess-position identity is:
+
+  
+
+```text
+
+PositionKey
+
+```
+
+  
+
+The concrete node still retains its full six-field `FullFen`.
+
+  
+
+When calling an external API, use the exact request form expected by that API.
+
+  
+
+Do not shorten a full FEN merely because local cache identity uses PositionKey.
+
+  
+
+#bug Current F sends the four-field normalised FEN to Lichess Explorer. External requests should use the appropriate full source position while local shared-position identity remains separate.
+
+  
+
+## HumanDataSnapshot
+
+  
+
+`Known:` Human data belongs to one repertoire's `HumanDataSnapshot`.
+
+  
+
+The snapshot represents one coherent human-explorer request context.
+
+  
+
+Compatibility depends only on settings that affect what human data is fetched, for example:
+
+  
+
+```text
+
+rating range
+
+time controls
+
+population/database filters
+
+other explorer request filters
+
+```
+
+  
+
+General generation-policy settings do not invalidate the raw snapshot.
+
+  
 
 For example:
 
-- Masters may contain real data;
-    
-- Elite may be empty because its request failed;
-    
-- Amateur may contain real data.
-    
+  
 
-F itself does not distinguish that failure-empty result from genuine usable empty data in its return type.
+```text
 
-**Why this matters**  
-F is the shared source of human move statistics for the repertoire algorithm.
+depth budget changes
 
-A3 uses the returned human data to decide which White moves survive into the repertoire, while Diagram B uses human statistics when choosing the repertoire's Black response.
+mainline threshold changes
 
-The cache prevents the generator from repeatedly querying Lichess for positions whose data has already been collected.
+Masters weighting changes
 
-The three datasets deliberately represent different playing populations:
+engine tolerance changes
 
-- Masters: Lichess Masters database;
-    
-- Elite: 2500-rated Lichess players, classical and rapid;
-    
-- Amateur: 1600, 1800 and 2000-rated Lichess players, classical and rapid.
-    
+→ human source data may still be reusable
 
-Blitz and bullet games are excluded from both Elite and Amateur.
+```
 
-There is also a deliberate-looking gap between those groups: ratings between 2200 and 2499 are not requested by either Elite or Amateur.
+  
 
-The `_EMPTY_` rows are important because they distinguish:
+## Snapshot lifetime
 
-> "We successfully checked this database and there were no moves"
+  
 
-from:
+A compatible human snapshot is reusable for one week or longer.
 
-> "We have never successfully cached this database."
+  
 
-Without the placeholder, a genuine zero-move result would look permanently uncached and would be fetched again on every run.
+```text
 
-**Why it may have been designed this way**  
-Likely: F was designed to give the rest of the generator one simple interface for all human statistics while hiding the cache, request parameters and retry behaviour.
+age < 7 days
 
-Requiring all three cache groups before using the cache also keeps the returned datasets from silently combining old cached data with newly fetched data.
+→ definitely reuse
 
-However, this simplicity comes at a cost: a single failed source causes future calls to fetch all three sources again rather than reusing the two successful ones.
+  
 
-Likely: the one-second waits were added to reduce pressure on the Lichess Explorer API. Unlike the delay we found in [[A4.29]], these waits occur **between the actual external requests**, so they are positioned where rate limiting can have an effect.
+age >= 7 days
 
-**Also affects:**  
-[[A3.02]]  
-[[A3.05]]  
-[[B]]  
-[[FR]]  
-[[PC]]
+→ eligible for deliberate replacement
 
-Notes:
+→ do not expire automatically
 
+```
 
-#bug F currently sends the normalised four-field FEN to Lichess Explorer. API requests should use the full six-field FEN; normalised FEN should be reserved for local shared-position/cache identity.
+  
 
-#bug If a required human-data fetch still fails after retries are exhausted, generation must stop with a hard error. The current code can treat a failed request as an empty dataset, making failure indistinguishable from a genuine zero-result response and allowing repertoire decisions to be made from incomplete data.
+A failed repertoire generation does not invalidate the snapshot.
 
-#bug Re-fetching a human-data bucket does not replace its previous cached move set. Returned SANs are upserted individually, so old SAN rows absent from the latest response can remain stale. A successful fresh fetch should replace the complete cached snapshot for that exact bucket.
+  
 
-#bug The current 1-second spacing between Lichess Explorer requests is too short for the intended 25-requests-per-minute limit. Rate limiting should be centralised at the actual Lichess request layer and use approximately one request every 3 seconds, including granular requests and retries. https://lichess.org/@/thibault/blog/the-opening-explorer-now-requires-authentication/FSWh9Zg3
+The next from-root rebuild reuses it when still compatible.
 
-#roadmap Granular human-data cache. Replace the coarse Amateur/Elite/Masters storage with per-bucket caching, where a bucket is one rating band and one time control. The current algorithm keeps using its intended subset; the finer data underneath serves future needs. Six parts:
+  
 
-- Store Explorer data as independent rating/time-control buckets, not the current coarse groups.
+## Required source groups today
 
-- Collect a broad global set once: rating bands from 1000 up, across ultrabullet, bullet, blitz, rapid and classical where supported. Exclude correspondence and the 400 band.
+  
 
-- Treat Amateur (1600/1800/2000) and Elite (2500) as views assembled from the granular buckets rather than as the stored datasets. Masters stays a separate source.
+The current repertoire uses:
 
-- Track each bucket's state independently: populated, successfully empty, missing, or failed — all distinct. An _EMPTY_ marker applies only to the exact bucket that was queried and came back empty.
+  
 
-- Ordinary generation fills only missing buckets. Refreshing an already-complete bucket is a separate, explicit action, not a side effect of some other bucket being missing.
+```text
 
-- Let future repertoire configuration pick rating ranges and time controls from the cached granular data without a new crawl.
+Masters
 
-Depends on the stale-upsert and all-or-nothing bugs above being resolved, since both concern how a bucket is cached and refreshed.
+Elite
 
-#note ECO, opening name and Wikibooks text belong to the shared global position cache rather than the human-move cache. Their persistence/reuse is covered by the position-cache design.
+Amateur
 
-#note totalGames can be reconstructed by summing the game counts of all SAN moves returned for a bucket.
+```
 
-#note A successful API response with no moves should be cached explicitly so it is distinguishable from missing or failed data.
+  
 
-#note The production Amateur calculation currently uses ratings 1600, 1800 and 2000. The 2200 band is intentionally not used. Elite 2500 and Masters serve separate purposes, including reply selection and Master Threat detection.
+for different purposes.
 
-#note Blitz and bullet are not used by today's Amateur/Elite repertoire calculation, but the future granular cache should collect them. Correspondence is deliberately excluded.
+  
 
+### White OPPONENT coverage
+
+  
+
+`Known:` White-move inclusion uses only Amateur statistics.
+
+  
+
+Masters and Elite must not affect which White opponent moves are included.
+
+  
+
+### RESPONSE candidate construction
+
+  
+
+`Known:` Masters and Elite are used to construct/rank Black human candidate moves according to the B logic.
+
+  
+
+Masters and Elite therefore remain useful even though Master Threat logic has been discarded.
+
+  
+
+## Trap/threat clean-up
+
+  
+
+`Known:` Master Threat and Amateur Trap behaviour has been discarded from the intended repertoire architecture.
+
+  
+
+F should not fetch or preserve Masters data because of "Master Threat detection".
+
+  
+
+Masters exists because it contributes to RESPONSE human-candidate construction.
+
+  
+
+## Successful fetch state
+
+  
+
+`Known:` A successful empty result must be distinct from a missing fetch.
+
+  
+
+Use explicit successful-fetch state rather than fake move rows.
+
+  
+
+Conceptually:
+
+  
+
+```text
+
+HumanExplorerFetch
+
+- Position / PositionKey
+
+- HumanDataSnapshot
+
+- database type
+
+```
+
+  
+
+Then:
+
+  
+
+```text
+
+no HumanExplorerFetch
+
+→ not fetched successfully
+
+```
+
+  
+
+```text
+
+HumanExplorerFetch exists
+
++ zero move rows
+
+→ fetched successfully
+
+→ genuinely empty
+
+```
+
+  
+
+```text
+
+HumanExplorerFetch exists
+
++ move rows
+
+→ fetched successfully
+
+→ use returned moves
+
+```
+
+  
+
+Do not use `_EMPTY_` as a fake SAN.
+
+  
+
+## Move identity
+
+  
+
+`Known:` Human-cache move identity is UCI/LAN, not SAN.
+
+  
+
+External APIs may return SAN.
+
+  
+
+On a successful response:
+
+  
+
+```text
+
+API SAN
+
+→ validate against exact source position
+
+→ convert to UCI/LAN
+
+→ store UCI/LAN as authoritative identity
+
+→ retain SAN only as source/display metadata
+
+```
+
+  
+
+If one returned SAN cannot be legally converted:
+
+  
+
+```text
+
+→ reject the complete database fetch
+
+→ store none of its moves
+
+→ do not mark fetch successful
+
+→ hard error / invalid source result
+
+```
+
+  
+
+Do not silently preserve a partial statistical dataset.
+
+  
+
+## Complete bucket replacement
+
+  
+
+`Known:` One successful human source fetch is a coherent result.
+
+  
+
+If a source bucket is deliberately refreshed:
+
+  
+
+```text
+
+old complete result
+
+→ fresh complete result
+
+→ atomically replace old result
+
+```
+
+  
+
+Do not upsert only returned moves and leave stale moves that disappeared from the source response.
+
+  
+
+#bug Current row-by-row upserts can leave stale move rows after refresh.
+
+  
+
+## Missing data
+
+  
+
+Ordinary generation fills only missing required source data in the current compatible snapshot.
+
+  
+
+If two source groups are already complete and one is missing:
+
+  
+
+```text
+
+→ reuse the two complete groups
+
+→ fetch the missing group
+
+```
+
+  
+
+Do not refetch all three merely because one is missing.
+
+  
+
+#bug Current all-or-nothing cache reuse can unnecessarily refetch already complete source groups.
+
+  
+
+## Fetch failure
+
+  
+
+`Known:` If required human data still cannot be fetched after the source's retry policy is exhausted:
+
+  
+
+```text
+
+→ hard generation error
+
+```
+
+  
+
+Do not turn failure into an empty dataset.
+
+  
+
+A genuine successful empty response and a failed request are different states.
+
+  
+
+#bug Current code can let failure look like empty data.
+
+  
+
+## Rate limiting
+
+  
+
+Lichess Explorer request spacing and retry behaviour belong at the actual request layer.
+
+  
+
+F should not depend on ad-hoc sleeps between high-level source groups.
+
+  
+
+The central API configuration owns the intended rate-limit/retry values.
+
+  
+
+## Opening classification
+
+  
+
+`Known:` ECO and `openingName` do **not** belong to global Position or human-cache data.
+
+  
+
+Opening classification is progression/history-specific.
+
+  
+
+It belongs to the canonical repertoire node whose canonical UCI/LAN history produced that progression.
+
+  
+
+A fresh Masters response may supply useful opening information, but storing it globally by PositionKey would be incorrect.
+
+  
+
+## Wikibooks
+
+  
+
+`Known:` Wikibooks text does **not** belong to F or the human cache.
+
+  
+
+Wikibooks information is history-specific and follows [[W]].
+
+  
+
+It must not be treated as global Position metadata.
+
+  
+
+## Granular human-data roadmap
+
+  
+
+#roadmap A future granular cache may store independent rating/time-control buckets rather than only today's coarse Amateur/Elite groups.
+
+  
+
+That future design should preserve the same principles:
+
+  
+
+```text
+
+one coherent source bucket
+
+explicit successful-empty state
+
+independent missing/complete state
+
+UCI move identity
+
+atomic refresh replacement
+
+compatibility based on explorer request settings
+
+```
+
+  
+
+Today's repertoire can still assemble its intended Amateur/Elite views from those buckets.
+
+  
+
+## Result
+
+  
+
+F should provide:
+
+  
+
+```text
+
+coherent human source data
+
+per HumanDataSnapshot
+
+reuse of compatible completed data
+
+fetch only missing required source groups
+
+hard error on required source failure
+
+explicit successful-empty state
+
+UCI/LAN authoritative move identity
+
+atomic complete-result replacement
+
+Amateur-only White coverage input
+
+Masters + Elite RESPONSE candidate input
+
+no trap/threat purpose
+
+no global ECO/opening ownership
+
+no Wikibooks ownership
+
+```

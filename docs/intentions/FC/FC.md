@@ -2,141 +2,486 @@
 tags:
   - processed
 ---
-### FC — Save one human move cache row
+# FC — Save human Explorer data
 
-**What the code does**  
-FC receives one human-move cache record from F.
+  
 
-The caller provides:
+## What the code does
 
-- the position;
-    
-- the database/source type;
-    
-- the SAN move;
-    
-- total games for that move;
-    
-- White wins;
-    
-- draws;
-    
-- Black wins.
-    
+  
 
-Before storing anything, FC normalises the FEN again.
+FC is currently a low-level writer for one human-move cache row.
 
-This is redundant when FC is called from F, because F has already normalised the position before passing it in. Running `normalizeFen()` twice does not change the result, so this is harmless duplication rather than a behavioural problem.
+  
 
-FC then identifies a cache row using the combination:
+The current caller supplies:
+
+  
 
 ```text
+
+position
+
+database/source type
+
+SAN move
+
+games
+
+White wins
+
+draws
+
+Black wins
+
+```
+
+  
+
+The current implementation identifies a row by:
+
+  
+
+```text
+
 normalised position
+
 + database type
-+ SAN move
+
++ SAN
+
 ```
 
-That combination is the unique key.
+  
 
-So, for example:
+and upserts that individual row.
+
+  
+
+It also uses the special SAN:
+
+  
 
 ```text
-position X
-+ amateur
-+ e4
+
+_EMPTY_
+
 ```
 
-is a different cache entry from:
+  
+
+to remember that a source was fetched successfully but returned no moves.
+
+  
+
+That accurately describes the current code, but it is not the intended future cache model.
+
+  
+
+## Intended responsibility
+
+  
+
+`Known:` FC/the human-cache writer should persist one **complete validated human source result**, not independently accumulate SAN rows forever.
+
+  
+
+Conceptually:
+
+  
 
 ```text
-position X
-+ amateur
-+ d4
+
+validated source result
+
+→ HumanExplorerFetch
+
+→ zero or more ExplorerMoveCache rows
+
 ```
 
-and also different from:
+  
+
+The successful-fetch record and its child move rows belong together.
+
+  
+
+## HumanExplorerFetch
+
+  
+
+One successful fetch record identifies:
+
+  
 
 ```text
-position X
-+ elite
-+ e4
+
+Position / PositionKey
+
++ HumanDataSnapshot
+
++ database type
+
 ```
 
-If a row with that exact key already exists, FC updates only its four numerical values:
+  
 
-- games;
-    
-- White wins;
-    
-- draws;
-    
-- Black wins.
-    
+It means:
 
-The position, database type and SAN do not change because they are the identity of the row itself.
+  
 
-If no matching row exists, FC creates a new one containing:
+> this source was queried successfully for this position under this snapshot
 
-- the normalised position;
-    
-- database type;
-    
-- SAN;
-    
-- games;
-    
-- White wins;
-    
-- draws;
-    
-- Black wins.
-    
+  
 
-The operation is implemented as a database `upsert`, meaning "update if this exact row exists; otherwise create it".
+It does not require any fake move row.
 
-After that, the individual cache row is saved and control returns to F.
+  
 
-FC is called once for every move returned by a successful human-data fetch.
+## Successful empty result
 
-It is also called once with the special SAN:
+  
 
-`_EMPTY_`
+A successful result with zero moves is stored as:
 
-when F successfully checks a source but gets no moves. That placeholder lets F remember that the source was genuinely checked and empty rather than simply never fetched.
-
-**Why this matters**  
-FC is the low-level writer for the human Explorer cache.
-
-Its job is deliberately narrow:
-
-> save or update one move from one human-data source for one position.
-
-It does not know what "Amateur" or "Elite" means statistically, and it does not calculate probability.
-
-It simply persists the raw counts that F later reconstructs into human-move datasets.
-
-Those raw counts are enough to calculate locally:
+  
 
 ```text
-moveGames = White wins + draws + Black wins
+
+HumanExplorerFetch exists
+
++ zero ExplorerMoveCache rows
+
 ```
 
-and later:
+  
+
+Do not store:
+
+  
 
 ```text
-move popularity = moveGames / totalGames
+
+SAN = "_EMPTY_"
+
 ```
 
-So there is no need for FC to store a separate probability value.
+  
 
-**Why it may have been designed this way**  
-Likely: one row per SAN makes individual moves easy to read and update without storing a whole Explorer response as one large object.
+`_EMPTY_` is obsolete in the intended design.
 
-The upsert also makes repeated writes of the same SAN straightforward: if Lichess returns fresh counts for `e4`, those numbers replace the old `e4` numbers.
+  
 
-**Also affects:**  
-[[F]]
+## Move identity
 
-Notes:
+  
 
-#note The key thing to remember about FC is: **it saves one row, not one complete Lichess response**. That is why the stale-row bug cannot really be solved by tweaking the current upsert alone; F/FC need a bucket-level "replace snapshot" operation.
+`Known:` Authoritative move identity is UCI/LAN.
+
+  
+
+External SAN is converted before persistence.
+
+  
+
+One move row is identified by:
+
+  
+
+```text
+
+Position
+
++ HumanDataSnapshot
+
++ database type
+
++ UCI/LAN move
+
+```
+
+  
+
+Stores conceptually:
+
+  
+
+```text
+
+UCI/LAN move
+
+SAN, as source/display metadata
+
+games
+
+White wins
+
+draws
+
+Black wins
+
+```
+
+  
+
+SAN must not be the unique chess-move identity.
+
+  
+
+## Validation before write
+
+  
+
+Before FC commits anything, the complete source result must already be validated.
+
+  
+
+For every returned move:
+
+  
+
+```text
+
+SAN
+
+→ validate against exact source position
+
+→ convert to UCI/LAN
+
+```
+
+  
+
+If one move cannot be legally converted:
+
+  
+
+```text
+
+→ reject complete result
+
+→ write no move rows
+
+→ do not create successful fetch marker
+
+```
+
+  
+
+Do not silently drop the broken move.
+
+  
+
+## Complete replacement
+
+  
+
+A successful fresh fetch replaces the complete old result for the exact source bucket.
+
+  
+
+Conceptually:
+
+  
+
+```text
+
+old:
+
+A
+
+B
+
+C
+
+D
+
+  
+
+fresh:
+
+A
+
+B
+
+C
+
+  
+
+commit:
+
+A
+
+B
+
+C
+
+```
+
+  
+
+D must disappear.
+
+  
+
+Do not implement refresh as independent move upserts that leave stale rows behind.
+
+  
+
+#bug The current row-by-row upsert model can retain moves absent from a later complete source response.
+
+  
+
+## Atomic write
+
+  
+
+The intended write is atomic:
+
+  
+
+```text
+
+validate complete result
+
+→ begin transaction
+
+→ replace old move rows for exact bucket
+
+→ write complete new move set
+
+→ write/confirm HumanExplorerFetch
+
+→ commit
+
+```
+
+  
+
+For a successful empty result:
+
+  
+
+```text
+
+validate empty response
+
+→ begin transaction
+
+→ remove old move rows for exact bucket
+
+→ write/confirm HumanExplorerFetch
+
+→ commit
+
+```
+
+  
+
+Readers must not observe a half-replaced human dataset.
+
+  
+
+## Failed request
+
+  
+
+A failed request is not written as successful-empty state.
+
+  
+
+```text
+
+request failed
+
+→ no new HumanExplorerFetch
+
+→ no partial move rows
+
+```
+
+  
+
+If an older trusted result exists during an explicit refresh and the refresh fails, keep the older trusted result unchanged.
+
+  
+
+## Statistics
+
+  
+
+FC stores raw counts.
+
+  
+
+It does not calculate repertoire inclusion probability or RESPONSE ranking.
+
+  
+
+Those calculations belong to higher-level logic.
+
+  
+
+For a move:
+
+  
+
+```text
+
+moveGames
+
+= White wins + draws + Black wins
+
+```
+
+  
+
+A source's `totalGames` can be reconstructed from the complete returned move set where appropriate.
+
+  
+
+## Snapshot ownership
+
+  
+
+Human move rows belong to one `HumanDataSnapshot`.
+
+  
+
+They are not reusable across incompatible explorer-request settings.
+
+  
+
+A repertoire-tree rebuild does not itself invalidate a compatible HumanDataSnapshot.
+
+  
+
+## Result
+
+  
+
+The intended FC design is:
+
+  
+
+```text
+
+complete source-result writer
+
+explicit HumanExplorerFetch state
+
+zero-move success without _EMPTY_
+
+UCI/LAN authoritative move identity
+
+SAN display/source metadata only
+
+complete validation before write
+
+atomic replacement
+
+no stale rows after refresh
+
+raw counts only
+
+```
