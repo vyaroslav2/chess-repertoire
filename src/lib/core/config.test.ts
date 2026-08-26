@@ -4,6 +4,7 @@ import {
     defaultConfig,
     validateConfig,
     computeConfigHash,
+    computeRemoteEngineEvaluationProfile,
     createRuntimeConfig,
     getMoveBand
 } from './config';
@@ -222,4 +223,26 @@ test('19. humanExplorerRequest invalid values rejected', () => {
     const cfg3 = JSON.parse(JSON.stringify(defaultConfig));
     cfg3.humanExplorerRequest.elite.ratings = [2500.5];
     assert.throws(() => validateConfig(cfg3), /Invalid humanExplorerRequest.elite.ratings/);
+});
+
+test('20. remote evaluation profile is stable for equal effective request settings', () => {
+    const copy = JSON.parse(JSON.stringify(defaultConfig));
+    assert.strictEqual(computeRemoteEngineEvaluationProfile('LICHESS', defaultConfig), computeRemoteEngineEvaluationProfile('LICHESS', copy));
+    assert.strictEqual(computeRemoteEngineEvaluationProfile('CHESSDB', defaultConfig), computeRemoteEngineEvaluationProfile('CHESSDB', copy));
+});
+
+test('21. remote evaluation profile changes with material request shape', () => {
+    const changed = JSON.parse(JSON.stringify(defaultConfig));
+    changed.api.lichessCloudEval.multiPv += 1;
+    assert.notStrictEqual(computeRemoteEngineEvaluationProfile('LICHESS', defaultConfig), computeRemoteEngineEvaluationProfile('LICHESS', changed));
+});
+
+test('22. remote evaluation profile ignores retry and delay settings', () => {
+    const changed = JSON.parse(JSON.stringify(defaultConfig));
+    changed.api.lichessCloudEval.retryAttempts += 1;
+    changed.api.networkRetryDelayMs += 123;
+    changed.api.rateLimitRetryDelayMs += 456;
+    changed.api.betweenRequestDelayMs += 789;
+    assert.strictEqual(computeRemoteEngineEvaluationProfile('LICHESS', defaultConfig), computeRemoteEngineEvaluationProfile('LICHESS', changed));
+    assert.strictEqual(computeRemoteEngineEvaluationProfile('CHESSDB', defaultConfig), computeRemoteEngineEvaluationProfile('CHESSDB', changed));
 });

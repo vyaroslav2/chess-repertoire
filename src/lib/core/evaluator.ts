@@ -1,10 +1,33 @@
 import { Chess } from "chess.js";
-import { prisma, saveEngineEvalCache } from "../db/operations";
-import { fetchWithRetry, delay, promptUser, GlobalState } from "../api/retry";
+import { readRemoteEngineResult, saveRemoteEngineResult, type RemoteEngineEvaluation } from "../db/operations";
+import { fetchWithRetry, delay, GlobalState } from "../api/retry";
 import { runLocalStockfish, checkPvTolerance, getCpTolerance, getCp } from "./verifier";
 import { fallbackGeminiMove } from "../api/gemini";
-import { parseFullFen, positionKeyFromFen } from "./fen";
-import { defaultConfig, getMoveBand } from "./config";
+import { parseFullFen } from "./fen";
+import { computeRemoteEngineEvaluationProfile, defaultConfig, getMoveBand } from "./config";
+
+function compareRemoteEvaluationsForBlack(a: RemoteEngineEvaluation, b: RemoteEngineEvaluation): number {
+  const category = (evaluation: RemoteEngineEvaluation) =>
+    evaluation.mate !== null ? (evaluation.mate < 0 ? 0 : 2) : 1;
+  const categoryDifference = category(a) - category(b);
+  if (categoryDifference !== 0) return categoryDifference;
+
+  if (a.mate !== null && b.mate !== null) {
+    const mateDifference = a.mate < 0
+      ? Math.abs(a.mate) - Math.abs(b.mate)
+      : Math.abs(b.mate) - Math.abs(a.mate);
+    if (mateDifference !== 0) return mateDifference;
+  } else if (a.cp !== null && b.cp !== null && a.cp !== b.cp) {
+    return a.cp - b.cp;
+  }
+  return a.uci.localeCompare(b.uci);
+}
+
+function toLegacyEnginePvs(evaluations: RemoteEngineEvaluation[]) {
+  return [...evaluations]
+    .sort(compareRemoteEvaluationsForBlack)
+    .map(evaluation => ({ cp: evaluation.cp, mate: evaluation.mate, moves: evaluation.uci }));
+}
 
 export function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: number, amateurList: any[], totalAmateurGames: number) {
     const amateurData = amateurList.find(m => m.san === moveSan) || { games: 0, white: 0, draws: 0, black: 0 };
@@ -43,7 +66,6 @@ import { fetchAllDatabases } from "../api/lichess";
 
 export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: number, previousMovesSan: string[], snapshotId: string): Promise<any> {
   const fullFen = parseFullFen(fen);
-  const posKey = positionKeyFromFen(fullFen);
   
   // 1. Check Explorer Cache via lichess.ts
   const [mastersData, eliteData, amateurData] = await fetchAllDatabases(fen, snapshotId);
@@ -94,116 +116,71 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
 
   candidateMoves.sort((a, b) => b.score - a.score);
 
-  // 2. Check Engine Eval Cache
+  // 2. Reuse or fetch coherent remote engine results.
   let lichessCp: number | null = null;
   let chessdbCp: number | null = null;
   let bestCp = 0;
   let enginePvs: any[] = [];
   let chessdbPvs: any[] = [];
   let evalSource = 'Lichess';
+  const lichessProfile = computeRemoteEngineEvaluationProfile("LICHESS", defaultConfig);
+  const chessDbProfile = computeRemoteEngineEvaluationProfile("CHESSDB", defaultConfig);
 
-  const cachedEvals = await prisma.engineEvalCache.findMany({ where: { positionId: posKey }, orderBy: { rank: 'asc' } });
-  
-  if (cachedEvals.length > 0) {
-    const lichessCached = cachedEvals.filter(e => e.source === "lichess");
-    const chessdbCached = cachedEvals.filter(e => e.source === "chessdb");
-    
-    if (lichessCached.length > 0) {
-      lichessCp = lichessCached[0].cp;
-      bestCp = lichessCp;
-      // Reconstruct PVs
-      enginePvs = lichessCached.map(c => {
-        try {
-          const tempChess = new Chess(fen);
-          const res = tempChess.move(c.san);
-          return { cp: c.cp, mate: c.mate, moves: res.lan };
-        } catch(e) { return null; }
-      }).filter(Boolean);
-    } else if (chessdbCached.length > 0) {
-      evalSource = 'ChessDB';
-      chessdbCp = chessdbCached[0].cp;
-      bestCp = chessdbCp;
-      enginePvs = chessdbCached.map(c => {
-        try {
-          const tempChess = new Chess(fen);
-          const res = tempChess.move(c.san);
-          return { cp: c.cp, mate: c.mate, moves: res.lan };
-        } catch(e) { return null; }
-      }).filter(Boolean);
-    }
-  } else {
-    // Missing Cache: Fetch from Engine APIs
+  let lichessResult = await readRemoteEngineResult(fullFen, "LICHESS", lichessProfile);
+  let chessDbResult = await readRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile);
+
+  if (lichessResult.status === "missing" && GlobalState.lichessCloudEvals) {
     await delay(1000);
-    try {
-      let cloudData: any = null;
-      if (GlobalState.lichessCloudEvals) {
-        const cloudUrl = `https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(fullFen)}&multiPv=${defaultConfig.api.lichessCloudEval.multiPv}`;
-        cloudData = await fetchWithRetry(cloudUrl, defaultConfig.api.lichessCloudEval.retryAttempts, false, 'eval');
-      }
-      
-      if (cloudData && !cloudData.error && cloudData.pvs && cloudData.pvs.length > 0) {
-        enginePvs = cloudData.pvs;
-        lichessCp = enginePvs[0].cp;
-        bestCp = lichessCp!;
-        
-        let rank = 1;
-        for (const pv of enginePvs) {
-          const lan = pv.moves.split(" ")[0];
-          try {
-            const tempChess = new Chess(fen);
-            const fromSq = lan.substring(0, 2);
-            const toSq = lan.substring(2, 4);
-            const promotion = lan.length === 5 ? lan[4] : undefined;
-            const moveResult = tempChess.move({ from: fromSq, to: toSq, promotion } as any);
-            
-            await saveEngineEvalCache(fen, "lichess", { san: moveResult.san, cp: pv.cp, mate: pv.mate || null, rank: rank++ });
-          } catch(e) {}
-        }
-      } else {
-        evalSource = 'ChessDB';
-      }
-
-      try {
-        const chessdbUrl = `https://www.chessdb.cn/cdb.php?action=queryall&board=${encodeURIComponent(fullFen)}`;
-        const chessdbRes = await fetch(chessdbUrl);
-        if (chessdbRes.ok) {
-          const text = await chessdbRes.text();
-          if (text.includes("move:")) {
-            const moves = text.split("|");
-            let rank = 1;
-            for (const m of moves) {
-              const moveMatch = m.match(/move:([^,]+),score:([^,]+)/);
-              if (moveMatch) {
-                const lan = moveMatch[1];
-                const scoreCp = parseInt(moveMatch[2], 10);
-                const whiteCp = -scoreCp; 
-                chessdbPvs.push({ cp: whiteCp, moves: lan });
-                
-                try {
-                  const tempChess = new Chess(fen);
-                  const fromSq = lan.substring(0, 2);
-                  const toSq = lan.substring(2, 4);
-                  const promotion = lan.length === 5 ? lan[4] : undefined;
-                  const moveResult = tempChess.move({ from: fromSq, to: toSq, promotion } as any);
-                  
-                  await saveEngineEvalCache(fen, "chessdb", { san: moveResult.san, cp: whiteCp, mate: null, rank: rank++ });
-                } catch(e) {}
-              }
-            }
-            if (chessdbPvs.length > 0) {
-              chessdbPvs.sort((a, b) => a.cp - b.cp);
-              chessdbCp = chessdbPvs[0].cp;
-              if (evalSource === 'ChessDB') {
-                enginePvs = chessdbPvs;
-                bestCp = chessdbCp;
-              }
-            }
-          }
-        }
-      } catch (e) {}
-    } catch (e) {
-      console.log("Error fetching engine eval:", e);
+    const cloudUrl = `https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(fullFen)}&multiPv=${defaultConfig.api.lichessCloudEval.multiPv}`;
+    const cloudData = await fetchWithRetry(cloudUrl, defaultConfig.api.lichessCloudEval.retryAttempts, false, 'eval');
+    if (cloudData && !cloudData.error) {
+      if (!Array.isArray(cloudData.pvs)) throw new Error("Malformed successful Lichess engine snapshot");
+      const evaluations: RemoteEngineEvaluation[] = cloudData.pvs.map((pv: any) => ({
+        uci: typeof pv.moves === "string" ? pv.moves.split(" ")[0] : "",
+        cp: pv.cp === undefined ? null : pv.cp,
+        mate: pv.mate === undefined ? null : pv.mate
+      }));
+      await saveRemoteEngineResult(fullFen, "LICHESS", lichessProfile, evaluations);
+      lichessResult = await readRemoteEngineResult(fullFen, "LICHESS", lichessProfile);
     }
+  }
+
+  if (chessDbResult.status === "missing") {
+    const chessdbUrl = `https://www.chessdb.cn/cdb.php?action=${defaultConfig.api.chessDb.queryMode}&board=${encodeURIComponent(fullFen)}`;
+    try {
+      const chessdbRes = await fetch(chessdbUrl);
+      if (chessdbRes.ok) {
+        const text = await chessdbRes.text();
+        const evaluations: RemoteEngineEvaluation[] = text.includes("move:")
+          ? text.split("|").filter(row => row.includes("move:")).map(row => {
+              const match = row.match(/move:([^,]+),score:([^,]+)/);
+              if (!match || !/^-?\d+$/.test(match[2])) throw new Error("Malformed successful ChessDB engine snapshot");
+              return { uci: match[1], cp: -Number(match[2]), mate: null };
+            })
+          : [];
+        await saveRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile, evaluations);
+        chessDbResult = await readRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile);
+      }
+    } catch (error) {
+      if (error instanceof Error &&
+          (error.message.startsWith("Invalid remote engine result") || error.message.startsWith("Malformed successful"))) throw error;
+      console.log("Error fetching ChessDB engine eval:", error);
+    }
+  }
+
+  if (lichessResult.status === "success") {
+    enginePvs = toLegacyEnginePvs(lichessResult.evaluations);
+    lichessCp = enginePvs.find(pv => typeof pv.cp === "number")?.cp ?? null;
+    if (lichessCp !== null) bestCp = lichessCp;
+  }
+  if (chessDbResult.status === "success") {
+    chessdbPvs = toLegacyEnginePvs(chessDbResult.evaluations);
+    chessdbCp = chessdbPvs.find(pv => typeof pv.cp === "number")?.cp ?? null;
+  }
+  if (enginePvs.length === 0 && chessdbPvs.length > 0) {
+    evalSource = 'ChessDB';
+    enginePvs = chessdbPvs;
+    if (chessdbCp !== null) bestCp = chessdbCp;
   }
 
   // --- KILL MODE (Forced Mate Detection) ---
@@ -226,7 +203,6 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
           const moveResult = tempChess.move({ from: lan.substring(0, 2), to: lan.substring(2, 4), promotion: lan.length === 5 ? lan[4] : undefined } as any);
           
           const finalCp = getCp(bestDeep);
-          await saveEngineEvalCache(fen, "local_deep", { san: moveResult.san, cp: finalCp, mate: bestDeep.mate, rank: 1 });
           
           return {
               selectedMoveSan: moveResult.san,

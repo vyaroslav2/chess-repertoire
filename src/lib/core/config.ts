@@ -69,6 +69,9 @@ export interface Config {
         lichessExplorer: {
             retryAttempts: number;
         };
+        chessDb: {
+            queryMode: "queryall";
+        };
         networkRetryDelayMs: number;
         rateLimitRetryDelayMs: number;
         betweenRequestDelayMs: number;
@@ -193,6 +196,11 @@ export const defaultConfig: Config = {
             retryAttempts: 10
         },
 
+        // ChessDB request shape used for complete remote result snapshots.
+        chessDb: {
+            queryMode: "queryall"
+        },
+
         // Delay durations (in milliseconds)
         networkRetryDelayMs: 1000,
         rateLimitRetryDelayMs: 2000,
@@ -249,6 +257,7 @@ export function validateConfig(config: Config) {
     if (!Number.isInteger(config.api?.lichessCloudEval?.multiPv) || config.api.lichessCloudEval.multiPv < 1) throw new Error("Invalid api.lichessCloudEval.multiPv");
     if (!Number.isInteger(config.api?.lichessCloudEval?.retryAttempts) || config.api.lichessCloudEval.retryAttempts < 1) throw new Error("Invalid api.lichessCloudEval.retryAttempts");
     if (!Number.isInteger(config.api?.lichessExplorer?.retryAttempts) || config.api.lichessExplorer.retryAttempts < 1) throw new Error("Invalid api.lichessExplorer.retryAttempts");
+    if (config.api?.chessDb?.queryMode !== "queryall") throw new Error("Invalid api.chessDb.queryMode");
 
     if (typeof config.api?.networkRetryDelayMs !== 'number' || config.api.networkRetryDelayMs < 0 || !Number.isFinite(config.api.networkRetryDelayMs)) throw new Error("Invalid api.networkRetryDelayMs");
     if (typeof config.api?.rateLimitRetryDelayMs !== 'number' || config.api.rateLimitRetryDelayMs < 0 || !Number.isFinite(config.api.rateLimitRetryDelayMs)) throw new Error("Invalid api.rateLimitRetryDelayMs");
@@ -275,6 +284,15 @@ export function computeConfigHash(config: Config): string {
 export function computeExplorerRequestProfile(config: Config): string {
     const canonical = canonicalStringify(config.humanExplorerRequest);
     return createHash('sha256').update(canonical).digest('hex');
+}
+
+export type RemoteEngineProfileSource = "LICHESS" | "CHESSDB";
+
+export function computeRemoteEngineEvaluationProfile(source: RemoteEngineProfileSource, config: Config): string {
+    const requestShape = source === "LICHESS"
+        ? { source, multiPv: config.api.lichessCloudEval.multiPv }
+        : { source, queryMode: config.api.chessDb.queryMode };
+    return createHash('sha256').update(canonicalStringify(requestShape)).digest('hex');
 }
 
 export function createRuntimeConfig(configSource: Config) {

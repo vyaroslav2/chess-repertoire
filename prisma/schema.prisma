@@ -71,8 +71,6 @@ model PositionCache {
   eco         String?
   openingName String?
   wikiText    String?
-
-  engineEvals EngineEvalCache[]
 }
 
 model ExplorerMoveCache {
@@ -94,18 +92,28 @@ model ExplorerMoveCache {
   @@index([snapshotId, positionKey, databaseType])
 }
 
-model EngineEvalCache {
-  id         String @id @default(uuid())
-  positionId String // FK to PositionCache.fen
-  san        String
-  cp         Float
-  mate       Int?
-  rank       Int
-  source     String // "lichess" or "chessdb"
+model RemoteEngineFetch {
+  id                String                  @id @default(uuid())
+  fullFen           String
+  source            String // "LICHESS" or "CHESSDB"
+  evaluationProfile String
+  fetchedAt         DateTime                @default(now())
+  evaluations       RemoteEngineEvalCache[]
 
-  position PositionCache @relation(fields: [positionId], references: [fen], onDelete: Cascade)
+  @@unique([fullFen, source, evaluationProfile])
+}
 
-  @@unique([positionId, san, source])
+model RemoteEngineEvalCache {
+  id      String  @id @default(uuid())
+  fetchId String
+  uci     String
+  san     String?
+  cp      Float?
+  mate    Int?
+
+  fetch RemoteEngineFetch @relation(fields: [fetchId], references: [id], onDelete: Cascade)
+
+  @@unique([fetchId, uci])
 }
 
 // --- THE ALGORITHM LAYER ---

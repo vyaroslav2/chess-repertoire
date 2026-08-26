@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { Chess } from "chess.js";
 import { fetchWikibooksSnippet } from "../api/wikibooks";
 import { parseFullFen, positionKeyFromFen } from "../core/fen";
 
@@ -158,30 +159,154 @@ export async function readHumanExplorerBucket(snapshotId: string, positionKey: s
   return { status: "success", moves: rows };
 }
 
-export async function saveEngineEvalCache(fen: string, source: string, evalData: { san: string, cp: number, mate: number | null, rank: number }) {
-  const normFen = positionKeyFromFen(parseFullFen(fen));
-  return prisma.engineEvalCache.upsert({
-    where: {
-      positionId_san_source: {
-        positionId: normFen,
-        san: evalData.san,
-        source: source
-      }
-    },
-    update: {
-      cp: evalData.cp,
-      mate: evalData.mate,
-      rank: evalData.rank
-    },
-    create: {
-      positionId: normFen,
-      san: evalData.san,
-      cp: evalData.cp,
-      mate: evalData.mate,
-      rank: evalData.rank,
-      source: source
+export type RemoteEngineSource = "LICHESS" | "CHESSDB";
+
+export type RemoteEngineEvaluation = {
+  uci: string;
+  san?: string | null;
+  cp: number | null;
+  mate: number | null;
+};
+
+function validateRemoteEngineSource(source: string): asserts source is RemoteEngineSource {
+  if (source !== "LICHESS" && source !== "CHESSDB") {
+    throw new Error(`Invalid remote engine source: ${source}`);
+  }
+}
+
+function validateRemoteEngineResult(
+  fullFen: string,
+  source: RemoteEngineSource,
+  evaluationProfile: string,
+  evaluations: RemoteEngineEvaluation[]
+): Array<RemoteEngineEvaluation & { san: string }> {
+  const canonicalFullFen = parseFullFen(fullFen);
+  if (canonicalFullFen !== fullFen) {
+    throw new Error("Invalid remote engine result: FullFen must be canonical");
+  }
+  validateRemoteEngineSource(source);
+  if (typeof evaluationProfile !== "string" || evaluationProfile.trim() === "" || evaluationProfile.trim() !== evaluationProfile) {
+    throw new Error("Invalid remote engine result: evaluationProfile must be non-empty and canonical");
+  }
+  if (!Array.isArray(evaluations)) {
+    throw new Error("Invalid remote engine result: evaluations must be an array");
+  }
+
+  const seenUci = new Set<string>();
+  return evaluations.map(evaluation => {
+    if (!evaluation || typeof evaluation !== "object") {
+      throw new Error("Invalid remote engine result: evaluation must be an object");
     }
+    if (typeof evaluation.uci !== "string" || !/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(evaluation.uci)) {
+      throw new Error("Invalid remote engine result: malformed UCI/LAN move");
+    }
+    if (seenUci.has(evaluation.uci)) {
+      throw new Error(`Invalid remote engine result: duplicate UCI move ${evaluation.uci}`);
+    }
+    seenUci.add(evaluation.uci);
+
+    const hasCp = typeof evaluation.cp === "number" && Number.isFinite(evaluation.cp);
+    const hasMate = typeof evaluation.mate === "number" && Number.isInteger(evaluation.mate);
+    if (!((hasCp && evaluation.mate === null) || (evaluation.cp === null && hasMate))) {
+      throw new Error("Invalid remote engine result: exactly one of finite cp or integer mate is required");
+    }
+
+    const chess = new Chess(canonicalFullFen);
+    let parsedMove;
+    try {
+      parsedMove = chess.move({
+        from: evaluation.uci.slice(0, 2),
+        to: evaluation.uci.slice(2, 4),
+        promotion: evaluation.uci.length === 5 ? evaluation.uci[4] : undefined
+      });
+    } catch {
+      throw new Error(`Invalid remote engine result: illegal UCI move ${evaluation.uci}`);
+    }
+    if (!parsedMove || parsedMove.lan !== evaluation.uci) {
+      throw new Error(`Invalid remote engine result: illegal UCI move ${evaluation.uci}`);
+    }
+    if (evaluation.san !== undefined && evaluation.san !== null &&
+        (typeof evaluation.san !== "string" || evaluation.san.trim() === "" || evaluation.san !== parsedMove.san)) {
+      throw new Error(`Invalid remote engine result: SAN does not match UCI move ${evaluation.uci}`);
+    }
+
+    return { ...evaluation, san: parsedMove.san };
   });
+}
+
+export async function saveRemoteEngineResult(
+  fullFen: string,
+  source: RemoteEngineSource,
+  evaluationProfile: string,
+  evaluations: RemoteEngineEvaluation[]
+) {
+  const validated = validateRemoteEngineResult(fullFen, source, evaluationProfile, evaluations);
+
+  return prisma.$transaction(async tx => {
+    const fetch = await tx.remoteEngineFetch.upsert({
+      where: { fullFen_source_evaluationProfile: { fullFen, source, evaluationProfile } },
+      update: { fetchedAt: new Date() },
+      create: { fullFen, source, evaluationProfile }
+    });
+
+    await tx.remoteEngineEvalCache.deleteMany({ where: { fetchId: fetch.id } });
+    if (validated.length > 0) {
+      await tx.remoteEngineEvalCache.createMany({
+        data: validated.map(evaluation => ({
+          fetchId: fetch.id,
+          uci: evaluation.uci,
+          san: evaluation.san,
+          cp: evaluation.cp,
+          mate: evaluation.mate
+        }))
+      });
+    }
+
+    return fetch;
+  });
+}
+
+export type ReadRemoteEngineResult =
+  | { status: "missing" }
+  | { status: "empty", fetch: { id: string; fullFen: string; source: string; evaluationProfile: string; fetchedAt: Date } }
+  | { status: "success", fetch: { id: string; fullFen: string; source: string; evaluationProfile: string; fetchedAt: Date }, evaluations: Array<RemoteEngineEvaluation & { id: string; fetchId: string; san: string | null }> };
+
+export async function readRemoteEngineResult(
+  fullFen: string,
+  source: RemoteEngineSource,
+  evaluationProfile: string
+): Promise<ReadRemoteEngineResult> {
+  const canonicalFullFen = parseFullFen(fullFen);
+  if (canonicalFullFen !== fullFen) throw new Error("FullFen must be canonical");
+  validateRemoteEngineSource(source);
+  if (typeof evaluationProfile !== "string" || evaluationProfile.trim() === "" || evaluationProfile.trim() !== evaluationProfile) {
+    throw new Error("evaluationProfile must be non-empty and canonical");
+  }
+
+  const fetch = await prisma.remoteEngineFetch.findUnique({
+    where: { fullFen_source_evaluationProfile: { fullFen, source, evaluationProfile } },
+    include: { evaluations: { orderBy: { uci: "asc" } } }
+  });
+  if (!fetch) return { status: "missing" };
+
+  const { evaluations, ...fetchMarker } = fetch;
+  if (evaluations.length === 0) return { status: "empty", fetch: fetchMarker };
+  return { status: "success", fetch: fetchMarker, evaluations };
+}
+
+export async function readRemoteEngineCandidate(
+  fullFen: string,
+  source: RemoteEngineSource,
+  evaluationProfile: string,
+  uci: string
+) {
+  const result = await readRemoteEngineResult(fullFen, source, evaluationProfile);
+  if (result.status === "missing") return { status: "missing" as const };
+  if (result.status === "empty") return { status: "unavailable" as const, fetch: result.fetch };
+  const evaluation = result.evaluations.find(item => item.uci === uci);
+  return evaluation
+    ? { status: "success" as const, fetch: result.fetch, evaluation }
+    : { status: "unavailable" as const, fetch: result.fetch };
 }
 
 export async function getRepertoireNode(repertoireId: string, pgn: string) {

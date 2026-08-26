@@ -67,7 +67,6 @@ async function runTest() {
   await getOrCreatePositionCache(fullFen);
   
   // Clean up any existing engine eval cache so it's forced to fetch
-  await prisma.engineEvalCache.deleteMany({ where: { positionId: normFen } });
   
   // Inject some fake explorer data so candidateMoves isn't empty (bypassing Lichess explorer limits)
   const reqProfile = computeExplorerRequestProfile(defaultConfig);

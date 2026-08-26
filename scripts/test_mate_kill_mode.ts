@@ -40,7 +40,6 @@ async function runTest() {
   await getOrCreatePositionCache(fullFen);
 
   // Clean previous engine evals for this test FEN
-  await prisma.engineEvalCache.deleteMany({ where: { positionId: normFen } });
 
   // Inject terrible human moves to prove they are ignored
   await prisma.explorerMoveCache.deleteMany({ where: { positionKey: normFen } });
