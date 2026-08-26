@@ -111,14 +111,12 @@ model EngineEvalCache {
 // --- THE ALGORITHM LAYER ---
 
 model RepertoireNode {
-  id             String  @id @default(uuid()) // Unique ID for this specific path
+  id             String @id @default(uuid()) // Unique ID for this specific path
   repertoireId   String
   fullFen        String // Canonical exact state
   positionKey    String // FK to permanent Position
   pgn            String // The unique move history
-  cumulativeProb Float   @default(0)
-  isAmateurTrap  Boolean @default(false)
-  isMasterThreat Boolean @default(false)
+  cumulativeProb Float  @default(0)
 
   position   Position   @relation(fields: [positionKey], references: [positionKey], onDelete: Restrict)
   repertoire Repertoire @relation(fields: [repertoireId], references: [id], onDelete: Cascade)

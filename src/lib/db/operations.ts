@@ -195,7 +195,7 @@ export async function getRepertoireNode(repertoireId: string, pgn: string) {
   });
 }
 
-export async function createRepertoireNode(repertoireId: string, rawFen: string, pgn: string, cumulativeProb: number, isAmateurTrap: boolean = false, isMasterThreat: boolean = false) {
+export async function createRepertoireNode(repertoireId: string, rawFen: string, pgn: string, cumulativeProb: number) {
   const fullFen = parseFullFen(rawFen);
   const positionKey = positionKeyFromFen(fullFen);
 
@@ -207,9 +207,7 @@ export async function createRepertoireNode(repertoireId: string, rawFen: string,
       fullFen,
       positionKey,
       pgn,
-      cumulativeProb,
-      isAmateurTrap,
-      isMasterThreat
+      cumulativeProb
     }
   });
 }

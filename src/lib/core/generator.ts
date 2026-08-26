@@ -3,8 +3,7 @@ import { prisma, getOrCreatePositionCache, getRepertoireNode, createRepertoireNo
 import { parseFullFen, positionKeyFromFen } from "./fen";
 import { fetchAllDatabases } from "../api/lichess";
 import { defaultConfig, computeExplorerRequestProfile } from "../core/config";
-import { shouldIncludeWhiteMove, evaluateBlackMove } from "./evaluator";
-import { getSmoothedWinRate } from "./math";
+import { selectWhiteCandidates, evaluateBlackMove } from "./evaluator";
 import { delay } from "../api/retry";
 import { createEmptyCard } from "ts-fsrs";
 
@@ -14,9 +13,6 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
   const startTime = Date.now();
   let totalPositionsProcessed = 0;
   let totalWhiteMovesFound = 0;
-  let totalWhiteMainlines = 0;
-  let totalWhiteTraps = 0;
-  let totalWhiteThreats = 0;
   let totalMissingWhiteMoves = 0;
   let totalBlackMovesEvaluated = 0;
   let totalSkippedMoves = 0;
@@ -49,7 +45,6 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
     nodeId: rootNode.id,
     fen: startFen, 
     currentMoveNumber: 1, 
-    trapDepth: 0, 
     cumulativeProb: 1.0, 
     history: [] as string[] 
   }];
@@ -70,8 +65,7 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
 
     const currentElapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     
-    let trapLog = node.trapDepth > 0 ? ` | Trap Depth: ${node.trapDepth}` : "";
-    console.log(`\n--- Queue Size: ${queue.length} | Move: ${node.currentMoveNumber}${trapLog} ---`);
+    console.log(`\n--- Queue Size: ${queue.length} | Move: ${node.currentMoveNumber} ---`);
     console.log(`History: ${pgnString}`);
     console.log(`[Stats] Elapsed: ${currentElapsed}s | Positions Processed: ${totalPositionsProcessed} | N/A Evals: ${totalNaEvals}`);
 
@@ -88,24 +82,16 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
       totalBranchesAborted++;
       continue;
     }
-    if (node.trapDepth >= 8) {
-      console.log(`[ABORTED] Trap refutation limit reached (8). Stopping branch (0 White moves processed for this node).`);
-      totalBranchesAborted++;
-      continue;
-    }
-
     const [masters, elite, amateur] = await fetchAllDatabases(node.fen, snapshotId);
     await getOrCreatePositionCache(node.fen, masters.opening, node.history);
     
-    const allWhiteSan = new Set<string>();
-    if (masters.moves) masters.moves.forEach((m: any) => allWhiteSan.add(m.san));
-    if (elite.moves) elite.moves.forEach((m: any) => allWhiteSan.add(m.san));
-    if (amateur.moves) amateur.moves.forEach((m: any) => allWhiteSan.add(m.san));
-
-    const whiteCandidates = Array.from(allWhiteSan).map(san => {
-       const filterResult = shouldIncludeWhiteMove(san, node.currentMoveNumber, masters.moves || [], elite.moves || [], amateur.moves || [], amateur.totalGames || 0);
-       return { san, ...filterResult };
-    }).filter(m => m.include);
+    const whiteCandidates = selectWhiteCandidates(
+      node.currentMoveNumber,
+      masters.moves || [],
+      elite.moves || [],
+      amateur.moves || [],
+      amateur.totalGames || 0
+    );
 
     if (whiteCandidates.length === 0) {
         const tempChess = new Chess(node.fen);
@@ -114,17 +100,12 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
             totalMissingWhiteMoves++;
         }
     } else {
-        console.log(`Found ${whiteCandidates.length} White threats/mainlines to process.`);
+        console.log(`Found ${whiteCandidates.length} White moves to process.`);
     }
     totalWhiteMovesFound += whiteCandidates.length;
 
     for (const whiteMove of whiteCandidates) {
-      let isTrap = whiteMove.isAmateurTrap;
-      let isThreat = whiteMove.isMasterThreat;
-      let isMainline = whiteMove.reason === "Mainline" && !isTrap && !isThreat;
-      let tag = isTrap ? "[TRAP] " : (isThreat ? "[THREAT] " : "");
-
-      console.log(`\n${tag}Evaluating White Move: ${whiteMove.san} (Reason: ${whiteMove.reason}, Prob: ${whiteMove.probability ? (whiteMove.probability*100).toFixed(1) : 0}%)`);
+      console.log(`\nEvaluating White Move: ${whiteMove.san} (Reason: ${whiteMove.reason}, Prob: ${whiteMove.probability ? (whiteMove.probability*100).toFixed(1) : 0}%)`);
       const tempChess = new Chess(node.fen);
       tempChess.move(whiteMove.san);
       const fenAfterWhite = tempChess.fen();
@@ -161,10 +142,6 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
               data: { cumulativeProb: Math.max(posAfterWhiteNode.cumulativeProb, incomingPathProb) }
           });
           
-          if (isMainline) totalWhiteMainlines++;
-          if (isTrap) totalWhiteTraps++;
-          if (isThreat) totalWhiteThreats++;
-          
           totalSkippedMoves++;
           continue; 
       }
@@ -172,15 +149,6 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
       
       if (!posAfterWhiteNode) {
           posAfterWhiteNode = await createRepertoireNode(repertoire.id, fenAfterWhite, newPgn, incomingPathProb);
-          if (isTrap || isThreat) {
-              await prisma.repertoireNode.update({
-                  where: { id: posAfterWhiteNode.id },
-                  data: { isMasterThreat: isThreat, isAmateurTrap: isTrap }
-              });
-              let finalTag = isThreat ? '[THREAT]' : '[TRAP]';
-              let finalLabel = isThreat ? 'Master Threat' : 'Amateur Trap';
-              console.log(`${finalTag} Flagged ${whiteMove.san} as ${finalLabel}! (Saved to DB)`);
-          }
       }
 
       await createRepertoireMove({
@@ -205,21 +173,10 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
           tempChess.move(dbBlackMove.san);
           const fenAfterBlack = tempChess.fen();
           
-          if (isMainline) totalWhiteMainlines++;
-          if (isTrap) {
-              totalWhiteTraps++;
-              console.log(`[TRAP] (Skipped) Flagged ${whiteMove.san} as Amateur Trap (already in DB)!`);
-          }
-          if (isThreat) {
-              totalWhiteThreats++;
-              console.log(`[THREAT] (Skipped) Flagged ${whiteMove.san} as Master Threat (already in DB)!`);
-          }
-
           queue.push({
             nodeId: dbBlackMove.toNodeId,
             fen: fenAfterBlack,
             currentMoveNumber: node.currentMoveNumber + 1,
-            trapDepth: node.trapDepth > 0 ? node.trapDepth + 1 : (isTrap || isThreat ? 1 : 0),
             cumulativeProb: incomingPathProb,
             history: [...newHistory, dbBlackMove.san]
           });
@@ -303,16 +260,10 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
         }
       });
 
-
-      if (isMainline) totalWhiteMainlines++;
-      if (isTrap) totalWhiteTraps++;
-      if (isThreat) totalWhiteThreats++;
-
       queue.push({
         nodeId: posAfterBlackNode.id,
         fen: fenAfterBlack,
         currentMoveNumber: node.currentMoveNumber + 1,
-        trapDepth: node.trapDepth > 0 ? node.trapDepth + 1 : (isTrap || isThreat ? 1 : 0),
         cumulativeProb: incomingPathProb,
         history: blackHistory
       });
@@ -324,7 +275,7 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
     const runningElapsed = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(`\n--- [TEMPORARY CHECKPOINT] Node Finished ---`);
     console.log(`Time: ${runningElapsed}s | Nodes Processed: ${totalPositionsProcessed} (Aborted: ${totalBranchesAborted})`);
-    console.log(`White Moves Found: ${totalWhiteMovesFound} (Skipped: ${totalSkippedMoves} | Mainlines: ${totalWhiteMainlines} | Traps: ${totalWhiteTraps} | Threats: ${totalWhiteThreats})`);
+    console.log(`White Moves Found: ${totalWhiteMovesFound} (Skipped: ${totalSkippedMoves})`);
     console.log(`Missing White Moves: ${totalMissingWhiteMoves} | Missing Black Moves: ${totalMissingBlackMoves}`);
     console.log(`--------------------------------------------\n`);
   }
@@ -338,9 +289,6 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
   console.log(`Total Nodes Processed:    ${totalPositionsProcessed}`);
   console.log(`  - Branches Aborted:     ${totalBranchesAborted}`);
   console.log(`White Moves Found:        ${totalWhiteMovesFound}`);
-  console.log(`  - Mainlines:            ${totalWhiteMainlines}`);
-  console.log(`  - Master Threats:       ${totalWhiteThreats}`);
-  console.log(`  - Amateur Traps:        ${totalWhiteTraps}`);
   console.log(`Total Black Responses:    ${totalBlackMovesEvaluated}`);
   console.log(`Total Skipped (In DB):    ${totalSkippedMoves}`);
   console.log(`Missing White Moves:      ${totalMissingWhiteMoves}`);

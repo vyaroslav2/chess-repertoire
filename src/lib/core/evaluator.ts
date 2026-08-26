@@ -1,87 +1,42 @@
 import { Chess } from "chess.js";
 import { prisma, saveEngineEvalCache } from "../db/operations";
 import { fetchWithRetry, delay, promptUser, GlobalState } from "../api/retry";
-import { getSmoothedWinRate } from "./math";
 import { runLocalStockfish, checkPvTolerance, getCpTolerance, getCp } from "./verifier";
 import { fallbackGeminiMove } from "../api/gemini";
 import { parseFullFen, positionKeyFromFen } from "./fen";
 import { defaultConfig, getMoveBand } from "./config";
 
-export function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: number, mastersList: any[], eliteList: any[], amateurList: any[], totalAmateurGames: number) {
+export function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: number, amateurList: any[], totalAmateurGames: number) {
     const amateurData = amateurList.find(m => m.san === moveSan) || { games: 0, white: 0, draws: 0, black: 0 };
-    const aTotal = amateurData.games || (amateurData.white + amateurData.draws + amateurData.black);
-    const mastersData = mastersList.find(m => m.san === moveSan);
-    const eliteData = eliteList.find(m => m.san === moveSan);
+    const amateurGames = amateurData.games ?? (amateurData.white + amateurData.draws + amateurData.black);
+    const probability = totalAmateurGames > 0 ? amateurGames / totalAmateurGames : 0;
+    const band = getMoveBand(currentMoveNumber, defaultConfig);
+    const requiredProbability = defaultConfig.whiteMoveFiltering.mainlinePopularity[band];
+    const include = totalAmateurGames > 0 && probability >= requiredProbability;
 
-    let include = false;
-    let reason = "";
-    let isTrap = false;
-    let probability = totalAmateurGames > 0 ? aTotal / totalAmateurGames : 0;
-
-    const mTotal = mastersData ? (mastersData.games || (mastersData.white + mastersData.draws + mastersData.black)) : 0;
-    const mWin = mTotal > 0 ? mastersData.white / mTotal : 0;
-    const mDraw = mTotal > 0 ? mastersData.draws / mTotal : 0;
-    const mLoss = mTotal > 0 ? mastersData.black / mTotal : 0;
-
-    const aWin = aTotal > 0 ? amateurData.white / aTotal : 0;
-    const aDraw = aTotal > 0 ? amateurData.draws / aTotal : 0;
-    const aLoss = aTotal > 0 ? amateurData.black / aTotal : 0;
-
-    let isAmateurTrap = false;
-    let isMasterThreat = false;
-    
-    const masterSmoothed = getSmoothedWinRate(
-      mTotal > 0 ? mastersData.white : 0, 
-      mTotal > 0 ? mastersData.draws : 0, 
-      mTotal, 50, 0.52
-    );
-
-    if (mTotal >= 15 && masterSmoothed >= 0.58) {
-        isMasterThreat = true;
-    }
-    
-    if (isMasterThreat && probability < 0.01) {
-        probability = 0.01;
-    }
-
-    if (totalAmateurGames > 0) {
-      const amateurWhiteWinRate = aTotal > 0 ? amateurData.white / aTotal : 0;
-      
-      const amateurSmoothed = getSmoothedWinRate(
-        aTotal > 0 ? amateurData.white : 0, 
-        aTotal > 0 ? amateurData.draws : 0, 
-        aTotal, 50, 0.52
-      );
-
-      if (aTotal >= 15 && amateurSmoothed >= 0.58 && !isMasterThreat) {
-          isAmateurTrap = true;
-      }
-
-      let requiredProbability = defaultConfig.whiteMoveFiltering.mainlinePopularity.late;
-      const band = getMoveBand(currentMoveNumber, defaultConfig);
-      if (band === 'early') requiredProbability = defaultConfig.whiteMoveFiltering.mainlinePopularity.early;
-      else if (band === 'middle') requiredProbability = defaultConfig.whiteMoveFiltering.mainlinePopularity.middle;
-      
-      if (probability >= requiredProbability) {
-          include = true;
-          reason = "Mainline";
-      } else if (isMasterThreat) {
-          include = true;
-          reason = "Master Threat";
-          isTrap = true;
-      } else if (isAmateurTrap || (probability >= 0.01 && amateurWhiteWinRate >= 0.55)) {
-          include = true;
-          reason = "Amateur Trap";
-          isTrap = true;
-          isAmateurTrap = true; // ensure it's flagged even if it only hit the 55% raw filter
-      }
-    }
-
-    return { 
-      include, reason, isTrap, isAmateurTrap, isMasterThreat, probability,
-      mastersGames: mTotal, mastersWin: mWin, mastersDraw: mDraw, mastersLoss: mLoss,
-      lichessGames: aTotal, lichessWin: aWin, lichessDraw: aDraw, lichessLoss: aLoss
+    return {
+      include,
+      reason: include ? "Amateur popularity" : "",
+      probability,
+      amateurGames,
+      amateurWhiteWins: amateurData.white,
+      amateurDraws: amateurData.draws,
+      amateurBlackWins: amateurData.black
     };
+}
+
+export function selectWhiteCandidates(currentMoveNumber: number, mastersList: any[], eliteList: any[], amateurList: any[], totalAmateurGames: number) {
+  const allWhiteSan = new Set<string>();
+  for (const move of [...mastersList, ...eliteList, ...amateurList]) {
+    allWhiteSan.add(move.san);
+  }
+
+  return Array.from(allWhiteSan)
+    .map(san => ({
+      san,
+      ...shouldIncludeWhiteMove(san, currentMoveNumber, amateurList, totalAmateurGames)
+    }))
+    .filter(move => move.include);
 }
 
 import { fetchAllDatabases } from "../api/lichess";
