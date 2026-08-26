@@ -4,7 +4,7 @@ import { fetchWithRetry, delay, promptUser, GlobalState } from "../api/retry";
 import { getSmoothedWinRate } from "./math";
 import { runLocalStockfish, checkPvTolerance, getCpTolerance, getCp } from "./verifier";
 import { fallbackGeminiMove } from "../api/gemini";
-import { normalizeFen } from "./fen";
+import { parseFullFen, positionKeyFromFen } from "./fen";
 
 export function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: number, mastersList: any[], eliteList: any[], amateurList: any[], totalAmateurGames: number) {
     const amateurData = amateurList.find(m => m.san === moveSan) || { games: 0, white: 0, draws: 0, black: 0 };
@@ -85,7 +85,8 @@ export function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: numbe
 import { fetchAllDatabases } from "../api/lichess";
 
 export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: number, previousMovesSan: string[]): Promise<any> {
-  const normFen = normalizeFen(fen);
+  const fullFen = parseFullFen(fen);
+  const posKey = positionKeyFromFen(fullFen);
   
   // 1. Check Explorer Cache via lichess.ts
   const [mastersData, eliteData, amateurData] = await fetchAllDatabases(fen);
@@ -143,7 +144,7 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
   let chessdbPvs: any[] = [];
   let evalSource = 'Lichess';
 
-  const cachedEvals = await prisma.engineEvalCache.findMany({ where: { positionId: normFen }, orderBy: { rank: 'asc' } });
+  const cachedEvals = await prisma.engineEvalCache.findMany({ where: { positionId: posKey }, orderBy: { rank: 'asc' } });
   
   if (cachedEvals.length > 0) {
     const lichessCached = cachedEvals.filter(e => e.source === "lichess");
@@ -178,7 +179,7 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
     try {
       let cloudData: any = null;
       if (GlobalState.lichessCloudEvals) {
-        const cloudUrl = `https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(normFen)}&multiPv=5`;
+        const cloudUrl = `https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(fullFen)}&multiPv=5`;
         cloudData = await fetchWithRetry(cloudUrl, 10, false, 'eval');
       }
       
@@ -205,7 +206,7 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
       }
 
       try {
-        const chessdbUrl = `https://www.chessdb.cn/cdb.php?action=queryall&board=${encodeURIComponent(normFen)}`;
+        const chessdbUrl = `https://www.chessdb.cn/cdb.php?action=queryall&board=${encodeURIComponent(fullFen)}`;
         const chessdbRes = await fetch(chessdbUrl);
         if (chessdbRes.ok) {
           const text = await chessdbRes.text();
@@ -251,14 +252,14 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
   let baselinePvs = enginePvs.length > 0 ? enginePvs : (chessdbPvs.length > 0 ? chessdbPvs : []);
   if (baselinePvs.length === 0) {
       console.log(`[KILL MODE] APIs down, running shallow Local Stockfish baseline...`);
-      baselinePvs = await runLocalStockfish(normFen, 15, 18);
+      baselinePvs = await runLocalStockfish(fullFen, 15, 18);
   }
 
   const bestBaseline = baselinePvs[0];
   if (bestBaseline && bestBaseline.mate !== null && bestBaseline.mate < 0) {
       console.log(`[KILL MODE] Forced mate detected (Mate in ${Math.abs(bestBaseline.mate)}). Bypassing human candidates and running deep search...`);
       
-      const deepPvs = await runLocalStockfish(normFen, 1, 24);
+      const deepPvs = await runLocalStockfish(fullFen, 1, 24);
       const bestDeep = deepPvs[0];
       
       if (bestDeep) {
@@ -340,7 +341,7 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
               // 3. Waterfall to Local Stockfish
               if (!localEngineRun) {
                   console.log(`\n[DEEP SEARCH] Candidate '${candidate.san}' exceeds API depth. Running Local Stockfish...`);
-                  localEnginePvs = await runLocalStockfish(normFen, 15, 18);
+                  localEnginePvs = await runLocalStockfish(fullFen, 15, 18);
                   localEngineRun = true;
               }
   

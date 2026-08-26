@@ -2,7 +2,7 @@ import { runLocalStockfish } from "../src/lib/core/verifier";
 import { evaluateBlackMove } from "../src/lib/core/evaluator";
 import { prisma, getOrCreatePositionCache, saveExplorerMoveCache } from "../src/lib/db/operations";
 import { Chess } from "chess.js";
-import { normalizeFen } from "../src/lib/core/fen";
+import { parseFullFen, positionKeyFromFen } from "../src/lib/core/fen";
 
 // Ensure burner DB
 process.env.DATABASE_URL = "file:./burner.db";
@@ -10,12 +10,13 @@ process.env.DATABASE_URL = "file:./burner.db";
 async function runTest() {
   console.log("=== Phase 1: Setup and Basic Health Check ===");
   const fen = "r1bq1rk1/ppp1bppp/2n2n2/3p4/3P4/2PB1N2/PP3PPP/RNBQ1RK1 b - - 4 8";
-  const normFen = normalizeFen(fen);
+  const fullFen = parseFullFen(fen);
+  const normFen = positionKeyFromFen(fullFen);
   console.log(`Test FEN: ${fen}`);
   const chess = new Chess(fen);
   
   console.log("Running local Stockfish directly...");
-  const localPvs = await runLocalStockfish(fen, 15, 18);
+  const localPvs = await runLocalStockfish(fullFen, 15, 18);
   
   if (!Array.isArray(localPvs) || localPvs.length === 0) {
     throw new Error("runLocalStockfish did not return a valid array of moves.");
@@ -62,7 +63,7 @@ async function runTest() {
   };
   
   console.log("\n=== Phase 3: Verify the Fallback Mechanism ===");
-  await getOrCreatePositionCache(normFen);
+  await getOrCreatePositionCache(fullFen);
   
   // Clean up any existing engine eval cache so it's forced to fetch
   await prisma.engineEvalCache.deleteMany({ where: { positionId: normFen } });
@@ -76,9 +77,9 @@ async function runTest() {
   ];
   
   for (const m of fakeData) {
-      await saveExplorerMoveCache(normFen, "masters", m);
-      await saveExplorerMoveCache(normFen, "elite", m);
-      await saveExplorerMoveCache(normFen, "amateur", m);
+      await saveExplorerMoveCache(fullFen, "masters", m);
+      await saveExplorerMoveCache(fullFen, "elite", m);
+      await saveExplorerMoveCache(fullFen, "amateur", m);
   }
 
   console.log("Calling evaluateBlackMove...");

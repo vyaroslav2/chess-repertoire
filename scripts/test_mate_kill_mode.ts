@@ -2,7 +2,7 @@ import { evaluateBlackMove } from '../src/lib/core/evaluator';
 import { Chess } from 'chess.js';
 import { PrismaClient } from '@prisma/client';
 import { saveExplorerMoveCache, getOrCreatePositionCache } from '../src/lib/db/operations';
-import { normalizeFen } from '../src/lib/core/fen';
+import { parseFullFen, positionKeyFromFen } from '../src/lib/core/fen';
 
 // Ensure burner DB
 process.env.DATABASE_URL = "file:./burner.db";
@@ -13,7 +13,8 @@ async function runTest() {
   console.log("=== Phase 1: Environment Isolation (Local Stockfish Only) ===");
   // FEN: 4r1k1/5ppp/8/8/8/8/5PPP/4R1K1 b - - 0 1 (White rook just moved to e1, Black plays Rxe1#)
   const fen = "4r1k1/5ppp/8/8/8/8/5PPP/4R1K1 b - - 0 1"; 
-  const normFen = normalizeFen(fen);
+  const fullFen = parseFullFen(fen);
+  const normFen = positionKeyFromFen(fullFen);
   console.log(`Test FEN: ${fen} (Black has Rxe1#)`);
 
   const chess = new Chess(fen);
@@ -35,7 +36,7 @@ async function runTest() {
   };
 
   // Ensure the PositionCache exists before saving foreign-keyed cache data
-  await getOrCreatePositionCache(normFen);
+  await getOrCreatePositionCache(fullFen);
 
   // Clean previous engine evals for this test FEN
   await prisma.engineEvalCache.deleteMany({ where: { positionId: normFen } });
@@ -49,9 +50,9 @@ async function runTest() {
   ];
   
   for (const m of fakeData) {
-      await saveExplorerMoveCache(normFen, "masters", m);
-      await saveExplorerMoveCache(normFen, "elite", m);
-      await saveExplorerMoveCache(normFen, "amateur", m);
+      await saveExplorerMoveCache(fullFen, "masters", m);
+      await saveExplorerMoveCache(fullFen, "elite", m);
+      await saveExplorerMoveCache(fullFen, "amateur", m);
   }
 
   console.log("\n=== Phase 3 & 4: Triggering Kill Mode & Deep Search ===");

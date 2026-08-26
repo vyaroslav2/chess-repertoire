@@ -1,11 +1,11 @@
 import { PrismaClient } from "@prisma/client";
 import { fetchWikibooksSnippet } from "../api/wikibooks";
-import { normalizeFen } from "../core/fen";
+import { parseFullFen, positionKeyFromFen } from "../core/fen";
 
 export const prisma = new PrismaClient();
 
 export async function getOrCreatePositionCache(fen: string, openingMetadata?: { eco: string, name: string }, history?: string[]) {
-  const normFen = normalizeFen(fen);
+  const normFen = positionKeyFromFen(parseFullFen(fen));
   let pos = await prisma.positionCache.findUnique({ where: { fen: normFen } });
   
   if (!pos) { 
@@ -40,7 +40,7 @@ export async function getOrCreatePositionCache(fen: string, openingMetadata?: { 
 }
 
 export async function saveExplorerMoveCache(fen: string, dbType: string, moveData: { san: string, games: number, whiteWins: number, draws: number, blackWins: number }) {
-  const normFen = normalizeFen(fen);
+  const normFen = positionKeyFromFen(parseFullFen(fen));
   return prisma.explorerMoveCache.upsert({
     where: {
       positionId_dbType_san: {
@@ -68,7 +68,7 @@ export async function saveExplorerMoveCache(fen: string, dbType: string, moveDat
 }
 
 export async function saveEngineEvalCache(fen: string, source: string, evalData: { san: string, cp: number, mate: number | null, rank: number }) {
-  const normFen = normalizeFen(fen);
+  const normFen = positionKeyFromFen(parseFullFen(fen));
   return prisma.engineEvalCache.upsert({
     where: {
       positionId_san_source: {
@@ -105,7 +105,7 @@ export async function getRepertoireNode(repertoireId: string, pgn: string) {
 }
 
 export async function createRepertoireNode(repertoireId: string, fen: string, pgn: string, cumulativeProb: number, isAmateurTrap: boolean = false, isMasterThreat: boolean = false) {
-  const normFen = normalizeFen(fen);
+  const normFen = positionKeyFromFen(parseFullFen(fen));
   return prisma.repertoireNode.create({
     data: {
       repertoireId,
