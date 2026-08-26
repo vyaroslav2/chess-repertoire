@@ -37,9 +37,13 @@ export async function promptUser(query: string): Promise<string> {
   return answer;
 }
 
-export async function fetchWithRetry(url: string, retryAttempts: number, useToken = true, apiType: 'eval' | 'explorer' = 'explorer'): Promise<any> {
-  const headers: any = { 'Accept': 'application/json' };
-  if (useToken && process.env.LICHESS_API_TOKEN) {
+export async function fetchWithRetry(url: string, retryAttempts: number, useToken = true, apiType: 'eval' | 'explorer' | 'chessdb' = 'explorer'): Promise<any> {
+  const headers: any = {};
+  if (apiType !== 'chessdb') {
+    headers['Accept'] = 'application/json';
+  }
+  
+  if (useToken && process.env.LICHESS_API_TOKEN && apiType !== 'chessdb') {
       headers['Authorization'] = `Bearer ${process.env.LICHESS_API_TOKEN}`;
   }
 
@@ -51,12 +55,12 @@ export async function fetchWithRetry(url: string, retryAttempts: number, useToke
       const response = await fetch(url, { headers });
       if (response.status === 429) {
         if (i < retryAttempts - 1) {
-            console.log(`[WARNING] Lichess rate limit (429) on ${url}. Auto-retrying in ${defaultConfig.api.rateLimitRetryDelayMs}ms (Attempt ${i+1}/${retryAttempts})...`);
+            console.log(`[WARNING] Rate limit (429) on ${url}. Auto-retrying in ${defaultConfig.api.rateLimitRetryDelayMs}ms (Attempt ${i+1}/${retryAttempts})...`);
             await delay(defaultConfig.api.rateLimitRetryDelayMs);
             continue;
         }
 
-        console.log(`\n[WARNING] Lichess rate limit (429) on ${url}`);
+        console.log(`\n[WARNING] Rate limit (429) on ${url}`);
         const cOption = apiType === 'eval' ? `, [c]=Fallback to ChessDB` : ``;
         const answer = await promptUser(`[ACTION REQUIRED] Auto-retries exhausted. Switch VPN and press Enter to retry. (Options: [Enter]=Retry, [n]=Deny/Skip${cOption}, [s]=Stop script): `);
         const choice = answer.toLowerCase().trim();
@@ -65,16 +69,18 @@ export async function fetchWithRetry(url: string, retryAttempts: number, useToke
             console.log("Stopping script.");
             process.exit(0);
         } else if (choice === 'c' && apiType === 'eval') {
-            GlobalState.lichessCloudEvals = false;
-            return null;
+            return null; // Don't turn off GlobalState.lichessCloudEvals anymore
         } else if (choice === 'n') {
             return null;
         }
         return await fetchWithRetry(url, retryAttempts, useToken, apiType);
       }
       if (!response.ok) {
-        console.log(`Lichess error ${response.status} on ${url}`);
+        console.log(`Error ${response.status} on ${url}`);
         return null;
+      }
+      if (apiType === 'chessdb') {
+        return await response.text();
       }
       return await response.json();
     } catch (e: any) {
@@ -88,8 +94,7 @@ export async function fetchWithRetry(url: string, retryAttempts: number, useToke
               console.log("Stopping script.");
               process.exit(0);
           } else if (choice === 'c' && apiType === 'eval') {
-              GlobalState.lichessCloudEvals = false;
-              return null;
+              return null; // Don't turn off GlobalState.lichessCloudEvals anymore
           } else if (choice === 'n') {
               return null;
           }

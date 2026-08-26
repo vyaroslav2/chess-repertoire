@@ -100,7 +100,7 @@ export function buildBlackHumanShortlist(
   const anchorGames = config.smoothing.anchorGames;
   const blackPrior = config.smoothing.blackPrior;
 
-  for (const candidate of candidatesByUci.values()) {
+  for (const candidate of Array.from(candidatesByUci.values())) {
     candidate.weightedGames = (candidate.mastersGames * weight) + candidate.eliteGames;
     candidate.weightedBlackWins = (candidate.mastersBlackWins * weight) + candidate.eliteBlackWins;
     candidate.weightedDraws = (candidate.mastersDraws * weight) + candidate.eliteDraws;

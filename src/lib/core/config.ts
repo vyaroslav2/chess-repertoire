@@ -71,6 +71,7 @@ export interface Config {
         };
         chessDb: {
             queryMode: "queryall";
+            retryAttempts: number;
         };
         networkRetryDelayMs: number;
         rateLimitRetryDelayMs: number;
@@ -198,7 +199,8 @@ export const defaultConfig: Config = {
 
         // ChessDB request shape used for complete remote result snapshots.
         chessDb: {
-            queryMode: "queryall"
+            queryMode: "queryall",
+            retryAttempts: 3
         },
 
         // Delay durations (in milliseconds)
@@ -258,6 +260,7 @@ export function validateConfig(config: Config) {
     if (!Number.isInteger(config.api?.lichessCloudEval?.retryAttempts) || config.api.lichessCloudEval.retryAttempts < 1) throw new Error("Invalid api.lichessCloudEval.retryAttempts");
     if (!Number.isInteger(config.api?.lichessExplorer?.retryAttempts) || config.api.lichessExplorer.retryAttempts < 1) throw new Error("Invalid api.lichessExplorer.retryAttempts");
     if (config.api?.chessDb?.queryMode !== "queryall") throw new Error("Invalid api.chessDb.queryMode");
+    if (!Number.isInteger(config.api?.chessDb?.retryAttempts) || config.api.chessDb.retryAttempts < 1) throw new Error("Invalid api.chessDb.retryAttempts");
 
     if (typeof config.api?.networkRetryDelayMs !== 'number' || config.api.networkRetryDelayMs < 0 || !Number.isFinite(config.api.networkRetryDelayMs)) throw new Error("Invalid api.networkRetryDelayMs");
     if (typeof config.api?.rateLimitRetryDelayMs !== 'number' || config.api.rateLimitRetryDelayMs < 0 || !Number.isFinite(config.api.rateLimitRetryDelayMs)) throw new Error("Invalid api.rateLimitRetryDelayMs");

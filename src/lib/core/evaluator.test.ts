@@ -1,5 +1,5 @@
-import test from 'node:test';
-import assert from 'node:assert';
+import { test } from 'node:test';
+import * as assert from 'node:assert';
 import { Chess } from 'chess.js';
 import { evaluateBlackMove } from './evaluator';
 import { PrismaClient } from '@prisma/client';
