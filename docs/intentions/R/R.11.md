@@ -14,7 +14,7 @@ This is the seed of the whole run. Everything that follows is the loop in [[A1]]
 
 The six things travelling with each item are what the expansion needs to know and cannot work out from the position alone. The move number decides how deep the branch has gone and which tolerance applies; the trap counter decides how much further a trap line may run; the cumulative probability decides both whether the position is worth expanding and what its children inherit. None of these can be recovered by looking at the board.
 
-Because the queue is only in memory, a run that stops halfway leaves nothing to resume from. There is no record of what had been reached and not yet expanded. Restarting means starting over — and today, thanks to the re-run crash, restarting is not possible at all.[^1]
+Because the queue is only in memory, a run that stops halfway leaves nothing to resume from — which is intended, not a shortcoming. Restarting always means starting over from the root.[^1][^1]
 
 Taking items from the front is what makes the tree grow evenly: every short line is finished before any long line is begun. Stop a run early and you have a complete shallow book rather than one deep line and a lot of gaps. That choice is made where items are removed, in [[A1.16]], not here — this step only puts the first one on.[^2]
 
@@ -27,7 +27,7 @@ Likely: keeping the queue in memory was the simple choice rather than a decision
 
 Notes:
 
-[^1]: #deferred The queue exists only while the run is going, so a run that stops halfway cannot be resumed — there is no record of what was reached but not yet expanded. Revisit if runs ever become long enough that losing one hurts. Writing the queue to the database at each step would make resuming possible, at the cost of a write per position.
+[^1]: #note The queue lives only in memory, so a run that stops halfway leaves nothing to resume from — and that is correct by design. The generation model is rebuild-from-root only (see [[M]]): a run that fails is discarded and started again clean from the root, never resumed. Persisting the queue to allow resume is deliberately not wanted, because it would add run-state tracking for no benefit — the tree is derived data and the caches survive a wipe, so a fresh rebuild is cheap.
 
 [^2]: #note Taking from the front, so that short lines finish before long ones start, is the decision that shapes the whole tree. It is made in [[A1.16]], where items are taken off — this box only seeds the queue.
 

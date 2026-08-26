@@ -58,8 +58,7 @@ third history move  → White move 2
 ...
 ```
 
-#roadmap Resumable generation must restore the complete saved history from the original opening start. Resuming must not create a new partial history beginning at the resume point.
-
+#note Resumable generation is not wanted — the model is rebuild-from-root only, with no resume (see [[M]]). This box's history handling therefore only needs to serve a clean from-root run.
 ## Transpositions
 
 `Known:` Chess positions may be shared across transpositions, but repertoire histories/progressions are unique.

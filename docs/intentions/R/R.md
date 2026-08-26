@@ -28,9 +28,9 @@ A failed run must look failed in the log. See [[R.14]] and [[R.06]].
 
 If the log cannot be written, the run stops. Decided: correct.
 
-**Open across this diagram**
+Rebuild-from-root only. Every run starts clean; a failed run is discarded, never
+resumed, and there is no extend mode. See [[R.11]] and [[M]].
 
-Whether a second run extends the tree or rebuilds it, once the re-run crash is
-fixed. Two modes chosen at start rather than fixed in the code. See [[R.01]].
+**Open across this diagram**
 
 Whether the depth cap of 3 is right. See [[R.13]].
