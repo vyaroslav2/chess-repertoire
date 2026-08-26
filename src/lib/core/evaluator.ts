@@ -1,7 +1,14 @@
 import { Chess } from "chess.js";
 import { readRemoteEngineResult, saveRemoteEngineResult, type RemoteEngineEvaluation } from "../db/operations";
 import { fetchWithRetry, delay, GlobalState } from "../api/retry";
-import { runLocalStockfish, checkPvTolerance, getCpTolerance, getCp } from "./verifier";
+import {
+  runLocalStockfish,
+  checkLegacyLocalPvTolerance,
+  getCpTolerance,
+  getLegacyLocalCp,
+  verifyOrdinaryCpSnapshot,
+  type OrdinaryCpSnapshotEntry
+} from "./verifier";
 import { fallbackGeminiMove } from "../api/gemini";
 import { parseFullFen } from "./fen";
 import { computeRemoteEngineEvaluationProfile, defaultConfig, getMoveBand } from "./config";
@@ -27,6 +34,16 @@ function toLegacyEnginePvs(evaluations: RemoteEngineEvaluation[]) {
   return [...evaluations]
     .sort(compareRemoteEvaluationsForBlack)
     .map(evaluation => ({ cp: evaluation.cp, mate: evaluation.mate, moves: evaluation.uci }));
+}
+
+function toOrdinaryCpSnapshot(evaluations: RemoteEngineEvaluation[]): OrdinaryCpSnapshotEntry[] | null {
+  if (evaluations.some(evaluation => evaluation.mate !== null)) return null;
+  return evaluations.map(evaluation => ({
+    uci: evaluation.uci,
+    cp: evaluation.cp as number,
+    san: evaluation.san,
+    mate: null
+  }));
 }
 
 export function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: number, amateurList: any[], totalAmateurGames: number) {
@@ -122,6 +139,8 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
   let bestCp = 0;
   let enginePvs: any[] = [];
   let chessdbPvs: any[] = [];
+  let lichessOrdinarySnapshot: OrdinaryCpSnapshotEntry[] | null = [];
+  let chessDbOrdinarySnapshot: OrdinaryCpSnapshotEntry[] | null = [];
   let evalSource = 'Lichess';
   const lichessProfile = computeRemoteEngineEvaluationProfile("LICHESS", defaultConfig);
   const chessDbProfile = computeRemoteEngineEvaluationProfile("CHESSDB", defaultConfig);
@@ -170,11 +189,13 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
 
   if (lichessResult.status === "success") {
     enginePvs = toLegacyEnginePvs(lichessResult.evaluations);
+    lichessOrdinarySnapshot = toOrdinaryCpSnapshot(lichessResult.evaluations);
     lichessCp = enginePvs.find(pv => typeof pv.cp === "number")?.cp ?? null;
     if (lichessCp !== null) bestCp = lichessCp;
   }
   if (chessDbResult.status === "success") {
     chessdbPvs = toLegacyEnginePvs(chessDbResult.evaluations);
+    chessDbOrdinarySnapshot = toOrdinaryCpSnapshot(chessDbResult.evaluations);
     chessdbCp = chessdbPvs.find(pv => typeof pv.cp === "number")?.cp ?? null;
   }
   if (enginePvs.length === 0 && chessdbPvs.length > 0) {
@@ -202,7 +223,7 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
           const lan = bestDeep.moves.split(' ')[0];
           const moveResult = tempChess.move({ from: lan.substring(0, 2), to: lan.substring(2, 4), promotion: lan.length === 5 ? lan[4] : undefined } as any);
           
-          const finalCp = getCp(bestDeep);
+          const finalCp = getLegacyLocalCp(bestDeep);
           
           return {
               selectedMoveSan: moveResult.san,
@@ -241,57 +262,57 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
       let localEnginePvs: any[] = [];
       
       // Separate the baseline CP for each engine source
-      const lichessBestCp = enginePvs.length > 0 ? getCp(enginePvs[0]) : 0;
-      const chessdbBestCp = chessdbPvs.length > 0 ? getCp(chessdbPvs[0]) : 0;
+      const lichessBestCp = enginePvs.length > 0 ? getLegacyLocalCp(enginePvs[0]) : 0;
       
       for (const candidate of candidateMoves) {
-          try {
-              const moveResult = chess.move(candidate.san);
-              chess.undo();
-              const lan = moveResult.lan; 
-              const currentTolerance = getCpTolerance(moveNumber, false);
+          const moveResult = chess.move(candidate.san);
+          chess.undo();
+          const lan = moveResult.lan;
+          const currentTolerance = getCpTolerance(moveNumber, false);
   
-              // 1. Check Lichess PVs (using lichessBestCp)
-              let status = checkPvTolerance(lan, enginePvs, lichessBestCp, currentTolerance);
-              if (status === 'VALID') {
+          // Remote ordinary snapshots use strict PV semantics. A Lichess mate
+          // snapshot stays outside this cp verifier until the B3 mate slice.
+          const lichessDecision = lichessOrdinarySnapshot === null
+              ? 'INCONCLUSIVE'
+              : verifyOrdinaryCpSnapshot(lan, lichessOrdinarySnapshot, currentTolerance);
+          if (lichessDecision === 'ACCEPT') {
                   selectedMoveSan = candidate.san;
                   selectedStats = candidate;
-                  selectedEngineCp = getCp(enginePvs.find(pv => pv.moves.split(" ")[0] === lan));
+                  selectedEngineCp = lichessOrdinarySnapshot!.find(entry => entry.uci === lan)!.cp;
                   break;
-              }
-              if (status === 'REJECTED') continue;
+          }
+          if (lichessDecision === 'REJECT') continue;
   
-              // 2. Check ChessDB PVs (using chessdbBestCp)
-              status = checkPvTolerance(lan, chessdbPvs, chessdbBestCp, currentTolerance);
-              if (status === 'VALID') {
+          const chessDbDecision = chessDbOrdinarySnapshot === null
+              ? 'INCONCLUSIVE'
+              : verifyOrdinaryCpSnapshot(lan, chessDbOrdinarySnapshot, currentTolerance);
+          if (chessDbDecision === 'ACCEPT') {
                   selectedMoveSan = candidate.san;
                   selectedStats = candidate;
-                  selectedEngineCp = getCp(chessdbPvs.find(pv => pv.moves.split(" ")[0] === lan));
+                  selectedEngineCp = chessDbOrdinarySnapshot!.find(entry => entry.uci === lan)!.cp;
                   evalSource = 'ChessDB';
                   break;
-              }
-              if (status === 'REJECTED') continue;
+          }
+          if (chessDbDecision === 'REJECT') continue;
   
-              // 3. Waterfall to Local Stockfish
-              if (!localEngineRun) {
+          // Local Stockfish remains on its legacy mate-aware adapter in this slice.
+          if (!localEngineRun) {
                   console.log(`\n[DEEP SEARCH] Candidate '${candidate.san}' exceeds API depth. Running Local Stockfish...`);
                   localEnginePvs = await runLocalStockfish(fullFen, defaultConfig.engine.localVerification.multiPv, defaultConfig.engine.localVerification.depth);
                   localEngineRun = true;
-              }
+          }
   
-              const localTolerance = getCpTolerance(moveNumber, true); 
-              const localBestCp = localEnginePvs.length > 0 ? getCp(localEnginePvs[0]) : lichessBestCp;
+          const localTolerance = getCpTolerance(moveNumber, true);
+          const localBestCp = localEnginePvs.length > 0 ? getLegacyLocalCp(localEnginePvs[0]) : lichessBestCp;
               
-              // (using localBestCp)
-              status = checkPvTolerance(lan, localEnginePvs, localBestCp, localTolerance);
-              if (status === 'VALID') {
+          const localStatus = checkLegacyLocalPvTolerance(lan, localEnginePvs, localBestCp, localTolerance);
+          if (localStatus === 'VALID') {
                   selectedMoveSan = candidate.san;
                   selectedStats = candidate;
-                  selectedEngineCp = getCp(localEnginePvs.find(pv => pv.moves.split(" ")[0] === lan));
+                  selectedEngineCp = getLegacyLocalCp(localEnginePvs.find(pv => pv.moves.split(" ")[0] === lan));
                   evalSource = 'Local Stockfish';
                   break;
-              }
-          } catch(e) {}
+          }
       }
   }
 

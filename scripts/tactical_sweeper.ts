@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { runLocalStockfish, getCp } from '../src/lib/core/verifier';
+import { runLocalStockfish, getLegacyLocalCp } from '../src/lib/core/verifier';
 import { isLocked, createLockfile, removeLockfile } from '../src/lib/core/lockfile';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -87,8 +87,8 @@ async function main() {
             }
 
             // 4. Subtract the CPs. If difference > 150 CP, flag it.
-            const bestCp = getCp(bestDeepMove);
-            const fastCp = getCp(fastPickEval);
+            const bestCp = getLegacyLocalCp(bestDeepMove);
+            const fastCp = getLegacyLocalCp(fastPickEval);
             
             // Because the CP is always from White's perspective.
             // Since Black wants a lower CP, if the Fast Move (played by Black) is worse, its CP will be HIGHER.

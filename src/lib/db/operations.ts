@@ -2,6 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import { Chess } from "chess.js";
 import { fetchWikibooksSnippet } from "../api/wikibooks";
 import { parseFullFen, positionKeyFromFen } from "../core/fen";
+import { isValidUciMove } from "../core/uci";
 
 export const prisma = new PrismaClient();
 
@@ -74,13 +75,7 @@ function validateExplorerMoveRows(moves: ExplorerMoveRow[]): void {
       throw new Error("Invalid explorer bucket: move must be an object");
     }
 
-    const uciIsShaped = typeof move.uci === "string" &&
-      /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(move.uci) &&
-      move.uci.slice(0, 2) !== move.uci.slice(2, 4) &&
-      (move.uci.length === 4 ||
-        (move.uci[1] === "7" && move.uci[3] === "8") ||
-        (move.uci[1] === "2" && move.uci[3] === "1"));
-    if (!uciIsShaped) {
+    if (!isValidUciMove(move.uci)) {
       throw new Error("Invalid explorer bucket: invalid UCI/LAN move");
     }
     if (typeof move.san !== "string" || move.san.trim() === "") {
@@ -197,7 +192,7 @@ function validateRemoteEngineResult(
     if (!evaluation || typeof evaluation !== "object") {
       throw new Error("Invalid remote engine result: evaluation must be an object");
     }
-    if (typeof evaluation.uci !== "string" || !/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(evaluation.uci)) {
+    if (!isValidUciMove(evaluation.uci)) {
       throw new Error("Invalid remote engine result: malformed UCI/LAN move");
     }
     if (seenUci.has(evaluation.uci)) {

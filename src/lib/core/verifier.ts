@@ -3,6 +3,73 @@ import { Chess } from 'chess.js';
 import * as path from 'path';
 
 import { defaultConfig, getMoveBand } from './config';
+import { isValidUciMove } from './uci';
+
+export type PvDecision = 'ACCEPT' | 'REJECT' | 'INCONCLUSIVE';
+
+export type OrdinaryCpSnapshotEntry = {
+    uci: string;
+    cp: number;
+    san?: string | null;
+    mate?: null;
+};
+
+export function verifyOrdinaryCpSnapshot(
+    candidateUci: string,
+    snapshot: readonly OrdinaryCpSnapshotEntry[],
+    toleranceCp: number
+): PvDecision {
+    if (!isValidUciMove(candidateUci)) {
+        throw new Error('Invalid PV candidate UCI/LAN move');
+    }
+    if (typeof toleranceCp !== 'number' || !Number.isFinite(toleranceCp) || toleranceCp < 0) {
+        throw new Error('Invalid PV tolerance: expected a finite non-negative number');
+    }
+    if (!Array.isArray(snapshot)) {
+        throw new Error('Invalid ordinary cp snapshot: expected an array');
+    }
+
+    const seenUci = new Set<string>();
+    const validated = snapshot.map((entry) => {
+        if (!entry || typeof entry !== 'object') {
+            throw new Error('Invalid ordinary cp snapshot entry');
+        }
+        if (!isValidUciMove(entry.uci)) {
+            throw new Error('Invalid ordinary cp snapshot UCI/LAN move');
+        }
+        if (seenUci.has(entry.uci)) {
+            throw new Error(`Duplicate UCI move in ordinary cp snapshot: ${entry.uci}`);
+        }
+        seenUci.add(entry.uci);
+        if (entry.mate !== undefined && entry.mate !== null) {
+            throw new Error('Wrong evaluation kind for ordinary cp verifier: mate evaluation supplied');
+        }
+        if (typeof entry.cp !== 'number' || !Number.isFinite(entry.cp)) {
+            throw new Error(`Invalid ordinary cp evaluation for ${entry.uci}`);
+        }
+        return { uci: entry.uci, cp: entry.cp };
+    });
+
+    if (validated.length === 0) return 'INCONCLUSIVE';
+
+    const ordered = [...validated].sort((a, b) => a.cp - b.cp || a.uci.localeCompare(b.uci));
+    const bestCp = ordered[0].cp;
+    const candidate = ordered.find(entry => entry.uci === candidateUci);
+
+    if (candidate) {
+        const candidateLoss = candidate.cp - bestCp;
+        if (candidateLoss < 0) {
+            throw new Error('Invalid ordinary cp snapshot: candidate loss is negative');
+        }
+        return candidateLoss <= toleranceCp ? 'ACCEPT' : 'REJECT';
+    }
+
+    const boundaryLoss = ordered[ordered.length - 1].cp - bestCp;
+    if (boundaryLoss < 0) {
+        throw new Error('Invalid ordinary cp snapshot: returned boundary loss is negative');
+    }
+    return boundaryLoss > toleranceCp ? 'REJECT' : 'INCONCLUSIVE';
+}
 
 // Local Fluctuation Allowance: slightly more lenient for lower-depth local engine
 export function getCpTolerance(moveNumber: number, isLocalEngine = false): number {
@@ -13,8 +80,9 @@ export function getCpTolerance(moveNumber: number, isLocalEngine = false): numbe
     return defaultConfig.engineVerification.apiToleranceCp[band];
 }
 
-// Safely handles both CP and Forced Mates (using 30000 as extreme baseline)
-export const getCp = (pv: any) => pv.mate !== null ? (pv.mate > 0 ? 30000 - pv.mate : -30000 - pv.mate) : (pv.cp !== undefined ? pv.cp : 0);
+// Legacy local-engine ordering only. Strict remote PV verification never uses this
+// mate-to-cp compatibility mapping.
+export const getLegacyLocalCp = (pv: any) => pv.mate !== null ? (pv.mate > 0 ? 30000 - pv.mate : -30000 - pv.mate) : (pv.cp !== undefined ? pv.cp : 0);
 
 export async function runLocalStockfish(fen: string, multiPv: number, depth: number, searchmoves?: string): Promise<any[]> {
     const enginePath = path.resolve(process.cwd(), 'bin', 'stockfish.exe');
@@ -54,21 +122,23 @@ export async function runLocalStockfish(fen: string, multiPv: number, depth: num
 
     // 3. Sort by perspective and limit strictly to the requested multiPv amount
     return Array.from(uniquePvs.values())
-        .sort((a: any, b: any) => isBlackToMove ? getCp(a) - getCp(b) : getCp(b) - getCp(a))
+        .sort((a: any, b: any) => isBlackToMove ? getLegacyLocalCp(a) - getLegacyLocalCp(b) : getLegacyLocalCp(b) - getLegacyLocalCp(a))
         .slice(0, multiPv);
 }
 
-export function checkPvTolerance(candidateLan: string, pvs: any[], bestCp: number, tolerance: number): 'VALID' | 'REJECTED' | 'NEED_DEEPER_SEARCH' {
+// Legacy local-engine adapter. Remote coherent snapshots use
+// verifyOrdinaryCpSnapshot directly.
+export function checkLegacyLocalPvTolerance(candidateLan: string, pvs: any[], bestCp: number, tolerance: number): 'VALID' | 'REJECTED' | 'NEED_DEEPER_SEARCH' {
     if (!pvs || pvs.length === 0) return 'NEED_DEEPER_SEARCH';
     
     const matchedPv = pvs.find(pv => pv.moves.split(" ")[0] === candidateLan);
     
     if (matchedPv) {
-        const diff = Math.abs(getCp(matchedPv) - bestCp);
+        const diff = Math.abs(getLegacyLocalCp(matchedPv) - bestCp);
         return diff <= tolerance ? 'VALID' : 'REJECTED';
     } else {
         const worstPv = pvs[pvs.length - 1]; 
-        const worstDiff = Math.abs(getCp(worstPv) - bestCp);
+        const worstDiff = Math.abs(getLegacyLocalCp(worstPv) - bestCp);
         
         // If the worst move in our API limit is already worse than tolerance, 
         // the candidate is mathematically guaranteed to fail.
