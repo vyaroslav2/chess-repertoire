@@ -207,8 +207,8 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
           volStr = algoResult.selectedStats.weightedCount.toString();
       }
 
-      console.log(`Black responds with: ${algoResult.selectedMoveSan} -> Score: ${scoreStr} | Weighted Vol: ${volStr} | ${algoResult.evalSource} Eval: ${algoResult.selectedEngineCp !== null ? (algoResult.selectedEngineCp / 100).toFixed(2) : "N/A"}`);
-      let explanation = `Score: ${scoreStr} | Weighted Vol: ${volStr} | Eval: ${algoResult.selectedEngineCp !== null ? (algoResult.selectedEngineCp/100).toFixed(2) : "N/A"}`;
+      console.log(`Black responds with: ${algoResult.selectedMoveSan} -> Score: ${scoreStr} | Weighted Vol: ${volStr} | ${algoResult.evalSource} Eval: ${algoResult.selectedEngineCp !== null ? (algoResult.selectedEngineCp / 100).toFixed(2) : (algoResult.selectedMate !== null ? 'M' + Math.abs(algoResult.selectedMate) : "N/A")}`);
+      let explanation = `Score: ${scoreStr} | Weighted Vol: ${volStr} | Eval: ${algoResult.selectedEngineCp !== null ? (algoResult.selectedEngineCp/100).toFixed(2) : (algoResult.selectedMate !== null ? 'M' + Math.abs(algoResult.selectedMate) : "N/A")}`;
 
       tempChess.move(algoResult.selectedMoveSan);
       const fenAfterBlack = tempChess.fen();

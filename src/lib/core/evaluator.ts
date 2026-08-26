@@ -9,6 +9,7 @@ import {
   verifyOrdinaryCpSnapshot,
   type OrdinaryCpSnapshotEntry
 } from "./verifier";
+import { analyseLichessMateSnapshot, verifyCandidateAgainstLichessMate, type LichessMateContext } from "./lichess-mate";
 import { fallbackGeminiMove } from "../api/gemini";
 import { parseFullFen } from "./fen";
 import { computeRemoteEngineEvaluationProfile, defaultConfig, getMoveBand } from "./config";
@@ -163,7 +164,10 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
     }
   }
 
+  let lichessMateContext: LichessMateContext = { kind: "NO_MATE" };
+
   if (lichessResult.status === "success") {
+    lichessMateContext = analyseLichessMateSnapshot(lichessResult.evaluations);
     enginePvs = toLegacyEnginePvs(lichessResult.evaluations);
     lichessOrdinarySnapshot = toOrdinaryCpSnapshot(lichessResult.evaluations);
     lichessCp = enginePvs.find(pv => typeof pv.cp === "number")?.cp ?? null;
@@ -180,44 +184,12 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
     if (chessdbCp !== null) bestCp = chessdbCp;
   }
 
-  // --- KILL MODE (Forced Mate Detection) ---
-  let baselinePvs = enginePvs.length > 0 ? enginePvs : (chessdbPvs.length > 0 ? chessdbPvs : []);
-  if (baselinePvs.length === 0) {
-      console.log(`[KILL MODE] APIs down, running shallow Local Stockfish baseline...`);
-      baselinePvs = await runLocalStockfish(fullFen, defaultConfig.engine.localFallback.multiPv, defaultConfig.engine.localFallback.depth);
-  }
 
-  const bestBaseline = baselinePvs[0];
-  if (bestBaseline && bestBaseline.mate !== null && bestBaseline.mate < 0) {
-      console.log(`[KILL MODE] Forced mate detected (Mate in ${Math.abs(bestBaseline.mate)}). Bypassing human candidates and running deep search...`);
-      
-      const deepPvs = await runLocalStockfish(fullFen, defaultConfig.engine.deepVerification.multiPv, defaultConfig.engine.deepVerification.depth);
-      const bestDeep = deepPvs[0];
-      
-      if (bestDeep) {
-          const tempChess = new Chess(fen);
-          const lan = bestDeep.moves.split(' ')[0];
-          const moveResult = tempChess.move({ from: lan.substring(0, 2), to: lan.substring(2, 4), promotion: lan.length === 5 ? lan[4] : undefined } as any);
-          
-          const finalCp = getLegacyLocalCp(bestDeep);
-          
-          return {
-              selectedMoveSan: moveResult.san,
-              selectedStats: candidateMoves.find(m => m.san === moveResult.san) || null,
-              selectedEngineCp: finalCp,
-              lichessCp,
-              chessdbCp,
-              evalSource: 'Local Deep Stockfish',
-              candidateMoves,
-              enginePvs: deepPvs
-          };
-      }
-  }
-  // --- END KILL MODE ---
 
   let selectedMoveSan: string | null = null;
   let selectedStats: any = null;
   let selectedEngineCp: number | null = null;
+  let selectedMate: number | null = null;
 
   if (moveNumber === 1 && previousMovesSan.length === 1) {
     const whiteFirstMove = previousMovesSan[0];
@@ -243,6 +215,17 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
       for (const candidate of candidateMoves) {
           const lan = candidate.uci || (() => { const mr = chess.move(candidate.san); chess.undo(); return mr.lan; })();
           const currentTolerance = getCpTolerance(moveNumber, false);
+          
+          if (lichessMateContext.kind === "FORCED_MATE") {
+              const mateDecision = verifyCandidateAgainstLichessMate(lan, lichessMateContext);
+              if (mateDecision === "ACCEPT") {
+                  selectedMoveSan = candidate.san;
+                  selectedStats = candidate;
+                  selectedMate = lichessMateContext.fallbackMate; // The HCM exact mate value is the same as the shortest mate.
+                  break;
+              }
+              continue; // Reject HCM, do not go to ChessDB/Local Deep.
+          }
   
           // Remote ordinary snapshots use strict PV semantics. A Lichess mate
           // snapshot stays outside this cp verifier until the B3 mate slice.
@@ -290,6 +273,29 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
       }
   }
 
+  if (!selectedMoveSan && lichessMateContext.kind === "FORCED_MATE") {
+    const lan = lichessMateContext.fallbackUci;
+    const fromSq = lan.substring(0, 2);
+    const toSq = lan.substring(2, 4);
+    const promotion = lan.length === 5 ? lan[4] : undefined;
+    
+    let moveResult;
+    try {
+      moveResult = chess.move({ from: fromSq, to: toSq, promotion } as any);
+    } catch(e) {
+      throw new Error(`Failed to apply Lichess mate fallback move '${lan}': ${e}`);
+    }
+
+    if (!moveResult) {
+      throw new Error(`Lichess mate fallback move '${lan}' is illegal in this position.`);
+    }
+
+    chess.undo();
+    selectedMoveSan = moveResult.san;
+    selectedMate = lichessMateContext.fallbackMate;
+    selectedStats = candidateMoves.find(m => m.san === selectedMoveSan) || null;
+  }
+
   if (!selectedMoveSan && enginePvs.length > 0) {
     try {
       const lan = enginePvs[0].moves.split(" ")[0];
@@ -310,5 +316,5 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
   }
 
 
-  return { selectedMoveSan, selectedStats, selectedEngineCp, lichessCp, chessdbCp, evalSource, candidateMoves, enginePvs };
+  return { selectedMoveSan, selectedStats, selectedEngineCp, selectedMate, lichessCp, chessdbCp, evalSource, candidateMoves, enginePvs };
 }
