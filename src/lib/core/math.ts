@@ -3,9 +3,3 @@ export function getSmoothedWinRate(whiteWins: number, draws: number, totalGames:
     const fakeScore = anchor * prior; 
     return (realScore + fakeScore) / (totalGames + anchor);
 }
-
-export function getCpTolerance(moveNumber: number): number {
-    if (moveNumber <= 4) return 80;
-    if (moveNumber <= 8) return 50;
-    return 35; 
-}

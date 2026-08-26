@@ -1,5 +1,6 @@
 import * as readline from 'readline/promises';
 import { stdin as processStdin, stdout as processStdout } from 'process';
+import { defaultConfig } from '../core/config';
 
 export const GlobalState = {
     lichessCloudEvals: false
@@ -14,19 +15,19 @@ export async function promptUser(query: string): Promise<string> {
   return answer;
 }
 
-export async function fetchWithRetry(url: string, retries = 10, useToken = true, apiType: 'eval' | 'explorer' = 'explorer'): Promise<any> {
+export async function fetchWithRetry(url: string, retryAttempts: number, useToken = true, apiType: 'eval' | 'explorer' = 'explorer'): Promise<any> {
   const headers: any = { 'Accept': 'application/json' };
   if (useToken && process.env.LICHESS_API_TOKEN) {
       headers['Authorization'] = `Bearer ${process.env.LICHESS_API_TOKEN}`;
   }
 
-  for (let i = 0; i < retries; i++) {
+  for (let i = 0; i < retryAttempts; i++) {
     try {
       const response = await fetch(url, { headers });
       if (response.status === 429) {
-        if (i < retries - 1) {
-            console.log(`[WARNING] Lichess rate limit (429) on ${url}. Auto-retrying in 2s (Attempt ${i+1}/${retries})...`);
-            await delay(2000);
+        if (i < retryAttempts - 1) {
+            console.log(`[WARNING] Lichess rate limit (429) on ${url}. Auto-retrying in ${defaultConfig.api.rateLimitRetryDelayMs}ms (Attempt ${i+1}/${retryAttempts})...`);
+            await delay(defaultConfig.api.rateLimitRetryDelayMs);
             continue;
         }
 
@@ -44,7 +45,7 @@ export async function fetchWithRetry(url: string, retries = 10, useToken = true,
         } else if (choice === 'n') {
             return null;
         }
-        return await fetchWithRetry(url, retries, useToken, apiType);
+        return await fetchWithRetry(url, retryAttempts, useToken, apiType);
       }
       if (!response.ok) {
         console.log(`Lichess error ${response.status} on ${url}`);
@@ -53,7 +54,7 @@ export async function fetchWithRetry(url: string, retries = 10, useToken = true,
       return await response.json();
     } catch (e: any) {
       console.log(`[WARNING] Network error fetching ${url}: ${e.message}`);
-      if (i === retries - 1) {
+      if (i === retryAttempts - 1) {
           const cOption = apiType === 'eval' ? `, [c]=Fallback to ChessDB` : ``;
           const answer = await promptUser(`\n[ACTION REQUIRED] Network errors exhausted. Switch VPN and press Enter to retry. (Options: [Enter]=Retry, [n]=Deny/Skip${cOption}, [s]=Stop script): `);
           const choice = answer.toLowerCase().trim();
@@ -67,9 +68,9 @@ export async function fetchWithRetry(url: string, retries = 10, useToken = true,
           } else if (choice === 'n') {
               return null;
           }
-          return await fetchWithRetry(url, retries, useToken, apiType);
+          return await fetchWithRetry(url, retryAttempts, useToken, apiType);
       }
-      await delay(1000);
+      await delay(defaultConfig.api.networkRetryDelayMs);
       continue;
     }
   }

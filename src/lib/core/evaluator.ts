@@ -5,6 +5,7 @@ import { getSmoothedWinRate } from "./math";
 import { runLocalStockfish, checkPvTolerance, getCpTolerance, getCp } from "./verifier";
 import { fallbackGeminiMove } from "../api/gemini";
 import { parseFullFen, positionKeyFromFen } from "./fen";
+import { defaultConfig, getMoveBand } from "./config";
 
 export function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: number, mastersList: any[], eliteList: any[], amateurList: any[], totalAmateurGames: number) {
     const amateurData = amateurList.find(m => m.san === moveSan) || { games: 0, white: 0, draws: 0, black: 0 };
@@ -56,9 +57,10 @@ export function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: numbe
           isAmateurTrap = true;
       }
 
-      let requiredProbability = 0.15; 
-      if (currentMoveNumber <= 4) requiredProbability = 0.05;
-      else if (currentMoveNumber <= 8) requiredProbability = 0.10;
+      let requiredProbability = defaultConfig.whiteMoveFiltering.mainlinePopularity.late;
+      const band = getMoveBand(currentMoveNumber, defaultConfig);
+      if (band === 'early') requiredProbability = defaultConfig.whiteMoveFiltering.mainlinePopularity.early;
+      else if (band === 'middle') requiredProbability = defaultConfig.whiteMoveFiltering.mainlinePopularity.middle;
       
       if (probability >= requiredProbability) {
           include = true;
@@ -121,14 +123,15 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
     }
   }
 
-  const MIN_GAMES_THRESHOLD = 15;
+  const MIN_GAMES_THRESHOLD = defaultConfig.humanMoves.minimumWeightedGames;
   const candidateMoves = Object.values(mergedMoves).map(m => {
-    const weightedCount = (m.mastersCount * 5) + m.onlineCount;
-    const weightedBlackWins = (m.mastersBlackWin * 5) + m.onlineBlackWin;
-    const weightedDraws = (m.mastersDraws * 5) + m.onlineDraws;
+    const mastersWeight = defaultConfig.humanMoves.mastersWeight;
+    const weightedCount = (m.mastersCount * mastersWeight) + m.onlineCount;
+    const weightedBlackWins = (m.mastersBlackWin * mastersWeight) + m.onlineBlackWin;
+    const weightedDraws = (m.mastersDraws * mastersWeight) + m.onlineDraws;
     
-    const priorWins = 50 * 0.48; // 24
-    const smoothedCount = weightedCount + 50;
+    const priorWins = defaultConfig.smoothing.anchorGames * defaultConfig.smoothing.blackPrior;
+    const smoothedCount = weightedCount + defaultConfig.smoothing.anchorGames;
     const score = (weightedBlackWins + (0.5 * weightedDraws) + priorWins) / smoothedCount;
     
     return { ...m, weightedCount, score };
@@ -179,8 +182,8 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
     try {
       let cloudData: any = null;
       if (GlobalState.lichessCloudEvals) {
-        const cloudUrl = `https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(fullFen)}&multiPv=5`;
-        cloudData = await fetchWithRetry(cloudUrl, 10, false, 'eval');
+        const cloudUrl = `https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(fullFen)}&multiPv=${defaultConfig.api.lichessCloudEval.multiPv}`;
+        cloudData = await fetchWithRetry(cloudUrl, defaultConfig.api.lichessCloudEval.retryAttempts, false, 'eval');
       }
       
       if (cloudData && !cloudData.error && cloudData.pvs && cloudData.pvs.length > 0) {
@@ -252,14 +255,14 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
   let baselinePvs = enginePvs.length > 0 ? enginePvs : (chessdbPvs.length > 0 ? chessdbPvs : []);
   if (baselinePvs.length === 0) {
       console.log(`[KILL MODE] APIs down, running shallow Local Stockfish baseline...`);
-      baselinePvs = await runLocalStockfish(fullFen, 15, 18);
+      baselinePvs = await runLocalStockfish(fullFen, defaultConfig.engine.localFallback.multiPv, defaultConfig.engine.localFallback.depth);
   }
 
   const bestBaseline = baselinePvs[0];
   if (bestBaseline && bestBaseline.mate !== null && bestBaseline.mate < 0) {
       console.log(`[KILL MODE] Forced mate detected (Mate in ${Math.abs(bestBaseline.mate)}). Bypassing human candidates and running deep search...`);
       
-      const deepPvs = await runLocalStockfish(fullFen, 1, 24);
+      const deepPvs = await runLocalStockfish(fullFen, defaultConfig.engine.deepVerification.multiPv, defaultConfig.engine.deepVerification.depth);
       const bestDeep = deepPvs[0];
       
       if (bestDeep) {
@@ -341,7 +344,7 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
               // 3. Waterfall to Local Stockfish
               if (!localEngineRun) {
                   console.log(`\n[DEEP SEARCH] Candidate '${candidate.san}' exceeds API depth. Running Local Stockfish...`);
-                  localEnginePvs = await runLocalStockfish(fullFen, 15, 18);
+                  localEnginePvs = await runLocalStockfish(fullFen, defaultConfig.engine.localVerification.multiPv, defaultConfig.engine.localVerification.depth);
                   localEngineRun = true;
               }
   

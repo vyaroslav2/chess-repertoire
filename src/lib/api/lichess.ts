@@ -1,6 +1,7 @@
 import { fetchWithRetry, delay } from './retry';
 import { prisma, saveExplorerMoveCache } from '../db/operations';
 import { parseFullFen, positionKeyFromFen } from '../core/fen';
+import { defaultConfig } from '../core/config';
 
 export async function fetchAllDatabases(fen: string) {
   const fullFen = parseFullFen(fen);
@@ -41,7 +42,7 @@ export async function fetchAllDatabases(fen: string) {
   // Otherwise, fetch from APIs and Cache
   try {
     const mastersUrl = `https://explorer.lichess.ovh/masters?fen=${encodeURIComponent(fullFen)}`;
-    const mData = await fetchWithRetry(mastersUrl);
+    const mData = await fetchWithRetry(mastersUrl, defaultConfig.api.lichessExplorer.retryAttempts);
     if (mData) {
       masters = mData;
       masters.totalGames = masters.white + masters.draws + masters.black;
@@ -56,11 +57,11 @@ export async function fetchAllDatabases(fen: string) {
     }
   } catch (e) {}
 
-  await delay(1000); 
+  await delay(defaultConfig.api.betweenRequestDelayMs);
 
   try {
     const eliteUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(fullFen)}&speeds=classical,rapid&ratings=2500`;
-    const eData = await fetchWithRetry(eliteUrl);
+    const eData = await fetchWithRetry(eliteUrl, defaultConfig.api.lichessExplorer.retryAttempts);
     if (eData) {
       elite = eData;
       elite.totalGames = elite.white + elite.draws + elite.black;
@@ -75,11 +76,11 @@ export async function fetchAllDatabases(fen: string) {
     }
   } catch (e) {}
 
-  await delay(1000);
+  await delay(defaultConfig.api.betweenRequestDelayMs);
 
   try {
     const amateurUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(fullFen)}&speeds=classical,rapid&ratings=1600,1800,2000`;
-    const aData = await fetchWithRetry(amateurUrl);
+    const aData = await fetchWithRetry(amateurUrl, defaultConfig.api.lichessExplorer.retryAttempts);
     if (aData) {
       amateur = aData;
       amateur.totalGames = amateur.white + amateur.draws + amateur.black;
