@@ -1,7 +1,8 @@
 import { Chess } from "chess.js";
-import { prisma, getOrCreatePositionCache, getRepertoireNode, createRepertoireNode, createRepertoireMove } from "../db/operations";
+import { prisma, getOrCreatePositionCache, getRepertoireNode, createRepertoireNode, createRepertoireMove, getOrCreateHumanDataSnapshot } from "../db/operations";
 import { parseFullFen, positionKeyFromFen } from "./fen";
 import { fetchAllDatabases } from "../api/lichess";
+import { defaultConfig, computeExplorerRequestProfile } from "../core/config";
 import { shouldIncludeWhiteMove, evaluateBlackMove } from "./evaluator";
 import { getSmoothedWinRate } from "./math";
 import { delay } from "../api/retry";
@@ -39,6 +40,10 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
   if (!rootNode) {
     rootNode = await createRepertoireNode(repertoire.id, startFen, "", 1.0);
   }
+
+  const reqProfile = computeExplorerRequestProfile(defaultConfig);
+  const snapshot = await getOrCreateHumanDataSnapshot(repertoire.id, reqProfile);
+  const snapshotId = snapshot.id;
 
   const queue = [{ 
     nodeId: rootNode.id,
@@ -89,7 +94,7 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
       continue;
     }
 
-    const [masters, elite, amateur] = await fetchAllDatabases(node.fen);
+    const [masters, elite, amateur] = await fetchAllDatabases(node.fen, snapshotId);
     await getOrCreatePositionCache(node.fen, masters.opening, node.history);
     
     const allWhiteSan = new Set<string>();
@@ -224,7 +229,7 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
         }
       }
 
-      const algoResult = await evaluateBlackMove(fenAfterWhite, tempChess, node.currentMoveNumber, newHistory);
+      const algoResult = await evaluateBlackMove(fenAfterWhite, tempChess, node.currentMoveNumber, newHistory, snapshotId);
 
 
       if (!algoResult.selectedMoveSan) {

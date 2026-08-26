@@ -1,103 +1,124 @@
-import { fetchWithRetry, delay } from './retry';
-import { prisma, saveExplorerMoveCache } from '../db/operations';
+import { fetchWithRetry } from './retry';
+import { readHumanExplorerBucket, saveHumanExplorerBucket, ExplorerMoveRow, HumanDatabaseType } from '../db/operations';
 import { parseFullFen, positionKeyFromFen } from '../core/fen';
 import { defaultConfig } from '../core/config';
+import { Chess } from 'chess.js';
 
-export async function fetchAllDatabases(fen: string) {
+type PublicExplorerMove = {
+  uci: string;
+  san: string;
+  white: number;
+  draws: number;
+  black: number;
+  games: number;
+};
+
+function toPublicMove(move: ExplorerMoveRow): PublicExplorerMove {
+  return {
+    uci: move.uci,
+    san: move.san,
+    white: move.whiteWins,
+    draws: move.draws,
+    black: move.blackWins,
+    games: move.games
+  };
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) && value >= 0;
+}
+
+export async function fetchAllDatabases(fen: string, snapshotId: string) {
   const fullFen = parseFullFen(fen);
   const posKey = positionKeyFromFen(fullFen);
-  
-  // Try to load from Cache first
-  const cachedMasters = await prisma.explorerMoveCache.findMany({ where: { positionId: posKey, dbType: "masters" } });
-  const cachedElite = await prisma.explorerMoveCache.findMany({ where: { positionId: posKey, dbType: "elite" } });
-  const cachedAmateur = await prisma.explorerMoveCache.findMany({ where: { positionId: posKey, dbType: "amateur" } });
 
-  let masters: any = { moves: [], totalGames: 0, opening: null };
-  let elite: any = { moves: [], totalGames: 0 };
-  let amateur: any = { moves: [], totalGames: 0 };
+  async function processBucket(
+    dbType: HumanDatabaseType,
+    url: string,
+    retryCount: number
+  ) {
+    const cached = await readHumanExplorerBucket(snapshotId, posKey, dbType);
+    if (cached.status === "success" || cached.status === "empty") {
+      const moves = cached.status === "success" ? cached.moves.map(toPublicMove) : [];
+      const totalGames = moves.reduce((sum, m) => sum + m.games, 0);
+      return { moves, totalGames, opening: null };
+    }
 
-  const reconstructCache = (cachedRows: any[]) => {
-    let totalGames = 0;
-    const moves = cachedRows.filter(row => row.san !== "_EMPTY_").map(row => {
-      totalGames += row.games;
-      return {
-        san: row.san,
-        white: row.whiteWins,
-        draws: row.draws,
-        black: row.blackWins,
-        games: row.games
-      };
-    });
-    return { moves, totalGames };
-  };
+    const data = await fetchWithRetry(url, retryCount);
+    if (!data) {
+      throw new Error(`Failed to fetch ${dbType} data for ${fullFen}`);
+    }
 
-  // If all three exist, we skip Lichess entirely
-  if (cachedMasters.length > 0 && cachedElite.length > 0 && cachedAmateur.length > 0) {
-    masters = reconstructCache(cachedMasters);
-    elite = reconstructCache(cachedElite);
-    amateur = reconstructCache(cachedAmateur);
-    return [masters, elite, amateur];
+    const chess = new Chess(fullFen);
+    const validMoves: ExplorerMoveRow[] = [];
+
+    if (!data || typeof data !== "object") {
+      throw new Error("Invalid source result: response is not an object");
+    }
+
+    if (!Array.isArray(data.moves)) {
+      throw new Error("Invalid source result: moves is missing or not an array");
+    }
+
+    for (const sourceMove of data.moves) {
+      if (!sourceMove || typeof sourceMove !== "object") {
+        throw new Error("Invalid source result: move is not an object");
+      }
+
+      const m = sourceMove as Record<string, unknown>;
+      if (typeof m.san !== "string" || m.san.trim() === "") {
+        throw new Error("Invalid source result: move has empty SAN");
+      }
+
+      if (!isNonNegativeInteger(m.white) ||
+          !isNonNegativeInteger(m.draws) ||
+          !isNonNegativeInteger(m.black)) {
+        throw new Error("Invalid source result: invalid statistic counts");
+      }
+
+      const white = m.white;
+      const draws = m.draws;
+      const black = m.black;
+      const total = white + draws + black;
+      let uci = "";
+      try {
+        const cMove = chess.move(m.san);
+        if (!cMove) throw new Error("Invalid move");
+        uci = cMove.lan;
+        chess.undo();
+      } catch {
+        throw new Error(`Invalid move ${m.san} for ${fullFen}`);
+      }
+
+      validMoves.push({
+        uci,
+        san: m.san,
+        games: total,
+        whiteWins: white,
+        draws,
+        blackWins: black
+      });
+    }
+
+    await saveHumanExplorerBucket(snapshotId, posKey, dbType, validMoves);
+
+    const returnedMoves = validMoves.map(toPublicMove);
+    const totalGames = returnedMoves.reduce((sum, m) => sum + m.games, 0);
+    return { moves: returnedMoves, totalGames, opening: data.opening || null };
   }
 
-  // Otherwise, fetch from APIs and Cache
-  try {
-    const mastersUrl = `https://explorer.lichess.ovh/masters?fen=${encodeURIComponent(fullFen)}`;
-    const mData = await fetchWithRetry(mastersUrl, defaultConfig.api.lichessExplorer.retryAttempts);
-    if (mData) {
-      masters = mData;
-      masters.totalGames = masters.white + masters.draws + masters.black;
-      if (mData.moves && mData.moves.length > 0) {
-        for (const m of mData.moves) {
-          const total = m.white + m.draws + m.black;
-          await saveExplorerMoveCache(fullFen, "masters", { san: m.san, games: total, whiteWins: m.white, draws: m.draws, blackWins: m.black });
-        }
-      } else {
-        await saveExplorerMoveCache(fullFen, "masters", { san: "_EMPTY_", games: 0, whiteWins: 0, draws: 0, blackWins: 0 });
-      }
-    }
-  } catch (e) {}
+  const mastersUrl = `https://explorer.lichess.ovh/masters?fen=${encodeURIComponent(fullFen)}`;
+  const mRes = await processBucket("MASTERS", mastersUrl, defaultConfig.api.lichessExplorer.retryAttempts);
 
-  await delay(defaultConfig.api.betweenRequestDelayMs);
+  const eliteSpeeds = defaultConfig.humanExplorerRequest.elite.speeds.join(',');
+  const eliteRatings = defaultConfig.humanExplorerRequest.elite.ratings.join(',');
+  const eliteUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(fullFen)}&speeds=${eliteSpeeds}&ratings=${eliteRatings}`;
+  const eRes = await processBucket("ELITE", eliteUrl, defaultConfig.api.lichessExplorer.retryAttempts);
 
-  try {
-    const eliteSpeeds = defaultConfig.humanExplorerRequest.elite.speeds.join(',');
-    const eliteRatings = defaultConfig.humanExplorerRequest.elite.ratings.join(',');
-    const eliteUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(fullFen)}&speeds=${eliteSpeeds}&ratings=${eliteRatings}`;
-    const eData = await fetchWithRetry(eliteUrl, defaultConfig.api.lichessExplorer.retryAttempts);
-    if (eData) {
-      elite = eData;
-      elite.totalGames = elite.white + elite.draws + elite.black;
-      if (eData.moves && eData.moves.length > 0) {
-        for (const m of eData.moves) {
-          const total = m.white + m.draws + m.black;
-          await saveExplorerMoveCache(fullFen, "elite", { san: m.san, games: total, whiteWins: m.white, draws: m.draws, blackWins: m.black });
-        }
-      } else {
-        await saveExplorerMoveCache(fullFen, "elite", { san: "_EMPTY_", games: 0, whiteWins: 0, draws: 0, blackWins: 0 });
-      }
-    }
-  } catch (e) {}
+  const amateurSpeeds = defaultConfig.humanExplorerRequest.amateur.speeds.join(',');
+  const amateurRatings = defaultConfig.humanExplorerRequest.amateur.ratings.join(',');
+  const amateurUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(fullFen)}&speeds=${amateurSpeeds}&ratings=${amateurRatings}`;
+  const aRes = await processBucket("AMATEUR", amateurUrl, defaultConfig.api.lichessExplorer.retryAttempts);
 
-  await delay(defaultConfig.api.betweenRequestDelayMs);
-
-  try {
-    const amateurSpeeds = defaultConfig.humanExplorerRequest.amateur.speeds.join(',');
-    const amateurRatings = defaultConfig.humanExplorerRequest.amateur.ratings.join(',');
-    const amateurUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(fullFen)}&speeds=${amateurSpeeds}&ratings=${amateurRatings}`;
-    const aData = await fetchWithRetry(amateurUrl, defaultConfig.api.lichessExplorer.retryAttempts);
-    if (aData) {
-      amateur = aData;
-      amateur.totalGames = amateur.white + amateur.draws + amateur.black;
-      if (aData.moves && aData.moves.length > 0) {
-        for (const m of aData.moves) {
-          const total = m.white + m.draws + m.black;
-          await saveExplorerMoveCache(fullFen, "amateur", { san: m.san, games: total, whiteWins: m.white, draws: m.draws, blackWins: m.black });
-        }
-      } else {
-        await saveExplorerMoveCache(fullFen, "amateur", { san: "_EMPTY_", games: 0, whiteWins: 0, draws: 0, blackWins: 0 });
-      }
-    }
-  } catch (e) {}
-
-  return [masters, elite, amateur];
+  return [mRes, eRes, aRes];
 }

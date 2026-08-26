@@ -1,6 +1,7 @@
 import { runLocalStockfish } from "../src/lib/core/verifier";
 import { evaluateBlackMove } from "../src/lib/core/evaluator";
-import { prisma, getOrCreatePositionCache, saveExplorerMoveCache } from "../src/lib/db/operations";
+import { prisma, getOrCreatePosition, getOrCreatePositionCache, saveHumanExplorerBucket, getOrCreateHumanDataSnapshot } from "../src/lib/db/operations";
+import { computeExplorerRequestProfile, defaultConfig } from "../src/lib/core/config";
 import { Chess } from "chess.js";
 import { parseFullFen, positionKeyFromFen } from "../src/lib/core/fen";
 
@@ -69,21 +70,33 @@ async function runTest() {
   await prisma.engineEvalCache.deleteMany({ where: { positionId: normFen } });
   
   // Inject some fake explorer data so candidateMoves isn't empty (bypassing Lichess explorer limits)
-  await prisma.explorerMoveCache.deleteMany({ where: { positionId: normFen } });
+  const reqProfile = computeExplorerRequestProfile(defaultConfig);
+  const user = await prisma.user.upsert({
+    where: { username: "local-stockfish-test" },
+    update: {},
+    create: { username: "local-stockfish-test" }
+  });
+  let repertoire = await prisma.repertoire.findFirst({ where: { userId: user.id, title: "Local Stockfish Test" } });
+  if (!repertoire) {
+    repertoire = await prisma.repertoire.create({ data: { userId: user.id, title: "Local Stockfish Test", color: "black" } });
+  }
+  await getOrCreatePosition(fullFen);
+  const snapshot = await getOrCreateHumanDataSnapshot(repertoire.id, reqProfile);
+  const snapshotId = snapshot.id;
+
+  await prisma.explorerMoveCache.deleteMany({ where: { positionKey: normFen } });
   
   const fakeData = [
-      { san: "Re8", games: 100, whiteWins: 30, draws: 40, blackWins: 30 },
-      { san: "h6", games: 50, whiteWins: 15, draws: 20, blackWins: 15 }
+      { uci: "f8e8", san: "Re8", games: 100, whiteWins: 30, draws: 40, blackWins: 30 },
+      { uci: "h7h6", san: "h6", games: 50, whiteWins: 15, draws: 20, blackWins: 15 }
   ];
   
-  for (const m of fakeData) {
-      await saveExplorerMoveCache(fullFen, "masters", m);
-      await saveExplorerMoveCache(fullFen, "elite", m);
-      await saveExplorerMoveCache(fullFen, "amateur", m);
-  }
+  await saveHumanExplorerBucket(snapshotId, normFen, "MASTERS", fakeData);
+  await saveHumanExplorerBucket(snapshotId, normFen, "ELITE", fakeData);
+  await saveHumanExplorerBucket(snapshotId, normFen, "AMATEUR", fakeData);
 
   console.log("Calling evaluateBlackMove...");
-  const evalResult = await evaluateBlackMove(fen, chess, 8, []);
+  const evalResult = await evaluateBlackMove(fen, chess, 8, [], snapshotId);
   
   if (evalResult.selectedMoveSan === null) {
       console.error("Pipeline failed to select a move!");
@@ -107,7 +120,7 @@ async function runTest() {
       console.log(`Querying ChessDB directly for baseline: ${chessdbUrl}`);
       const res = await fetch(chessdbUrl);
       const text = await res.text();
-      let chessdbPvs: any[] = [];
+      const chessdbPvs: { moves: string; cp: number }[] = [];
       
       if (text.includes("move:")) {
           const moves = text.split("|");

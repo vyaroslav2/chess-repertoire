@@ -50,32 +50,112 @@ export async function getOrCreatePositionCache(fen: string, openingMetadata?: { 
   return pos;
 }
 
-export async function saveExplorerMoveCache(fen: string, dbType: string, moveData: { san: string, games: number, whiteWins: number, draws: number, blackWins: number }) {
-  const normFen = positionKeyFromFen(parseFullFen(fen));
-  return prisma.explorerMoveCache.upsert({
-    where: {
-      positionId_dbType_san: {
-        positionId: normFen,
-        dbType: dbType,
-        san: moveData.san
-      }
-    },
-    update: {
-      games: moveData.games,
-      whiteWins: moveData.whiteWins,
-      draws: moveData.draws,
-      blackWins: moveData.blackWins
-    },
-    create: {
-      positionId: normFen,
-      dbType: dbType,
-      san: moveData.san,
-      games: moveData.games,
-      whiteWins: moveData.whiteWins,
-      draws: moveData.draws,
-      blackWins: moveData.blackWins
+export type ExplorerMoveRow = {
+  uci: string;
+  san: string;
+  games: number;
+  whiteWins: number;
+  draws: number;
+  blackWins: number;
+};
+
+function isFiniteNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) && value >= 0;
+}
+
+function validateExplorerMoveRows(moves: ExplorerMoveRow[]): void {
+  if (!Array.isArray(moves)) {
+    throw new Error("Invalid explorer bucket: moves must be an array");
+  }
+
+  for (const move of moves) {
+    if (!move || typeof move !== "object") {
+      throw new Error("Invalid explorer bucket: move must be an object");
     }
+
+    const uciIsShaped = typeof move.uci === "string" &&
+      /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(move.uci) &&
+      move.uci.slice(0, 2) !== move.uci.slice(2, 4) &&
+      (move.uci.length === 4 ||
+        (move.uci[1] === "7" && move.uci[3] === "8") ||
+        (move.uci[1] === "2" && move.uci[3] === "1"));
+    if (!uciIsShaped) {
+      throw new Error("Invalid explorer bucket: invalid UCI/LAN move");
+    }
+    if (typeof move.san !== "string" || move.san.trim() === "") {
+      throw new Error("Invalid explorer bucket: SAN must be non-empty");
+    }
+    if (!isFiniteNonNegativeInteger(move.games) ||
+        !isFiniteNonNegativeInteger(move.whiteWins) ||
+        !isFiniteNonNegativeInteger(move.draws) ||
+        !isFiniteNonNegativeInteger(move.blackWins)) {
+      throw new Error("Invalid explorer bucket: statistics must be finite non-negative integers");
+    }
+    if (move.games !== move.whiteWins + move.draws + move.blackWins) {
+      throw new Error("Invalid explorer bucket: games must equal the result-count sum");
+    }
+  }
+}
+
+export async function saveHumanExplorerBucket(snapshotId: string, positionKey: string, databaseType: HumanDatabaseType, moves: ExplorerMoveRow[]) {
+  validateDatabaseType(databaseType);
+  validateExplorerMoveRows(moves);
+
+  return prisma.$transaction(async (tx) => {
+    await tx.explorerMoveCache.deleteMany({
+      where: { snapshotId, positionKey, databaseType }
+    });
+
+    if (moves.length > 0) {
+      await tx.explorerMoveCache.createMany({
+        data: moves.map(m => ({
+          snapshotId,
+          positionKey,
+          databaseType,
+          ...m
+        }))
+      });
+    }
+
+    await tx.humanExplorerFetch.upsert({
+      where: {
+        snapshotId_positionKey_databaseType: {
+          snapshotId,
+          positionKey,
+          databaseType
+        }
+      },
+      update: {},
+      create: {
+        snapshotId,
+        positionKey,
+        databaseType
+      }
+    });
   });
+}
+
+export type ReadHumanExplorerBucketResult =
+  | { status: "missing" }
+  | { status: "empty" }
+  | { status: "success", moves: (ExplorerMoveRow & { id: string })[] };
+
+export async function readHumanExplorerBucket(snapshotId: string, positionKey: string, databaseType: HumanDatabaseType): Promise<ReadHumanExplorerBucketResult> {
+  validateDatabaseType(databaseType);
+
+  const fetchMarker = await prisma.humanExplorerFetch.findUnique({
+    where: { snapshotId_positionKey_databaseType: { snapshotId, positionKey, databaseType } }
+  });
+
+  if (!fetchMarker) return { status: "missing" };
+
+  const rows = await prisma.explorerMoveCache.findMany({
+    where: { snapshotId, positionKey, databaseType }
+  });
+
+  if (rows.length === 0) return { status: "empty" };
+
+  return { status: "success", moves: rows };
 }
 
 export async function saveEngineEvalCache(fen: string, source: string, evalData: { san: string, cp: number, mate: number | null, rank: number }) {

@@ -1,5 +1,5 @@
 import { Chess } from "chess.js";
-import { prisma, saveExplorerMoveCache, saveEngineEvalCache } from "../db/operations";
+import { prisma, saveEngineEvalCache } from "../db/operations";
 import { fetchWithRetry, delay, promptUser, GlobalState } from "../api/retry";
 import { getSmoothedWinRate } from "./math";
 import { runLocalStockfish, checkPvTolerance, getCpTolerance, getCp } from "./verifier";
@@ -86,12 +86,12 @@ export function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: numbe
 
 import { fetchAllDatabases } from "../api/lichess";
 
-export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: number, previousMovesSan: string[]): Promise<any> {
+export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: number, previousMovesSan: string[], snapshotId: string): Promise<any> {
   const fullFen = parseFullFen(fen);
   const posKey = positionKeyFromFen(fullFen);
   
   // 1. Check Explorer Cache via lichess.ts
-  const [mastersData, eliteData, amateurData] = await fetchAllDatabases(fen);
+  const [mastersData, eliteData, amateurData] = await fetchAllDatabases(fen, snapshotId);
 
   let mergedMoves: Record<string, any> = {};
 

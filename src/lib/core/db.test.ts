@@ -231,7 +231,7 @@ test('Slice 3 Database Architecture Tests', async (t) => {
         const posKey = pos.positionKey;
 
         const beforeCount = await prisma.explorerMoveCache.count({
-            where: { position: { fen: posKey }, dbType: "masters" }
+            where: { snapshotId: snap.id, positionKey: posKey, databaseType: "MASTERS" }
         });
 
         // We just record the fetch. We do not insert any _EMPTY_ ExplorerMoveCache.
@@ -239,12 +239,12 @@ test('Slice 3 Database Architecture Tests', async (t) => {
         assert.ok(fetch);
 
         const afterCount = await prisma.explorerMoveCache.count({
-            where: { position: { fen: posKey }, dbType: "masters" }
+            where: { snapshotId: snap.id, positionKey: posKey, databaseType: "MASTERS" }
         });
         assert.strictEqual(beforeCount, afterCount, "Recording successful fetch marker must not implicitly insert move cache rows");
 
         const emptyRow = await prisma.explorerMoveCache.findFirst({
-            where: { position: { fen: posKey }, dbType: "masters", san: "_EMPTY_" }
+            where: { snapshotId: snap.id, positionKey: posKey, databaseType: "MASTERS", san: "_EMPTY_" }
         });
         assert.ok(!emptyRow, "Recording successful fetch marker must not insert _EMPTY_ string markers");
     });

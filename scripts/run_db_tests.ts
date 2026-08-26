@@ -25,6 +25,8 @@ function main() {
 
     console.log(`[TEST SETUP] Schema created. Running DB tests...`);
     execSync('npx tsx --test src/lib/core/db.test.ts', { env: testEnv, stdio: 'inherit' });
+    execSync('npx tsx --test src/lib/core/human-cache.test.ts', { env: testEnv, stdio: 'inherit' });
+    execSync('npx tsx --test src/lib/api/retry.test.ts', { env: testEnv, stdio: 'inherit' });
 
     console.log(`[TEST SETUP] DB tests complete.`);
 }

@@ -8,6 +8,28 @@ export const GlobalState = {
 
 export const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
+let explorerRequestQueue = Promise.resolve();
+let nextExplorerRequestAt = 0;
+
+async function waitForExplorerRequestSlot(): Promise<void> {
+  const previousRequest = explorerRequestQueue;
+  let releaseRequest!: () => void;
+  explorerRequestQueue = new Promise<void>(resolve => {
+    releaseRequest = resolve;
+  });
+
+  await previousRequest;
+  try {
+    const waitMs = Math.max(0, nextExplorerRequestAt - Date.now());
+    if (waitMs > 0) {
+      await delay(waitMs);
+    }
+    nextExplorerRequestAt = Date.now() + defaultConfig.api.betweenRequestDelayMs;
+  } finally {
+    releaseRequest();
+  }
+}
+
 export async function promptUser(query: string): Promise<string> {
   const rl = readline.createInterface({ input: processStdin, output: processStdout });
   const answer = await rl.question(query);
@@ -23,6 +45,9 @@ export async function fetchWithRetry(url: string, retryAttempts: number, useToke
 
   for (let i = 0; i < retryAttempts; i++) {
     try {
+      if (apiType === 'explorer') {
+        await waitForExplorerRequestSlot();
+      }
       const response = await fetch(url, { headers });
       if (response.status === 429) {
         if (i < retryAttempts - 1) {

@@ -33,9 +33,10 @@ model Repertoire {
 // --- PERMANENT CHESS IDENTITY ---
 
 model Position {
-  positionKey  String               @id
-  nodes        RepertoireNode[]
-  humanFetches HumanExplorerFetch[]
+  positionKey       String               @id
+  nodes             RepertoireNode[]
+  humanFetches      HumanExplorerFetch[]
+  ExplorerMoveCache ExplorerMoveCache[]
 }
 
 // --- TEMPORARY SNAPSHOTS ---
@@ -46,8 +47,9 @@ model HumanDataSnapshot {
   startedAt              DateTime @default(now())
   explorerRequestProfile String
 
-  repertoire Repertoire           @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
-  fetches    HumanExplorerFetch[]
+  repertoire        Repertoire           @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
+  fetches           HumanExplorerFetch[]
+  ExplorerMoveCache ExplorerMoveCache[]
 }
 
 model HumanExplorerFetch {
@@ -70,23 +72,26 @@ model PositionCache {
   openingName String?
   wikiText    String?
 
-  explorerMoves ExplorerMoveCache[]
-  engineEvals   EngineEvalCache[]
+  engineEvals EngineEvalCache[]
 }
 
 model ExplorerMoveCache {
-  id         String @id @default(uuid())
-  positionId String // FK to PositionCache.fen
-  dbType     String // "masters", "elite", "amateur"
-  san        String
-  games      Int
-  whiteWins  Float
-  draws      Float
-  blackWins  Float
+  id           String @id @default(uuid())
+  snapshotId   String
+  positionKey  String
+  databaseType String // "MASTERS" | "ELITE" | "AMATEUR"
+  uci          String
+  san          String
+  games        Int
+  whiteWins    Float
+  draws        Float
+  blackWins    Float
 
-  position PositionCache @relation(fields: [positionId], references: [fen], onDelete: Cascade)
+  snapshot HumanDataSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  position Position          @relation(fields: [positionKey], references: [positionKey], onDelete: Restrict)
 
-  @@unique([positionId, dbType, san])
+  @@unique([snapshotId, positionKey, databaseType, uci])
+  @@index([snapshotId, positionKey, databaseType])
 }
 
 model EngineEvalCache {

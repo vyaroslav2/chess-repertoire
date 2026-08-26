@@ -1,11 +1,12 @@
 import { Chess } from "chess.js";
-import { prisma, getOrCreatePositionCache, createRepertoireNode, createRepertoireMove } from "../src/lib/db/operations";
+import { prisma, getOrCreatePositionCache, createRepertoireNode, createRepertoireMove, getOrCreateHumanDataSnapshot } from "../src/lib/db/operations";
 import { fetchAllDatabases } from "../src/lib/api/lichess";
+import { computeExplorerRequestProfile, defaultConfig } from "../src/lib/core/config";
 import { evaluateBlackMove } from "../src/lib/core/evaluator";
 import { GlobalState } from "../src/lib/api/retry";
 
 async function main() {
-  GlobalState.useLichessEval = true;
+  GlobalState.lichessCloudEvals = true;
   console.log("======================================================");
   console.log("           STARTING DEEP DIVE TEST (15 MOVES)         ");
   console.log("======================================================");
@@ -15,6 +16,10 @@ async function main() {
   if (!user) user = await prisma.user.create({ data: { username: "Yaroslav" } });
   let repertoire = await prisma.repertoire.findFirst({ where: { title: "Black Universal Repertoire", userId: user.id } });
   if (!repertoire) repertoire = await prisma.repertoire.create({ data: { title: "Black Universal Repertoire", color: "black", userId: user.id }});
+
+  const reqProfile = computeExplorerRequestProfile(defaultConfig);
+  const snapshot = await getOrCreateHumanDataSnapshot(repertoire.id, reqProfile);
+  const snapshotId = snapshot.id;
 
   // Start from advance Caro-Kann (After White's 3. e5)
   // History: e4 c6 d4 d5 e5
@@ -39,7 +44,7 @@ async function main() {
     console.log(`======================================================`);
 
     if (isBlacksTurn) {
-        const algoResult = await evaluateBlackMove(fen, chess, currentMoveNumber, history);
+        const algoResult = await evaluateBlackMove(fen, chess, currentMoveNumber, history, snapshotId);
         
         console.log(`\n[CANDIDATE MOVES (Score Formula)]`);
         console.log(`Move  | Score   | Masters | Online  | Weighted`);
@@ -67,7 +72,7 @@ async function main() {
         fen = chess.fen();
         currentMoveNumber++;
     } else {
-        const [masters, elite, amateur] = await fetchAllDatabases(fen);
+        const [masters, elite, amateur] = await fetchAllDatabases(fen, snapshotId);
       
         if (!amateur.moves || amateur.moves.length === 0) {
             console.log("No amateur moves found for White! Breaking test.");
