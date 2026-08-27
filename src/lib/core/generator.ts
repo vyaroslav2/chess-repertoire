@@ -4,8 +4,135 @@ import { parseFullFen, positionKeyFromFen } from "./fen";
 import { fetchAllDatabases } from "../api/lichess";
 import { defaultConfig, computeExplorerRequestProfile } from "../core/config";
 import { selectWhiteCandidates, evaluateBlackMove } from "./evaluator";
+import { reconcileExistingResponse } from "./rm-reconciliation";
 import { delay } from "../api/retry";
 import { createEmptyCard } from "ts-fsrs";
+
+type ResponseEvaluator = typeof evaluateBlackMove;
+
+export function historyFromCanonicalPgn(pgn: string): string[] {
+  if (typeof pgn !== "string" || pgn.trim() !== pgn) {
+    throw new Error("Canonical repertoire PGN must be a trimmed string");
+  }
+  return pgn === "" ? [] : pgn.split(/\s+/);
+}
+
+function fullmoveNumberFromFullFen(fullFen: string): number {
+  const canonicalFullFen = parseFullFen(fullFen);
+  if (canonicalFullFen !== fullFen) throw new Error("Canonical repertoire FullFen is malformed");
+  const fullmoveNumber = Number(canonicalFullFen.split(" ")[5]);
+  if (!Number.isInteger(fullmoveNumber) || fullmoveNumber < 1) {
+    throw new Error("Canonical repertoire FullFen has an invalid fullmove number");
+  }
+  return fullmoveNumber;
+}
+
+export async function evaluateCanonicalResponse(input: {
+  responseNode: { id: string; fullFen: string; pgn: string };
+  routePgn: string;
+  snapshotId: string;
+  evaluator?: ResponseEvaluator;
+}) {
+  const canonicalHistory = historyFromCanonicalPgn(input.responseNode.pgn);
+  const canonicalChess = new Chess(input.responseNode.fullFen);
+  const evaluator = input.evaluator ?? evaluateBlackMove;
+  const result = await evaluator(
+    input.responseNode.fullFen,
+    canonicalChess,
+    fullmoveNumberFromFullFen(input.responseNode.fullFen),
+    canonicalHistory,
+    input.snapshotId
+  );
+  const selectedMove = canonicalChess.move({
+    from: result.selectedUci.slice(0, 2),
+    to: result.selectedUci.slice(2, 4),
+    promotion: result.selectedUci[4]
+  });
+  if (!selectedMove || selectedMove.lan !== result.selectedUci || selectedMove.san !== result.selectedMoveSan) {
+    throw new Error(`Evaluator returned inconsistent RESPONSE UCI/SAN at ${input.responseNode.fullFen}`);
+  }
+  return {
+    result,
+    routeIsCanonicalOwner: input.routePgn === input.responseNode.pgn,
+    canonicalHistory,
+    selectedSan: selectedMove.san,
+    selectedDestinationFullFen: parseFullFen(canonicalChess.fen())
+  };
+}
+
+export function buildCanonicalContinuationQueueItem(input: {
+  destinationNode: { id: string; fullFen: string; pgn: string };
+  cumulativeProb: number;
+}) {
+  return {
+    nodeId: input.destinationNode.id,
+    fen: input.destinationNode.fullFen,
+    currentMoveNumber: fullmoveNumberFromFullFen(input.destinationNode.fullFen),
+    cumulativeProb: input.cumulativeProb,
+    history: historyFromCanonicalPgn(input.destinationNode.pgn)
+  };
+}
+
+export type GeneratorQueueItem = ReturnType<typeof buildCanonicalContinuationQueueItem> & {
+  responseSourceNodeId?: string;
+};
+
+export type PendingCanonicalContinuations = Map<string, GeneratorQueueItem>;
+
+export function enqueueCanonicalContinuation(input: {
+  queue: GeneratorQueueItem[];
+  pendingByResponseSource: PendingCanonicalContinuations;
+  responseSourceNodeId: string;
+  item: GeneratorQueueItem;
+}) {
+  if (input.pendingByResponseSource.has(input.responseSourceNodeId)) {
+    throw new Error("Canonical continuation is already queued for this RESPONSE source");
+  }
+  input.item.responseSourceNodeId = input.responseSourceNodeId;
+  input.queue.push(input.item);
+  input.pendingByResponseSource.set(input.responseSourceNodeId, input.item);
+}
+
+export function raisePendingCanonicalContinuationProbability(input: {
+  pendingByResponseSource: PendingCanonicalContinuations;
+  responseSourceNodeId: string;
+  effectiveCumulativeProb: number;
+}) {
+  const pending = input.pendingByResponseSource.get(input.responseSourceNodeId);
+  if (!pending) return false;
+  pending.cumulativeProb = Math.max(pending.cumulativeProb, input.effectiveCumulativeProb);
+  return true;
+}
+
+export function dequeueGeneratorQueueItem(
+  queue: GeneratorQueueItem[],
+  pendingByResponseSource: PendingCanonicalContinuations
+) {
+  const item = queue.shift();
+  if (item?.responseSourceNodeId && pendingByResponseSource.get(item.responseSourceNodeId) === item) {
+    pendingByResponseSource.delete(item.responseSourceNodeId);
+  }
+  return item;
+}
+
+export async function persistCanonicalMaxCumulativeProbability(input: {
+  node: { id: string; cumulativeProb: number };
+  incomingPathProb: number;
+}) {
+  if (!Number.isFinite(input.node.cumulativeProb) || input.node.cumulativeProb < 0 ||
+      !Number.isFinite(input.incomingPathProb) || input.incomingPathProb < 0) {
+    throw new Error("Canonical cumulative probability must be finite and non-negative");
+  }
+  if (input.incomingPathProb > input.node.cumulativeProb) {
+    await prisma.repertoireNode.updateMany({
+      where: { id: input.node.id, cumulativeProb: { lt: input.incomingPathProb } },
+      data: { cumulativeProb: input.incomingPathProb }
+    });
+  }
+  const currentNode = await prisma.repertoireNode.findUnique({ where: { id: input.node.id } });
+  if (!currentNode) throw new Error("Canonical repertoire node disappeared during probability reconciliation");
+  return currentNode;
+}
 
 export async function generateRepertoire(startFen: string, maxDepth: number) {
   console.log("Initializing BFS Tree Generator...");
@@ -41,7 +168,7 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
   const snapshot = await getOrCreateHumanDataSnapshot(repertoire.id, reqProfile);
   const snapshotId = snapshot.id;
 
-  const queue = [{ 
+  const queue: GeneratorQueueItem[] = [{
     nodeId: rootNode.id,
     fen: startFen, 
     currentMoveNumber: 1, 
@@ -50,9 +177,11 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
   }];
   
   const visitedPgns = new Set<string>();
+  const reconciledResponseNodeIds = new Set<string>();
+  const pendingCanonicalContinuations: PendingCanonicalContinuations = new Map();
   
   while (queue.length > 0) {
-    const node = queue.shift();
+    const node = dequeueGeneratorQueueItem(queue, pendingCanonicalContinuations);
     if (!node) continue;
     
     const pgnString = node.history.join(" ");
@@ -119,37 +248,16 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
       let posAfterWhiteNode = await prisma.repertoireNode.findFirst({
           where: { repertoireId: repertoire.id, positionKey: positionKeyFromFen(parseFullFen(fenAfterWhite)) }
       });
-      
-      if (posAfterWhiteNode) {
-          const statsCount = await prisma.repertoirePositionStat.count({
-              where: { repertoireId: repertoire.id, nodeId: posAfterWhiteNode.id }
-          });
-          if (statsCount > 0) {
-              console.log(`[TRANSPOSITION] FEN already fully expanded: ${fenAfterWhite}. Merging tree...`);
-              
-              await createRepertoireMove({
-                  repertoireId: repertoire.id,
-                  fromNodeId: node.nodeId,
-                  toNodeId: posAfterWhiteNode.id,
-              san: whiteMove.san,
-              playerTurn: "OPPONENT",
-              prob: whiteMove.probability,
-              trueProbability: incomingPathProb
-          });
-          
-          await prisma.repertoireNode.update({
-              where: { id: posAfterWhiteNode.id },
-              data: { cumulativeProb: Math.max(posAfterWhiteNode.cumulativeProb, incomingPathProb) }
-          });
-          
-          totalSkippedMoves++;
-          continue; 
-      }
-      }
-      
+
       if (!posAfterWhiteNode) {
           posAfterWhiteNode = await createRepertoireNode(repertoire.id, fenAfterWhite, newPgn, incomingPathProb);
+      } else {
+          posAfterWhiteNode = await persistCanonicalMaxCumulativeProbability({
+              node: posAfterWhiteNode,
+              incomingPathProb
+          });
       }
+      const effectiveCanonicalProb = posAfterWhiteNode.cumulativeProb;
 
       await createRepertoireMove({
           repertoireId: repertoire.id,
@@ -161,37 +269,44 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
           trueProbability: incomingPathProb
       });
 
+      // A canonical transposition RESPONSE is reconciled once per generator pass.
+      // A pre-existing stat alone is never treated as proof that it was reconciled.
+      if (reconciledResponseNodeIds.has(posAfterWhiteNode.id)) {
+          raisePendingCanonicalContinuationProbability({
+              pendingByResponseSource: pendingCanonicalContinuations,
+              responseSourceNodeId: posAfterWhiteNode.id,
+              effectiveCumulativeProb: effectiveCanonicalProb
+          });
+          totalSkippedMoves++;
+          continue;
+      }
+
       const existingStat = await prisma.repertoirePositionStat.findUnique({
         where: { repertoireId_nodeId: { repertoireId: repertoire.id, nodeId: posAfterWhiteNode.id } }
       });
 
-      if (existingStat) {
-        const dbBlackMove = await prisma.repertoireMove.findUnique({ where: { id: existingStat.targetMoveId } });
-        if (dbBlackMove) {
-          if (!dbBlackMove.uci || !dbBlackMove.source || !dbBlackMove.selectionMethod || !dbBlackMove.moveOrigin ||
-              !((typeof dbBlackMove.cp === "number" && dbBlackMove.mate === null) || (dbBlackMove.cp === null && typeof dbBlackMove.mate === "number" && dbBlackMove.mate !== 0)) ||
-              (dbBlackMove.deepVerified && !dbBlackMove.localEvaluationProfile)) {
-            throw new Error(`Stored RESPONSE ${dbBlackMove.id} is legacy/incomplete and cannot be reused`);
-          }
-          console.log(`[SKIPPED API] Already generated in DB! Black responds with: ${dbBlackMove.san}`);
-          
-          tempChess.move(dbBlackMove.san);
-          const fenAfterBlack = tempChess.fen();
-          
-          queue.push({
-            nodeId: dbBlackMove.toNodeId,
-            fen: fenAfterBlack,
-            currentMoveNumber: node.currentMoveNumber + 1,
-            cumulativeProb: incomingPathProb,
-            history: [...newHistory, dbBlackMove.san]
-          });
-          
-          totalSkippedMoves++;
-          continue; 
-        }
+      const dbBlackMove = existingStat
+        ? await prisma.repertoireMove.findUnique({ where: { id: existingStat.targetMoveId } })
+        : await prisma.repertoireMove.findFirst({ where: { fromNodeId: posAfterWhiteNode.id, playerTurn: "RESPONSE" } });
+      if (existingStat && !dbBlackMove) throw new Error(`Stored RESPONSE ${existingStat.targetMoveId} no longer exists`);
+      if (!existingStat && dbBlackMove) throw new Error(`Stored RESPONSE ${dbBlackMove.id} has no position stat and cannot be reconciled`);
+      if (dbBlackMove && (!dbBlackMove.uci || !dbBlackMove.source || !dbBlackMove.selectionMethod || !dbBlackMove.moveOrigin ||
+          dbBlackMove.playerTurn !== "RESPONSE" || dbBlackMove.fromNodeId !== posAfterWhiteNode.id ||
+          !((typeof dbBlackMove.cp === "number" && Number.isFinite(dbBlackMove.cp) && dbBlackMove.mate === null) ||
+            (dbBlackMove.cp === null && typeof dbBlackMove.mate === "number" && Number.isInteger(dbBlackMove.mate) && dbBlackMove.mate !== 0)) ||
+          (dbBlackMove.deepVerified && !dbBlackMove.localEvaluationProfile))) {
+        throw new Error(`Stored RESPONSE ${dbBlackMove.id} is legacy/incomplete and cannot be reconciled`);
       }
 
-      const algoResult = await evaluateBlackMove(fenAfterWhite, tempChess, node.currentMoveNumber, newHistory, snapshotId);
+      const canonicalSelection = await evaluateCanonicalResponse({
+          responseNode: posAfterWhiteNode,
+          routePgn: newPgn,
+          snapshotId
+      });
+      const algoResult = canonicalSelection.result;
+      const selectedWeightedCount = algoResult.moveOrigin === "Human Move"
+        ? algoResult.selectedStats?.weightedGames ?? null
+        : null;
 
 
       totalBlackMovesEvaluated++;
@@ -209,65 +324,118 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
       console.log(`Black responds with: ${algoResult.selectedMoveSan} -> Score: ${scoreStr} | Weighted Vol: ${volStr} | ${algoResult.source} Eval: ${algoResult.cp !== null ? (algoResult.cp / 100).toFixed(2) : 'M' + Math.abs(algoResult.mate!)}`);
       const explanation = `Score: ${scoreStr} | Weighted Vol: ${volStr} | Eval: ${algoResult.cp !== null ? (algoResult.cp/100).toFixed(2) : 'M' + Math.abs(algoResult.mate!)}`;
 
-      tempChess.move(algoResult.selectedMoveSan);
-      const fenAfterBlack = tempChess.fen();
-      const blackHistory = [...newHistory, algoResult.selectedMoveSan];
-      const blackPgn = blackHistory.join(" ");
-      
-      await getOrCreatePositionCache(fenAfterBlack, undefined, blackHistory);
-      
-      let posAfterBlackNode = await getRepertoireNode(repertoire.id, blackPgn);
-      if (!posAfterBlackNode) {
-          posAfterBlackNode = await createRepertoireNode(repertoire.id, fenAfterBlack, blackPgn, incomingPathProb);
+      const selectedDestinationFen = canonicalSelection.selectedDestinationFullFen;
+      const selectedHistory = [...canonicalSelection.canonicalHistory, canonicalSelection.selectedSan];
+      const blackPgn = selectedHistory.join(" ");
+
+      await getOrCreatePositionCache(selectedDestinationFen, undefined, selectedHistory);
+
+      let resultingDestinationId: string;
+      let resultingDestinationFen: string = selectedDestinationFen;
+      let resultingDestinationPgn = blackPgn;
+
+      if (dbBlackMove) {
+          const result = await reconcileExistingResponse({
+              repertoireId: repertoire.id,
+              sourceNodeId: posAfterWhiteNode.id,
+              expectedStoredResponse: {
+                  id: dbBlackMove.id,
+                  uci: dbBlackMove.uci as string,
+                  fromNodeId: dbBlackMove.fromNodeId,
+                  toNodeId: dbBlackMove.toNodeId,
+                  fullFen: posAfterWhiteNode.fullFen
+              },
+              cumulativeProb: effectiveCanonicalProb,
+              recomputed: {
+                  selectedUci: algoResult.selectedUci,
+                  selectedMoveSan: algoResult.selectedMoveSan,
+                  cp: algoResult.cp,
+                  mate: algoResult.mate,
+                  source: algoResult.source,
+                  selectionMethod: algoResult.selectionMethod,
+                  moveOrigin: algoResult.moveOrigin,
+                  deepVerified: algoResult.deepVerified,
+                  localEvaluationProfile: algoResult.localEvaluationProfile,
+                  weightedCount: selectedWeightedCount
+              }
+          });
+
+          resultingDestinationId = result.destinationNodeId;
+          resultingDestinationFen = result.destinationFullFen;
+          resultingDestinationPgn = result.destinationPgn;
+
+          // Reconcile explanation but DO NOT wipe SRS progress
+          const explanationUpdate = await prisma.repertoirePositionStat.updateMany({
+             where: { repertoireId: repertoire.id, nodeId: posAfterWhiteNode.id, targetMoveId: result.responseId },
+             data: { explanation: explanation }
+          });
+          if (explanationUpdate.count !== 1) throw new Error("Reconciled RESPONSE stat changed before explanation update");
       } else {
-          await prisma.repertoireNode.update({
-              where: { id: posAfterBlackNode.id },
-              data: { cumulativeProb: Math.max(posAfterBlackNode.cumulativeProb, incomingPathProb) }
+          let posAfterBlackNode = await getRepertoireNode(repertoire.id, blackPgn);
+          if (!posAfterBlackNode) {
+              posAfterBlackNode = await createRepertoireNode(repertoire.id, selectedDestinationFen, blackPgn, effectiveCanonicalProb);
+          } else {
+              await prisma.repertoireNode.update({
+                  where: { id: posAfterBlackNode.id },
+                  data: { cumulativeProb: Math.max(posAfterBlackNode.cumulativeProb, effectiveCanonicalProb) }
+              });
+          }
+
+          resultingDestinationId = posAfterBlackNode.id;
+          resultingDestinationFen = posAfterBlackNode.fullFen;
+          resultingDestinationPgn = posAfterBlackNode.pgn;
+
+          const createdResponse = await createResponseMove({
+              fromNodeId: posAfterWhiteNode.id,
+              toNodeId: posAfterBlackNode.id,
+              uci: algoResult.selectedUci,
+              san: algoResult.selectedMoveSan,
+              cp: algoResult.cp,
+              mate: algoResult.mate,
+              weightedCount: selectedWeightedCount,
+              source: algoResult.source,
+              selectionMethod: algoResult.selectionMethod,
+              moveOrigin: algoResult.moveOrigin,
+              deepVerified: algoResult.deepVerified,
+              localEvaluationProfile: algoResult.localEvaluationProfile
+          });
+
+          const emptyCard = createEmptyCard();
+          await prisma.repertoirePositionStat.upsert({
+            where: { repertoireId_nodeId: { repertoireId: repertoire.id, nodeId: posAfterWhiteNode.id } },
+            update: { targetMoveId: createdResponse.id, explanation: explanation },
+            create: {
+              repertoireId: repertoire.id,
+              nodeId: posAfterWhiteNode.id,
+              targetMoveId: createdResponse.id,
+              explanation: explanation,
+              due: emptyCard.due,
+              stability: emptyCard.stability,
+              difficulty: emptyCard.difficulty,
+              elapsed_days: emptyCard.elapsed_days,
+              scheduled_days: emptyCard.scheduled_days,
+              reps: emptyCard.reps,
+              lapses: emptyCard.lapses,
+              state: emptyCard.state,
+              last_review: emptyCard.last_review || null
+            }
           });
       }
 
-      const dbBlackMove = await createResponseMove({
-          fromNodeId: posAfterWhiteNode.id,
-          toNodeId: posAfterBlackNode.id,
-          uci: algoResult.selectedUci,
-          san: algoResult.selectedMoveSan,
-          cp: algoResult.cp,
-          mate: algoResult.mate,
-          weightedCount: algoResult.selectedStats?.weightedGames ?? null,
-          source: algoResult.source,
-          selectionMethod: algoResult.selectionMethod,
-          moveOrigin: algoResult.moveOrigin,
-          deepVerified: algoResult.deepVerified,
-          localEvaluationProfile: algoResult.localEvaluationProfile
+      reconciledResponseNodeIds.add(posAfterWhiteNode.id);
+      const continuationItem = buildCanonicalContinuationQueueItem({
+          destinationNode: {
+              id: resultingDestinationId,
+              fullFen: resultingDestinationFen,
+              pgn: resultingDestinationPgn
+          },
+          cumulativeProb: effectiveCanonicalProb
       });
-
-      const emptyCard = createEmptyCard();
-      await prisma.repertoirePositionStat.upsert({
-        where: { repertoireId_nodeId: { repertoireId: repertoire.id, nodeId: posAfterWhiteNode.id } },
-        update: { targetMoveId: dbBlackMove.id, explanation: explanation },
-        create: { 
-          repertoireId: repertoire.id, 
-          nodeId: posAfterWhiteNode.id, 
-          targetMoveId: dbBlackMove.id, 
-          explanation: explanation,
-          due: emptyCard.due,
-          stability: emptyCard.stability,
-          difficulty: emptyCard.difficulty,
-          elapsed_days: emptyCard.elapsed_days,
-          scheduled_days: emptyCard.scheduled_days,
-          reps: emptyCard.reps,
-          lapses: emptyCard.lapses,
-          state: emptyCard.state,
-          last_review: emptyCard.last_review || null
-        }
-      });
-
-      queue.push({
-        nodeId: posAfterBlackNode.id,
-        fen: fenAfterBlack,
-        currentMoveNumber: node.currentMoveNumber + 1,
-        cumulativeProb: incomingPathProb,
-        history: blackHistory
+      enqueueCanonicalContinuation({
+          queue,
+          pendingByResponseSource: pendingCanonicalContinuations,
+          responseSourceNodeId: posAfterWhiteNode.id,
+          item: continuationItem
       });
 
       await delay(100); // Shorter delay since we hit cache!
