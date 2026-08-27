@@ -601,6 +601,60 @@ export async function createResponseMove(input: ResponsePersistenceInput) {
   });
 }
 
+export async function markResponseDeepVerified(input: {
+  responseId: string;
+  expectedUci: string;
+  expectedFullFen: string;
+  localEvaluationProfile: string;
+  expectedBaseline: { uci: string; cp: number | null; mate: number | null };
+  expectedCandidate: { uci: string; cp: number | null; mate: number | null };
+}) {
+  return prisma.$transaction(async tx => {
+    const response = await tx.repertoireMove.findUnique({
+      where: { id: input.responseId },
+      include: { fromNode: true }
+    });
+    if (!response || response.playerTurn !== "RESPONSE") throw new Error("DV pass persistence: RESPONSE no longer exists");
+    if (response.uci !== input.expectedUci || response.fromNode.fullFen !== input.expectedFullFen) {
+      throw new Error("DV pass persistence: RESPONSE changed after verification");
+    }
+    validateResponsePersistence({
+      fromNodeId: response.fromNodeId,
+      toNodeId: response.toNodeId,
+      uci: response.uci,
+      san: response.san,
+      cp: response.cp,
+      mate: response.mate,
+      source: response.source as ResponseEvaluationSource,
+      selectionMethod: response.selectionMethod as ResponseSelectionMethod,
+      moveOrigin: response.moveOrigin as ResponseMoveOrigin,
+      deepVerified: false,
+      localEvaluationProfile: response.localEvaluationProfile,
+      weightedCount: response.weightedCount
+    });
+    const baseline = await tx.localEngineBaseline.findUnique({
+      where: { fullFen_evaluationProfile: { fullFen: input.expectedFullFen, evaluationProfile: input.localEvaluationProfile } }
+    });
+    const candidate = await tx.localEngineCandidate.findUnique({
+      where: { fullFen_candidateUci_evaluationProfile: { fullFen: input.expectedFullFen, candidateUci: input.expectedUci, evaluationProfile: input.localEvaluationProfile } }
+    });
+    const baselineMatches = baseline !== null && baseline.bestUci === input.expectedBaseline.uci &&
+      baseline.cp === input.expectedBaseline.cp && baseline.mate === input.expectedBaseline.mate;
+    const candidateMatches = input.expectedBaseline.uci === input.expectedUci
+      ? input.expectedCandidate.uci === input.expectedUci && input.expectedCandidate.cp === input.expectedBaseline.cp && input.expectedCandidate.mate === input.expectedBaseline.mate
+      : candidate !== null && candidate.candidateUci === input.expectedCandidate.uci && candidate.cp === input.expectedCandidate.cp && candidate.mate === input.expectedCandidate.mate;
+    if (!baselineMatches || !candidateMatches || input.expectedCandidate.uci !== input.expectedUci) {
+      throw new Error("DV pass persistence: compatible Local Deep evidence is missing");
+    }
+    const update = await tx.repertoireMove.updateMany({
+      where: { id: input.responseId, uci: input.expectedUci, deepVerified: false },
+      data: { deepVerified: true, localEvaluationProfile: input.localEvaluationProfile }
+    });
+    if (update.count !== 1) throw new Error("DV pass persistence: RESPONSE changed concurrently");
+    return tx.repertoireMove.findUniqueOrThrow({ where: { id: input.responseId } });
+  });
+}
+
 /** Compatibility API for existing OPPONENT callers only. */
 export async function createRepertoireMove(data: Parameters<typeof createOpponentMove>[0] & { playerTurn: string }) {
   if (data.playerTurn !== "OPPONENT") throw new Error("Use createResponseMove for complete RESPONSE persistence");
