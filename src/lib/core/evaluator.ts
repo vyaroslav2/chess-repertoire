@@ -2,13 +2,17 @@ import { Chess } from "chess.js";
 import { readRemoteEngineResult, saveRemoteEngineResult, type RemoteEngineEvaluation } from "../db/operations";
 import { fetchWithRetry, delay, GlobalState } from "../api/retry";
 import {
-  runLocalStockfish,
-  checkLegacyLocalPvTolerance,
   getCpTolerance,
-  getLegacyLocalCp,
   verifyOrdinaryCpSnapshot,
   type OrdinaryCpSnapshotEntry
 } from "./verifier";
+import {
+  getOrCreateLocalBaseline,
+  getOrCreateLocalCandidate,
+  verifyLocalCandidate,
+  runTrustedLocalSearch,
+  type LocalSearchRunner
+} from "./local-engine";
 import { analyseLichessMateSnapshot, verifyCandidateAgainstLichessMate, type LichessMateContext } from "./lichess-mate";
 
 import { parseFullFen } from "./fen";
@@ -84,8 +88,20 @@ import { fetchAllDatabases } from "../api/lichess";
 import { buildBlackHumanShortlist } from "./black-human-shortlist";
 
 
-export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: number, previousMovesSan: string[], snapshotId: string): Promise<any> {
+export type EvaluateBlackMoveDependencies = {
+  localSearchRunner?: LocalSearchRunner;
+};
+
+export async function evaluateBlackMove(
+  fen: string,
+  chess: Chess,
+  moveNumber: number,
+  previousMovesSan: string[],
+  snapshotId: string,
+  dependencies: EvaluateBlackMoveDependencies = {}
+): Promise<any> {
   const fullFen = parseFullFen(fen);
+  const localSearchRunner = dependencies.localSearchRunner ?? runTrustedLocalSearch;
   let evalSource = 'Lichess Cloud Evaluation';
 
   // 1. Check Explorer Cache via lichess.ts
@@ -183,10 +199,8 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
   let selectedStats: any = null;
   let selectedEngineCp: number | null = null;
   let selectedMate: number | null = null;
-
-  let localEngineRun = false;
-  let localEnginePvs: any[] = [];
-  const lichessBestCp = lichessPvs.length > 0 ? getLegacyLocalCp(lichessPvs[0]) : 0;
+  let deepVerified = false;
+  let localEvaluationProfile: string | null = null;
 
   const evaluateCandidateThroughWaterfall = async (candidate: any, isHardcoded: boolean = false) => {
     const lan = candidate.uci || (() => { const mr = chess.move(candidate.san); chess.undo(); return mr.lan; })();
@@ -203,22 +217,15 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
         if (found) return { source: "ChessDB", cp: found.cp, mate: found.mate };
       }
 
-      console.log(`\n[DEEP SEARCH] Running Local Stockfish for hardcoded move ${lan} (searchmoves)...`);
-      const exactLocal = await runLocalStockfish(fullFen, 1, defaultConfig.engine.localVerification.depth, lan);
-      if (exactLocal.length > 0) {
-        const pv = exactLocal[0];
-        const returnedUci = pv.moves.split(' ')[0];
-        if (returnedUci !== lan) {
-          throw new Error(`Invariant violation: Local Stockfish searchmoves requested ${lan} but returned ${returnedUci}`);
-        }
-        let cp = null;
-        let mate = null;
-        if (typeof pv.mate === 'number') mate = pv.mate;
-        else if (typeof pv.cp === 'number') cp = pv.cp;
-        return { source: "Local Stockfish", cp, mate };
-      }
-      
-      return { decision: "REJECT" };
+      console.log(`\n[DEEP SEARCH] Resolving exact Local Deep evidence for hardcoded move ${lan}...`);
+      const exactLocal = await getOrCreateLocalCandidate(fullFen, lan, defaultConfig, localSearchRunner);
+      return {
+        source: "Local Deep Stockfish",
+        cp: exactLocal.evaluation.cp,
+        mate: exactLocal.evaluation.mate,
+        localEvaluationProfile: exactLocal.evaluationProfile,
+        deepVerified: false
+      };
     }
 
     const currentTolerance = getCpTolerance(moveNumber, false);
@@ -263,17 +270,18 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
     }
     if (chessDbDecision === "REJECT") return { decision: "REJECT" };
 
-    // Local Stockfish
-    if (!localEngineRun) {
-      console.log(`\n[DEEP SEARCH] Running Local Stockfish for ${lan}...`);
-      localEnginePvs = await runLocalStockfish(fullFen, defaultConfig.engine.localVerification.multiPv, defaultConfig.engine.localVerification.depth);
-      localEngineRun = true;
-    }
+    // Local Deep Stockfish: unrestricted baseline plus exact target evidence.
+    console.log(`\n[DEEP SEARCH] Verifying ${lan} with trusted Local Deep evidence...`);
     const localTolerance = getCpTolerance(moveNumber, true);
-    const localBestCp = localEnginePvs.length > 0 ? getLegacyLocalCp(localEnginePvs[0]) : lichessBestCp;
-    const localStatus = checkLegacyLocalPvTolerance(lan, localEnginePvs, localBestCp, localTolerance);
-    if (localStatus === 'VALID') {
-      return { source: "Local Stockfish", cp: getLegacyLocalCp(localEnginePvs.find(pv => pv.moves.split(" ")[0] === lan)), mate: null };
+    const localResult = await verifyLocalCandidate(fullFen, lan, localTolerance, defaultConfig, localSearchRunner);
+    if (localResult.decision === 'ACCEPT') {
+      return {
+        source: "Local Deep Stockfish",
+        cp: localResult.candidate.cp,
+        mate: localResult.candidate.mate,
+        localEvaluationProfile: localResult.evaluationProfile,
+        deepVerified: true
+      };
     }
 
     return { decision: "REJECT" };
@@ -295,6 +303,8 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
         selectedEngineCp = res.cp;
         selectedMate = res.mate;
         evalSource = res.source;
+        deepVerified = res.deepVerified ?? false;
+        localEvaluationProfile = res.localEvaluationProfile ?? null;
       } else {
         throw new Error(`Hardcoded forced response ${forcedSan} was rejected by all available engines.`);
       }
@@ -311,6 +321,8 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
         selectedEngineCp = res.cp;
         selectedMate = res.mate;
         evalSource = res.source;
+        deepVerified = res.deepVerified ?? false;
+        localEvaluationProfile = res.localEvaluationProfile ?? null;
         break;
       }
     }
@@ -342,12 +354,12 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
   }
 
   if (!selectedMoveSan) {
-    // Local Deep Stockfish fallback for ordinary positions
-    console.log(`\n[DEEP SEARCH] Running Local Deep Stockfish fallback for position...`);
-    const deepPvs = await runLocalStockfish(fullFen, defaultConfig.engine.deepVerification.multiPv, defaultConfig.engine.deepVerification.depth);
-    
-    if (deepPvs.length > 0) {
-      const lan = deepPvs[0].moves.split(" ")[0];
+    // Local Deep fallback reuses the same exact baseline/profile used by HCM checks.
+    console.log(`\n[DEEP SEARCH] Resolving Local Deep Stockfish fallback baseline...`);
+    const baselineResult = await getOrCreateLocalBaseline(fullFen, defaultConfig, localSearchRunner);
+    const baseline = baselineResult.evaluation;
+    if (baseline) {
+      const lan = baseline.uci;
       const fromSq = lan.substring(0, 2);
       const toSq = lan.substring(2, 4);
       const promotion = lan.length === 5 ? lan[4] : undefined;
@@ -364,11 +376,14 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
       
       chess.undo();
       selectedMoveSan = moveResult.san;
-      selectedEngineCp = getLegacyLocalCp(deepPvs[0]);
+      selectedEngineCp = baseline.cp;
+      selectedMate = baseline.mate;
       selectedStats = candidateMoves.find(m => m.san === selectedMoveSan) || null;
       evalSource = "Local Deep Stockfish";
+      deepVerified = true;
+      localEvaluationProfile = baselineResult.evaluationProfile;
     } else {
-      throw new Error(`Local Deep Stockfish fallback returned zero usable PVs for position ${fullFen}.`);
+      throw new Error(`Local Deep Stockfish fallback returned zero usable results for position ${fullFen}.`);
     }
   }
 
@@ -384,6 +399,8 @@ export async function evaluateBlackMove(fen: string, chess: Chess, moveNumber: n
     lichessCp, 
     chessdbCp, 
     evalSource, 
+    deepVerified,
+    localEvaluationProfile,
     candidateMoves, 
     enginePvs: lichessPvs.length > 0 ? lichessPvs : (chessDbOrdinarySnapshot ? toLegacyEnginePvs((chessDbResult as any).evaluations) : []) 
   };

@@ -327,7 +327,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
           async () => {
             await evaluateBlackMove(fen, chess, 1, ["e4"], snapshot.id);
           },
-          (err: Error) => err.message.includes("Hardcoded forced response c6 was rejected by all available engines"),
+          (err: Error) => err.message.includes("Local Engine returned no usable result for expected root c7c6"),
           "Must throw a descriptive hard generation error when a hardcoded move is completely missing"
         );
       } finally {
@@ -381,7 +381,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
       try {
         const res = await evaluateBlackMove(fen, chess, 1, ["e4"], snapshot.id);
         assert.strictEqual(res.selectedMoveSan, "c6");
-        assert.strictEqual(res.evalSource, "Local Stockfish");
+        assert.strictEqual(res.evalSource, "Local Deep Stockfish");
         assert.strictEqual(res.selectedEngineCp, -777);
       } finally {
         nodeUci.Engine = OriginalEngine;
@@ -401,6 +401,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
     const repertoire = await prisma.repertoire.create({ data: { title: 'Eval Test', color: 'black', userId: user.id } });
     const snapshot = await createHumanDataSnapshot(repertoire.id, `snapshot-${Date.now()}`);
     const fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
+    await prisma.localEngineCandidate.deleteMany({ where: { fullFen: fen } });
     
     await prisma.remoteEngineFetch.deleteMany({ where: { fullFen: fen } });
     await prisma.humanExplorerFetch.deleteMany({ where: { positionKey: fen.split(" ")[0] } });
@@ -570,7 +571,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
           async () => {
             await evaluateBlackMove(fen, chess, 3, ["d4", "Nf6", "Nf3", "d5"], snapshot.id);
           },
-          (err: Error) => err.message.includes("Local Deep Stockfish fallback returned zero usable PVs"),
+          (err: Error) => err.message.includes("Local Engine returned zero usable root evaluations"),
           "Must throw descriptive error when deep fallback returns no PVs"
         );
       } finally {

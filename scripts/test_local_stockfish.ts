@@ -1,4 +1,4 @@
-import { runLocalStockfish } from "../src/lib/core/verifier";
+import { runLocalStockfish } from "../src/lib/core/local-engine";
 import { evaluateBlackMove } from "../src/lib/core/evaluator";
 import { prisma, getOrCreatePosition, getOrCreatePositionCache, saveHumanExplorerBucket, getOrCreateHumanDataSnapshot } from "../src/lib/db/operations";
 import { computeExplorerRequestProfile, defaultConfig } from "../src/lib/core/config";
@@ -17,7 +17,7 @@ async function runTest() {
   const chess = new Chess(fen);
   
   console.log("Running local Stockfish directly...");
-  const localPvs = await runLocalStockfish(fullFen, 15, 18);
+  const localPvs = await runLocalStockfish(fullFen, 1, 24);
   
   if (!Array.isArray(localPvs) || localPvs.length === 0) {
     throw new Error("runLocalStockfish did not return a valid array of moves.");
@@ -104,8 +104,8 @@ async function runTest() {
       console.log(`Eval Source: ${evalResult.evalSource}`);
       console.log(`Selected Engine CP: ${evalResult.selectedEngineCp}`);
       
-      if (evalResult.evalSource !== "Local Stockfish") {
-          console.warn(`Expected evalSource to be 'Local Stockfish', but got '${evalResult.evalSource}'`);
+      if (evalResult.evalSource !== "Local Deep Stockfish") {
+          console.warn(`Expected evalSource to be 'Local Deep Stockfish', but got '${evalResult.evalSource}'`);
       } else {
           console.log("Fallback mechanism successfully verified!");
       }

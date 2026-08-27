@@ -116,6 +116,32 @@ model RemoteEngineEvalCache {
   @@unique([fetchId, uci])
 }
 
+model LocalEngineBaseline {
+  id                String   @id @default(uuid())
+  fullFen           String
+  evaluationProfile String
+  bestUci           String
+  san               String?
+  cp                Float?
+  mate              Int?
+  analysedAt        DateTime @default(now())
+
+  @@unique([fullFen, evaluationProfile])
+}
+
+model LocalEngineCandidate {
+  id                String   @id @default(uuid())
+  fullFen           String
+  candidateUci      String
+  evaluationProfile String
+  san               String?
+  cp                Float?
+  mate              Int?
+  analysedAt        DateTime @default(now())
+
+  @@unique([fullFen, candidateUci, evaluationProfile])
+}
+
 // --- THE ALGORITHM LAYER ---
 
 model RepertoireNode {

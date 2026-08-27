@@ -304,6 +304,152 @@ export async function readRemoteEngineCandidate(
     : { status: "unavailable" as const, fetch: result.fetch };
 }
 
+export type LocalEngineEvaluation = {
+  uci: string;
+  san?: string | null;
+  cp: number | null;
+  mate: number | null;
+};
+
+function validateLocalEngineIdentity(fullFen: string, evaluationProfile: string): string {
+  const canonicalFullFen = parseFullFen(fullFen);
+  if (canonicalFullFen !== fullFen) {
+    throw new Error("Invalid Local Engine evidence: FullFen must be canonical");
+  }
+  if (typeof evaluationProfile !== "string" || evaluationProfile.trim() === "" || evaluationProfile.trim() !== evaluationProfile) {
+    throw new Error("Invalid Local Engine evidence: evaluationProfile must be non-empty and canonical");
+  }
+  return canonicalFullFen;
+}
+
+function validateLocalEngineEvaluation(
+  fullFen: string,
+  evaluationProfile: string,
+  evaluation: LocalEngineEvaluation,
+  expectedUci?: string
+): LocalEngineEvaluation & { san: string } {
+  const canonicalFullFen = validateLocalEngineIdentity(fullFen, evaluationProfile);
+  if (!evaluation || typeof evaluation !== "object" || !isValidUciMove(evaluation.uci)) {
+    throw new Error("Invalid Local Engine evidence: malformed UCI/LAN move");
+  }
+  if (expectedUci !== undefined && evaluation.uci !== expectedUci) {
+    throw new Error(`Invalid Local Engine evidence: expected root ${expectedUci} but received ${evaluation.uci}`);
+  }
+
+  const hasCp = typeof evaluation.cp === "number" && Number.isFinite(evaluation.cp);
+  const hasMate = typeof evaluation.mate === "number" && Number.isInteger(evaluation.mate);
+  if (!((hasCp && evaluation.mate === null) || (evaluation.cp === null && hasMate))) {
+    throw new Error("Invalid Local Engine evidence: exactly one of finite cp or integer mate is required");
+  }
+
+  const chess = new Chess(canonicalFullFen);
+  let parsedMove;
+  try {
+    parsedMove = chess.move({
+      from: evaluation.uci.slice(0, 2),
+      to: evaluation.uci.slice(2, 4),
+      promotion: evaluation.uci.length === 5 ? evaluation.uci[4] : undefined
+    });
+  } catch {
+    throw new Error(`Invalid Local Engine evidence: illegal UCI move ${evaluation.uci}`);
+  }
+  if (!parsedMove || parsedMove.lan !== evaluation.uci) {
+    throw new Error(`Invalid Local Engine evidence: illegal UCI move ${evaluation.uci}`);
+  }
+  if (evaluation.san !== undefined && evaluation.san !== null &&
+      (typeof evaluation.san !== "string" || evaluation.san !== parsedMove.san)) {
+    throw new Error(`Invalid Local Engine evidence: SAN does not match UCI move ${evaluation.uci}`);
+  }
+
+  return { ...evaluation, san: parsedMove.san };
+}
+
+export async function saveLocalEngineBaseline(
+  fullFen: string,
+  evaluationProfile: string,
+  evaluation: LocalEngineEvaluation
+) {
+  const validated = validateLocalEngineEvaluation(fullFen, evaluationProfile, evaluation);
+  return prisma.localEngineBaseline.upsert({
+    where: { fullFen_evaluationProfile: { fullFen, evaluationProfile } },
+    update: {
+      bestUci: validated.uci,
+      san: validated.san,
+      cp: validated.cp,
+      mate: validated.mate,
+      analysedAt: new Date()
+    },
+    create: {
+      fullFen,
+      evaluationProfile,
+      bestUci: validated.uci,
+      san: validated.san,
+      cp: validated.cp,
+      mate: validated.mate
+    }
+  });
+}
+
+export async function readLocalEngineBaseline(fullFen: string, evaluationProfile: string) {
+  validateLocalEngineIdentity(fullFen, evaluationProfile);
+  const row = await prisma.localEngineBaseline.findUnique({
+    where: { fullFen_evaluationProfile: { fullFen, evaluationProfile } }
+  });
+  if (!row) return null;
+  const evaluation = validateLocalEngineEvaluation(fullFen, evaluationProfile, {
+    uci: row.bestUci,
+    san: row.san,
+    cp: row.cp,
+    mate: row.mate
+  });
+  return { ...row, ...evaluation };
+}
+
+export async function saveLocalEngineCandidate(
+  fullFen: string,
+  candidateUci: string,
+  evaluationProfile: string,
+  evaluation: LocalEngineEvaluation
+) {
+  if (!isValidUciMove(candidateUci)) {
+    throw new Error("Invalid Local Engine candidate identity");
+  }
+  const validated = validateLocalEngineEvaluation(fullFen, evaluationProfile, evaluation, candidateUci);
+  return prisma.localEngineCandidate.upsert({
+    where: { fullFen_candidateUci_evaluationProfile: { fullFen, candidateUci, evaluationProfile } },
+    update: {
+      san: validated.san,
+      cp: validated.cp,
+      mate: validated.mate,
+      analysedAt: new Date()
+    },
+    create: {
+      fullFen,
+      candidateUci,
+      evaluationProfile,
+      san: validated.san,
+      cp: validated.cp,
+      mate: validated.mate
+    }
+  });
+}
+
+export async function readLocalEngineCandidate(fullFen: string, candidateUci: string, evaluationProfile: string) {
+  validateLocalEngineIdentity(fullFen, evaluationProfile);
+  if (!isValidUciMove(candidateUci)) throw new Error("Invalid Local Engine candidate identity");
+  const row = await prisma.localEngineCandidate.findUnique({
+    where: { fullFen_candidateUci_evaluationProfile: { fullFen, candidateUci, evaluationProfile } }
+  });
+  if (!row) return null;
+  const evaluation = validateLocalEngineEvaluation(fullFen, evaluationProfile, {
+    uci: row.candidateUci,
+    san: row.san,
+    cp: row.cp,
+    mate: row.mate
+  }, candidateUci);
+  return { ...row, ...evaluation };
+}
+
 export async function getRepertoireNode(repertoireId: string, pgn: string) {
   return prisma.repertoireNode.findUnique({
     where: {

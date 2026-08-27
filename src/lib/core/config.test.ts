@@ -5,12 +5,30 @@ import {
     validateConfig,
     computeConfigHash,
     computeRemoteEngineEvaluationProfile,
+    computeLocalEngineEvaluationProfile,
     createRuntimeConfig,
     getMoveBand
 } from './config';
 
 test('1. shipped default config validates', () => {
     assert.doesNotThrow(() => validateConfig(defaultConfig));
+});
+
+test('23. Local Deep profile tracks material search settings only', () => {
+    const same = JSON.parse(JSON.stringify(defaultConfig));
+    assert.strictEqual(computeLocalEngineEvaluationProfile(defaultConfig), computeLocalEngineEvaluationProfile(same));
+
+    const changedDepth = JSON.parse(JSON.stringify(defaultConfig));
+    changedDepth.engine.deepVerification.depth += 1;
+    assert.notStrictEqual(computeLocalEngineEvaluationProfile(defaultConfig), computeLocalEngineEvaluationProfile(changedDepth));
+
+    const changedMultiPv = JSON.parse(JSON.stringify(defaultConfig));
+    changedMultiPv.engine.deepVerification.multiPv = 2;
+    assert.notStrictEqual(computeLocalEngineEvaluationProfile(defaultConfig), computeLocalEngineEvaluationProfile(changedMultiPv));
+
+    const changedOperational = JSON.parse(JSON.stringify(defaultConfig));
+    changedOperational.api.networkRetryDelayMs += 1;
+    assert.strictEqual(computeLocalEngineEvaluationProfile(defaultConfig), computeLocalEngineEvaluationProfile(changedOperational));
 });
 
 test('2. required value missing -> hard error', () => {

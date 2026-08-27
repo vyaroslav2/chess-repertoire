@@ -1,7 +1,3 @@
-import { Engine } from 'node-uci';
-import { Chess } from 'chess.js';
-import * as path from 'path';
-
 import { defaultConfig, getMoveBand } from './config';
 import { isValidUciMove } from './uci';
 
@@ -80,71 +76,21 @@ export function getCpTolerance(moveNumber: number, isLocalEngine = false): numbe
     return defaultConfig.engineVerification.apiToleranceCp[band];
 }
 
-// Legacy local-engine ordering only. Strict remote PV verification never uses this
-// mate-to-cp compatibility mapping.
-export const getLegacyLocalCp = (pv: any) => pv.mate !== null ? (pv.mate > 0 ? 30000 - pv.mate : -30000 - pv.mate) : (pv.cp !== undefined ? pv.cp : 0);
-
-export async function runLocalStockfish(fen: string, multiPv: number, depth: number, searchmoves?: string): Promise<any[]> {
-    const enginePath = path.resolve(process.cwd(), 'bin', 'stockfish.exe');
-    const engine = new Engine(enginePath);
-    
-    await engine.init();
-    await engine.setoption('MultiPV', multiPv.toString());
-    await engine.position(fen);
-    
-    const goParams: any = { depth };
-    if (searchmoves) {
-        goParams.searchmoves = searchmoves;
-    }
-    
-    const result = await engine.go(goParams);
-    await engine.quit();
-    
-    // Convert side-to-move perspective to absolute White perspective
-    const isBlackToMove = fen.includes(' b ');
-    const multiplier = isBlackToMove ? -1 : 1;
-    
-    // 1. Map all valid info lines
-    const allPvs = result.info
-        .filter((info: any) => info.pv && info.score)
-        .map((info: any) => ({
-            cp: info.score.value !== undefined ? info.score.value * multiplier : 0,
-            mate: info.score.unit === 'mate' ? info.score.value * multiplier : null,
-            moves: info.pv
-        }));
-
-    // 2. Deduplicate: Keep only the deepest (latest) evaluation for each unique first move
-    const uniquePvs = new Map<string, any>();
-    for (const pv of allPvs) {
-        const firstMove = pv.moves.split(' ')[0];
-        uniquePvs.set(firstMove, pv); 
-    }
-
-    // 3. Sort by perspective and limit strictly to the requested multiPv amount
-    return Array.from(uniquePvs.values())
-        .sort((a: any, b: any) => isBlackToMove ? getLegacyLocalCp(a) - getLegacyLocalCp(b) : getLegacyLocalCp(b) - getLegacyLocalCp(a))
-        .slice(0, multiPv);
-}
-
-// Legacy local-engine adapter. Remote coherent snapshots use
-// verifyOrdinaryCpSnapshot directly.
-export function checkLegacyLocalPvTolerance(candidateLan: string, pvs: any[], bestCp: number, tolerance: number): 'VALID' | 'REJECTED' | 'NEED_DEEPER_SEARCH' {
-    if (!pvs || pvs.length === 0) return 'NEED_DEEPER_SEARCH';
-    
-    const matchedPv = pvs.find(pv => pv.moves.split(" ")[0] === candidateLan);
-    
-    if (matchedPv) {
-        const diff = Math.abs(getLegacyLocalCp(matchedPv) - bestCp);
-        return diff <= tolerance ? 'VALID' : 'REJECTED';
-    } else {
-        const worstPv = pvs[pvs.length - 1]; 
-        const worstDiff = Math.abs(getLegacyLocalCp(worstPv) - bestCp);
-        
-        // If the worst move in our API limit is already worse than tolerance, 
-        // the candidate is mathematically guaranteed to fail.
-        if (worstDiff > tolerance) {
-            return 'REJECTED';
+export function verifyLocalOrdinaryCp(
+    bestCp: number,
+    candidateCp: number,
+    toleranceCp: number
+): Exclude<PvDecision, 'INCONCLUSIVE'> {
+    for (const [name, value] of [['bestCp', bestCp], ['candidateCp', candidateCp], ['toleranceCp', toleranceCp]] as const) {
+        if (typeof value !== 'number' || !Number.isFinite(value)) {
+            throw new Error(`Invalid local ordinary verifier ${name}`);
         }
-        return 'NEED_DEEPER_SEARCH';
     }
+    if (toleranceCp < 0) throw new Error('Invalid local ordinary verifier toleranceCp');
+
+    const candidateLoss = candidateCp - bestCp;
+    if (candidateLoss < 0) {
+        throw new Error('Invalid local ordinary evidence: candidate evaluates better than baseline best');
+    }
+    return candidateLoss <= toleranceCp ? 'ACCEPT' : 'REJECT';
 }

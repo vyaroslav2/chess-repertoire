@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { runLocalStockfish, getLegacyLocalCp } from '../src/lib/core/verifier';
+import { runLocalStockfish } from '../src/lib/core/local-engine';
 import { isLocked, createLockfile, removeLockfile } from '../src/lib/core/lockfile';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -87,8 +87,11 @@ async function main() {
             }
 
             // 4. Subtract the CPs. If difference > 150 CP, flag it.
-            const bestCp = getLegacyLocalCp(bestDeepMove);
-            const fastCp = getLegacyLocalCp(fastPickEval);
+            if (bestDeepMove.cp === null || fastPickEval.cp === null) {
+                throw new Error('Tactical sweeper does not compare mate results as centipawns');
+            }
+            const bestCp = bestDeepMove.cp;
+            const fastCp = fastPickEval.cp;
             
             // Because the CP is always from White's perspective.
             // Since Black wants a lower CP, if the Fast Move (played by Black) is worse, its CP will be HIGHER.

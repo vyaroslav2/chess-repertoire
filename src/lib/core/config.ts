@@ -254,6 +254,9 @@ export function validateConfig(config: Config) {
         if (!Number.isInteger(engineSetting?.depth) || engineSetting.depth < 1) throw new Error(`Invalid engine.${key}.depth`);
         if (!Number.isInteger(engineSetting?.multiPv) || engineSetting.multiPv < 1) throw new Error(`Invalid engine.${key}.multiPv`);
     }
+    if (config.engine.deepVerification.multiPv !== 1) {
+        throw new Error("Invalid engine.deepVerification.multiPv: trusted Local Deep requires MultiPV 1");
+    }
 
     // Validate API settings
     if (!Number.isInteger(config.api?.lichessCloudEval?.multiPv) || config.api.lichessCloudEval.multiPv < 1) throw new Error("Invalid api.lichessCloudEval.multiPv");
@@ -296,6 +299,15 @@ export function computeRemoteEngineEvaluationProfile(source: RemoteEngineProfile
         ? { source, multiPv: config.api.lichessCloudEval.multiPv }
         : { source, queryMode: config.api.chessDb.queryMode };
     return createHash('sha256').update(canonicalStringify(requestShape)).digest('hex');
+}
+
+export function computeLocalEngineEvaluationProfile(config: Config): string {
+    const searchShape = {
+        role: "deep-local",
+        depth: config.engine.deepVerification.depth,
+        multiPv: config.engine.deepVerification.multiPv
+    };
+    return createHash('sha256').update(canonicalStringify(searchShape)).digest('hex');
 }
 
 export function createRuntimeConfig(configSource: Config) {
