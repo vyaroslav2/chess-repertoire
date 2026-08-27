@@ -242,8 +242,7 @@ test('Slice 5 Human Cache Rewrite Tests', async (t) => {
       }
 
       if (url.toString().includes("speeds=") && url.toString().includes("ELITE")) {
-        // Return 500
-        return new Response("Error", { status: 500 });
+        return new Response("Error", { status: 404 });
       }
 
       return new Response(JSON.stringify({ moves: [] }));
@@ -279,10 +278,10 @@ test('Slice 5 Human Cache Rewrite Tests', async (t) => {
     assert.strictEqual(mRes.status, "missing", "Marker not written on parse failure");
 
     // 17. failed required source throws rather than becoming empty
-    // ELITE mock returns 500. Let's mock MASTERS to be valid.
+    // ELITE mock returns a non-retryable failure. Let's mock MASTERS to be valid.
     global.fetch = async (url: any) => {
       if (url.toString().includes("masters")) return new Response(JSON.stringify({ moves: [] }));
-      if (url.toString().includes("ratings=2500")) return new Response("Error", { status: 500 }); // Elite
+      if (url.toString().includes("ratings=2500")) return new Response("Error", { status: 404 }); // Elite
       return new Response(JSON.stringify({ moves: [] }));
     };
 

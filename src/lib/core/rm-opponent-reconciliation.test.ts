@@ -431,6 +431,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
       ]) as any,
       responseEvaluator: responseEvaluator as any,
       ensurePositionCache: (async () => ({})) as any,
+      ensureNodeWikibooks: (async () => ({ status: "CACHED", text: null })) as any,
       wait: async () => undefined
     });
 
@@ -526,6 +527,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
       fetchDatabases: mockDatabases,
       responseEvaluator: mockEvaluator as any,
       ensurePositionCache: (async () => ({})) as any,
+      ensureNodeWikibooks: (async () => ({ status: "CACHED", text: null })) as any,
       wait: async () => undefined
     });
 
@@ -599,6 +601,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
       fetchDatabases: mockDatabases,
       responseEvaluator: mockEvaluator as any,
       ensurePositionCache: (async () => ({})) as any,
+      ensureNodeWikibooks: (async () => ({ status: "CACHED", text: null })) as any,
       wait: async () => undefined
     });
 

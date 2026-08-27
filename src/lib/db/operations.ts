@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { Chess } from "chess.js";
-import { fetchWikibooksSnippet } from "../api/wikibooks";
+import { fetchWikibooksSnippet, type WikibooksResult } from "../api/wikibooks";
 import { parseFullFen, positionKeyFromFen } from "../core/fen";
 import { isValidUciMove } from "../core/uci";
 
@@ -17,39 +17,70 @@ export async function getOrCreatePosition(rawFen: string) {
   });
 }
 
-export async function getOrCreatePositionCache(fen: string, openingMetadata?: { eco: string, name: string }, history?: string[]) {
+export async function getOrCreatePositionCache(fen: string, openingMetadata?: { eco: string, name: string }, _legacyHistory?: string[]) {
   const normFen = positionKeyFromFen(parseFullFen(fen));
   let pos = await prisma.positionCache.findUnique({ where: { fen: normFen } });
   
   if (!pos) { 
-    let wikiText = null;
-    if (history && history.length > 0) {
-       wikiText = await fetchWikibooksSnippet(history);
-    }
     pos = await prisma.positionCache.create({ 
       data: { 
         fen: normFen,
         eco: openingMetadata?.eco || null,
-        openingName: openingMetadata?.name || null,
-        wikiText: wikiText
+        openingName: openingMetadata?.name || null
       } 
     }); 
-  } else if (openingMetadata && openingMetadata.name && !pos.openingName) {
-    let wikiText = pos.wikiText;
-    if (!wikiText && history && history.length > 0) {
-       wikiText = await fetchWikibooksSnippet(history);
-    }
-    
+  } else if (openingMetadata && openingMetadata.name) {
     pos = await prisma.positionCache.update({
       where: { fen: normFen },
       data: {
         eco: openingMetadata.eco,
-        openingName: openingMetadata.name,
-        wikiText: wikiText
+        openingName: openingMetadata.name
       }
     });
   }
   return pos;
+}
+
+type WikibooksFetcher = (history: string[]) => Promise<WikibooksResult>;
+
+function validateRepertoireNodeWikibooksState(node: { wikibooksChecked: boolean; wikiText: string | null }): void {
+  if (!node.wikibooksChecked && node.wikiText !== null) {
+    throw new Error("Invalid RepertoireNode Wikibooks state: unchecked node cannot contain text");
+  }
+}
+
+export async function ensureRepertoireNodeWikibooks(
+  nodeId: string,
+  fetcher: WikibooksFetcher = fetchWikibooksSnippet
+) {
+  const node = await prisma.repertoireNode.findUnique({ where: { id: nodeId } });
+  if (!node) throw new Error(`Cannot enrich missing RepertoireNode ${nodeId}`);
+  validateRepertoireNodeWikibooksState(node);
+  if (node.wikibooksChecked) {
+    return { status: "CACHED" as const, text: node.wikiText };
+  }
+  if (node.pgn.trim() !== node.pgn) {
+    throw new Error("Cannot enrich RepertoireNode with non-canonical PGN history");
+  }
+
+  const result = await fetcher(node.pgn === "" ? [] : node.pgn.split(/\s+/));
+  if (result.status === "TECHNICAL_FAILURE") return result;
+
+  const wikiText = result.status === "DESCRIPTION" ? result.text : null;
+  if (wikiText !== null && (wikiText.trim() !== wikiText || wikiText.length === 0)) {
+    throw new Error("Invalid Wikibooks description persistence result");
+  }
+  const update = await prisma.repertoireNode.updateMany({
+    where: { id: node.id, wikibooksChecked: false, wikiText: null },
+    data: { wikibooksChecked: true, wikiText }
+  });
+  if (update.count !== 1) {
+    const current = await prisma.repertoireNode.findUnique({ where: { id: node.id } });
+    if (!current) throw new Error(`RepertoireNode ${node.id} disappeared during Wikibooks persistence`);
+    validateRepertoireNodeWikibooksState(current);
+    if (!current.wikibooksChecked) throw new Error("RepertoireNode Wikibooks state changed concurrently");
+  }
+  return result;
 }
 
 export type ExplorerMoveRow = {

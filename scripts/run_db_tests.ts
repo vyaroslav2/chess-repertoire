@@ -31,6 +31,7 @@ function main() {
         }
     } else {
         execSync('npx tsx --test src/lib/core/db.test.ts', { env: testEnv, stdio: 'inherit' });
+        execSync('npx tsx --test src/lib/core/wikibooks-cache.test.ts', { env: testEnv, stdio: 'inherit' });
         execSync('npx tsx --test src/lib/core/human-cache.test.ts', { env: testEnv, stdio: 'inherit' });
         execSync('npx tsx --test src/lib/api/retry.test.ts', { env: testEnv, stdio: 'inherit' });
         execSync('npx tsx --test src/lib/core/remote-engine-cache.test.ts', { env: testEnv, stdio: 'inherit' });

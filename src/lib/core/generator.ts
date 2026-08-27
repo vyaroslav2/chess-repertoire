@@ -1,5 +1,5 @@
 import { Chess } from "chess.js";
-import { prisma, getOrCreatePositionCache, getRepertoireNode, createRepertoireNode, createResponseMove, getOrCreateHumanDataSnapshot } from "../db/operations";
+import { prisma, getOrCreatePositionCache, getRepertoireNode, createRepertoireNode, createResponseMove, getOrCreateHumanDataSnapshot, ensureRepertoireNodeWikibooks } from "../db/operations";
 import { parseFullFen } from "./fen";
 import { fetchAllDatabases } from "../api/lichess";
 import { defaultConfig, computeExplorerRequestProfile } from "../core/config";
@@ -21,8 +21,19 @@ export type GenerateRepertoireDependencies = {
   fetchDatabases?: typeof fetchAllDatabases;
   responseEvaluator?: ResponseEvaluator;
   ensurePositionCache?: typeof getOrCreatePositionCache;
+  ensureNodeWikibooks?: typeof ensureRepertoireNodeWikibooks;
   wait?: typeof delay;
 };
+
+export async function attemptCanonicalNodeWikibooks(
+  nodeId: string,
+  attemptedNodeIds: Set<string>,
+  ensureNodeWikibooks: typeof ensureRepertoireNodeWikibooks = ensureRepertoireNodeWikibooks
+) {
+  if (attemptedNodeIds.has(nodeId)) return { status: "SKIPPED_THIS_RUN" as const };
+  attemptedNodeIds.add(nodeId);
+  return ensureNodeWikibooks(nodeId);
+}
 
 export function historyFromCanonicalPgn(pgn: string): string[] {
   if (typeof pgn !== "string" || pgn.trim() !== pgn) {
@@ -186,6 +197,7 @@ export async function generateRepertoire(
 
   const fetchDatabases = dependencies.fetchDatabases ?? fetchAllDatabases;
   const ensurePositionCache = dependencies.ensurePositionCache ?? getOrCreatePositionCache;
+  const ensureNodeWikibooks = dependencies.ensureNodeWikibooks ?? ensureRepertoireNodeWikibooks;
   const wait = dependencies.wait ?? delay;
   let repertoire;
   if (dependencies.repertoireId) {
@@ -223,7 +235,10 @@ export async function generateRepertoire(
   
   const visitedPgns = new Set<string>();
   const reconciledResponseNodeIds = new Set<string>();
+  const wikibooksAttemptedNodeIds = new Set<string>();
   const pendingCanonicalContinuations: PendingCanonicalContinuations = new Map();
+
+  await attemptCanonicalNodeWikibooks(rootNode.id, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
   
   while (queue.length > 0) {
     const node = dequeueGeneratorQueueItem(queue, pendingCanonicalContinuations);
@@ -263,9 +278,10 @@ export async function generateRepertoire(
     if (canonicalSourceNode.fullFen !== node.fen || canonicalSourceNode.pgn !== pgnString) {
       throw new Error("Queued canonical source state no longer matches its node/history");
     }
+    await attemptCanonicalNodeWikibooks(canonicalSourceNode.id, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
 
     const [masters, elite, amateur] = await fetchDatabases(canonicalSourceNode.fullFen, snapshotId);
-    await ensurePositionCache(canonicalSourceNode.fullFen, masters.opening, node.history);
+    await ensurePositionCache(canonicalSourceNode.fullFen, masters.opening);
     
     const whiteCandidates = selectWhiteCandidates(
       node.currentMoveNumber,
@@ -284,13 +300,6 @@ export async function generateRepertoire(
         probability: candidate.probability
       }))
     });
-    for (const candidate of canonicalOpponentCandidates) {
-      await ensurePositionCache(
-        candidate.destinationFullFen,
-        undefined,
-        candidate.destinationPgn === "" ? [] : candidate.destinationPgn.split(" ")
-      );
-    }
     const expectedOpponentSource: ExpectedOpponentSource = {
       id: canonicalSourceNode.id,
       repertoireId: canonicalSourceNode.repertoireId,
@@ -353,6 +362,8 @@ export async function generateRepertoire(
       if (!posAfterWhiteNode || posAfterWhiteNode.repertoireId !== repertoire.id) {
         throw new Error("Reconciled OPPONENT destination disappeared or changed repertoire");
       }
+      await ensurePositionCache(posAfterWhiteNode.fullFen);
+      await attemptCanonicalNodeWikibooks(posAfterWhiteNode.id, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
       const effectiveCanonicalProb = reconciledOpponent.effectiveCumulativeProb;
 
       // A canonical transposition RESPONSE is reconciled once per generator pass.
@@ -414,8 +425,6 @@ export async function generateRepertoire(
       const selectedDestinationFen = canonicalSelection.selectedDestinationFullFen;
       const selectedHistory = [...canonicalSelection.canonicalHistory, canonicalSelection.selectedSan];
       const blackPgn = selectedHistory.join(" ");
-
-      await ensurePositionCache(selectedDestinationFen, undefined, selectedHistory);
 
       let resultingDestinationId: string;
       let resultingDestinationFen: string = selectedDestinationFen;
@@ -508,6 +517,9 @@ export async function generateRepertoire(
             }
           });
       }
+
+      await ensurePositionCache(resultingDestinationFen);
+      await attemptCanonicalNodeWikibooks(resultingDestinationId, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
 
       reconciledResponseNodeIds.add(posAfterWhiteNode.id);
       const continuationItem = buildCanonicalContinuationQueueItem({

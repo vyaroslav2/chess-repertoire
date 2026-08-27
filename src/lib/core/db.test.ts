@@ -127,15 +127,29 @@ test('Slice 3 Database Architecture Tests', async (t) => {
         assert.ok(posAfter); // Permanent position survives cache deletion
     });
 
-    await t.test('8. Position model contains no ECO/openingName/wikiText ownership', async () => {
+    await t.test('8. Wikibooks ownership is history-specific on RepertoireNode', async () => {
         const positionKeys = Object.keys(prisma.position.fields);
         assert.ok(!positionKeys.includes('eco'));
         assert.ok(!positionKeys.includes('openingName'));
         assert.ok(!positionKeys.includes('wikiText'));
-        // As a sanity check, these should be on PositionCache
         const cacheKeys = Object.keys(prisma.positionCache.fields);
         assert.ok(cacheKeys.includes('eco'));
         assert.ok(cacheKeys.includes('openingName'));
+        assert.ok(!cacheKeys.includes('wikiText'));
+        const nodeKeys = Object.keys(prisma.repertoireNode.fields);
+        assert.ok(nodeKeys.includes('wikibooksChecked'));
+        assert.ok(nodeKeys.includes('wikiText'));
+    });
+
+    await t.test('8a. later authoritative opening metadata replaces cached ECO and name', async () => {
+        const fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
+        const original = await getOrCreatePositionCache(fen, { eco: "A00", name: "Old opening metadata" });
+
+        const updated = await getOrCreatePositionCache(fen, { eco: "B00", name: "King's Pawn Opening" });
+
+        assert.strictEqual(updated.fen, original.fen);
+        assert.strictEqual(updated.eco, "B00");
+        assert.strictEqual(updated.openingName, "King's Pawn Opening");
     });
 
     await t.test('9. new Repertoire defaults to generationStatus = IDLE and completedConfigHash = null', async () => {

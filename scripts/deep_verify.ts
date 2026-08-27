@@ -4,7 +4,7 @@ import { applyApprovedDeepCorrection } from "../src/lib/core/rm-correction";
 import { prisma } from "../src/lib/db/operations";
 import * as readline from "readline/promises";
 
-export async function main(args = process.argv.slice(2), testPrompter?: () => Promise<boolean>) {
+export async function main(args = process.argv.slice(2), testPrompter?: () => Promise<boolean>, lockOwner = "deep-verify") {
   const repertoireId = args.find(a => !a.startsWith("--"));
   const autoApprove = args.includes("--approve");
 
@@ -12,7 +12,7 @@ export async function main(args = process.argv.slice(2), testPrompter?: () => Pr
 
   let lock: LockHandle | null = null;
   try {
-    lock = acquireLock();
+    lock = acquireLock(lockOwner);
     const result = await runDeepVerification(repertoireId);
 
     if (result.status === "COMPLETE") {

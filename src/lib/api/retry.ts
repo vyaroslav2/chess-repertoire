@@ -6,6 +6,13 @@ export const GlobalState = {
     lichessCloudEvals: false
 };
 
+export class UserRequestedStopError extends Error {
+  constructor(message = 'Generation was stopped at the user\'s request') {
+    super(message);
+    this.name = 'UserRequestedStopError';
+  }
+}
+
 export const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 let explorerRequestQueue = Promise.resolve();
@@ -37,7 +44,11 @@ export async function promptUser(query: string): Promise<string> {
   return answer;
 }
 
-export async function fetchWithRetry(url: string, retryAttempts: number, useToken = true, apiType: 'eval' | 'explorer' | 'chessdb' = 'explorer'): Promise<any> {
+type FetchRetryDependencies = {
+  prompt?: (query: string) => Promise<string>;
+};
+
+export async function fetchWithRetry(url: string, retryAttempts: number, useToken = true, apiType: 'eval' | 'explorer' | 'chessdb' = 'explorer', dependencies: FetchRetryDependencies = {}): Promise<any> {
   const headers: any = {};
   if (apiType !== 'chessdb') {
     headers['Accept'] = 'application/json';
@@ -45,6 +56,21 @@ export async function fetchWithRetry(url: string, retryAttempts: number, useToke
   
   if (useToken && process.env.LICHESS_API_TOKEN && apiType !== 'chessdb') {
       headers['Authorization'] = `Bearer ${process.env.LICHESS_API_TOKEN}`;
+  }
+
+  async function handleExhaustedRetries(reason: string): Promise<any> {
+    const isRequiredExplorer = apiType === 'explorer';
+    const cOption = apiType === 'eval' ? `, [c]=Fallback to ChessDB` : ``;
+    const options = isRequiredExplorer
+      ? `(Options: [Enter]=Retry, [s]=Stop)`
+      : `(Options: [Enter]=Retry, [n]=Deny/Skip${cOption}, [s]=Stop script)`;
+    const answer = await (dependencies.prompt ?? promptUser)(`\n[ACTION REQUIRED] ${reason} Switch VPN if needed and press Enter to retry. ${options}: `);
+    const choice = answer.toLowerCase().trim();
+
+    if (choice === 's') throw new UserRequestedStopError();
+    if (choice === 'c' && apiType === 'eval') return null;
+    if (choice === 'n' && !isRequiredExplorer) return null;
+    return fetchWithRetry(url, retryAttempts, useToken, apiType, dependencies);
   }
 
   for (let i = 0; i < retryAttempts; i++) {
@@ -61,19 +87,15 @@ export async function fetchWithRetry(url: string, retryAttempts: number, useToke
         }
 
         console.log(`\n[WARNING] Rate limit (429) on ${url}`);
-        const cOption = apiType === 'eval' ? `, [c]=Fallback to ChessDB` : ``;
-        const answer = await promptUser(`[ACTION REQUIRED] Auto-retries exhausted. Switch VPN and press Enter to retry. (Options: [Enter]=Retry, [n]=Deny/Skip${cOption}, [s]=Stop script): `);
-        const choice = answer.toLowerCase().trim();
-        
-        if (choice === 's') {
-            console.log("Stopping script.");
-            process.exit(0);
-        } else if (choice === 'c' && apiType === 'eval') {
-            return null; // Don't turn off GlobalState.lichessCloudEvals anymore
-        } else if (choice === 'n') {
-            return null;
+        return handleExhaustedRetries('Rate-limit retries exhausted.');
+      }
+      if (response.status >= 500 && response.status <= 599) {
+        console.log(`[WARNING] Temporary HTTP ${response.status} on ${url}.`);
+        if (i < retryAttempts - 1) {
+          await delay(defaultConfig.api.networkRetryDelayMs);
+          continue;
         }
-        return await fetchWithRetry(url, retryAttempts, useToken, apiType);
+        return handleExhaustedRetries(`HTTP ${response.status} retries exhausted.`);
       }
       if (!response.ok) {
         console.log(`Error ${response.status} on ${url}`);
@@ -84,21 +106,13 @@ export async function fetchWithRetry(url: string, retryAttempts: number, useToke
       }
       return await response.json();
     } catch (e: any) {
+      if (e instanceof UserRequestedStopError) {
+        throw e;
+      }
+
       console.log(`[WARNING] Network error fetching ${url}: ${e.message}`);
       if (i === retryAttempts - 1) {
-          const cOption = apiType === 'eval' ? `, [c]=Fallback to ChessDB` : ``;
-          const answer = await promptUser(`\n[ACTION REQUIRED] Network errors exhausted. Switch VPN and press Enter to retry. (Options: [Enter]=Retry, [n]=Deny/Skip${cOption}, [s]=Stop script): `);
-          const choice = answer.toLowerCase().trim();
-          
-          if (choice === 's') {
-              console.log("Stopping script.");
-              process.exit(0);
-          } else if (choice === 'c' && apiType === 'eval') {
-              return null; // Don't turn off GlobalState.lichessCloudEvals anymore
-          } else if (choice === 'n') {
-              return null;
-          }
-          return await fetchWithRetry(url, retryAttempts, useToken, apiType);
+          return handleExhaustedRetries('Network retries exhausted.');
       }
       await delay(defaultConfig.api.networkRetryDelayMs);
       continue;
