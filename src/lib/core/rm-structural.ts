@@ -31,6 +31,78 @@ export interface ReplaceResponseBranchInput {
   cumulativeProb: number;
 }
 
+export interface OwnedBranchRoot {
+  edgeId: string;
+  nodeId: string;
+  parentPgn: string;
+  san: string;
+}
+
+export async function collectOwnedBranchDeletion(input: {
+  tx: Prisma.TransactionClient;
+  repertoireId: string;
+  roots: OwnedBranchRoot[];
+}) {
+  const nodesToDelete = new Set<string>();
+  const movesToDelete = new Set<string>();
+  const queue = [...input.roots]
+    .sort((a, b) => a.edgeId.localeCompare(b.edgeId))
+    .map(root => ({ nodeId: root.nodeId, parentPgn: root.parentPgn, san: root.san }));
+
+  for (const root of input.roots) movesToDelete.add(root.edgeId);
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (nodesToDelete.has(current.nodeId)) continue;
+    const currentNode = await input.tx.repertoireNode.findUnique({ where: { id: current.nodeId } });
+    if (!currentNode) throw new Error("Stale repertoire branch: destination node disappeared");
+    if (currentNode.repertoireId !== input.repertoireId) throw new Error("Cross-repertoire node detected");
+    const expectedPgn = `${current.parentPgn ? `${current.parentPgn} ` : ""}${current.san}`;
+    if (currentNode.pgn !== expectedPgn) continue;
+
+    nodesToDelete.add(current.nodeId);
+    const outgoingEdges = await input.tx.repertoireMove.findMany({
+      where: { fromNodeId: current.nodeId },
+      orderBy: { id: "asc" }
+    });
+    for (const edge of outgoingEdges) {
+      if (edge.repertoireId !== input.repertoireId) throw new Error("Cross-repertoire edge detected");
+      movesToDelete.add(edge.id);
+      queue.push({ nodeId: edge.toNodeId, parentPgn: currentNode.pgn, san: edge.san });
+    }
+  }
+
+  return { nodesToDelete, movesToDelete };
+}
+
+export async function deleteOwnedBranches(input: {
+  tx: Prisma.TransactionClient;
+  repertoireId: string;
+  roots: OwnedBranchRoot[];
+}) {
+  const collected = await collectOwnedBranchDeletion(input);
+  const invalidatedExternalSourceNodeIds = new Set<string>();
+
+  if (collected.nodesToDelete.size > 0) {
+    const incomingEdges = await input.tx.repertoireMove.findMany({
+      where: { toNodeId: { in: [...collected.nodesToDelete] } }
+    });
+    for (const edge of incomingEdges) {
+      if (!collected.nodesToDelete.has(edge.fromNodeId)) {
+        invalidatedExternalSourceNodeIds.add(edge.fromNodeId);
+      }
+    }
+  }
+
+  if (collected.movesToDelete.size > 0) {
+    await input.tx.repertoireMove.deleteMany({ where: { id: { in: [...collected.movesToDelete] } } });
+  }
+  if (collected.nodesToDelete.size > 0) {
+    await input.tx.repertoireNode.deleteMany({ where: { id: { in: [...collected.nodesToDelete] } } });
+  }
+  return { ...collected, invalidatedExternalSourceNodeIds };
+}
+
 export async function replaceResponseBranch(input: ReplaceResponseBranchInput) {
   const { tx, repertoireId, oldResponse } = input;
   validateResponsePersistence({
@@ -83,31 +155,16 @@ export async function replaceResponseBranch(input: ReplaceResponseBranchInput) {
     }
   }
 
-  const nodesToDelete = new Set<string>();
-  const movesToDelete = new Set<string>();
-  const queue: Array<{ nodeId: string; parentPgn: string; san: string }> = [
-    { nodeId: oldResponse.toNodeId, parentPgn: oldResponse.fromNode.pgn, san: oldResponse.san }
-  ];
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    if (nodesToDelete.has(current.nodeId)) continue;
-    const currentNode = await tx.repertoireNode.findUnique({ where: { id: current.nodeId } });
-    if (!currentNode) throw new Error("Stale RESPONSE branch: destination node disappeared");
-    if (currentNode.repertoireId !== repertoireId) throw new Error("Cross-repertoire node detected");
-    const expectedPgn = `${current.parentPgn ? `${current.parentPgn} ` : ""}${current.san}`;
-    if (currentNode.pgn !== expectedPgn) continue;
-    nodesToDelete.add(current.nodeId);
-    const outgoingEdges = await tx.repertoireMove.findMany({ where: { fromNodeId: current.nodeId } });
-    for (const edge of outgoingEdges) {
-      if (edge.repertoireId !== repertoireId) throw new Error("Cross-repertoire edge detected");
-      movesToDelete.add(edge.id);
-      queue.push({ nodeId: edge.toNodeId, parentPgn: currentNode.pgn, san: edge.san });
-    }
-  }
-
-  movesToDelete.add(oldResponse.id);
-  await tx.repertoireMove.deleteMany({ where: { id: { in: [...movesToDelete] } } });
-  await tx.repertoireNode.deleteMany({ where: { id: { in: [...nodesToDelete] } } });
+  const { nodesToDelete, movesToDelete, invalidatedExternalSourceNodeIds } = await deleteOwnedBranches({
+    tx,
+    repertoireId,
+    roots: [{
+      edgeId: oldResponse.id,
+      nodeId: oldResponse.toNodeId,
+      parentPgn: oldResponse.fromNode.pgn,
+      san: oldResponse.san
+    }]
+  });
   await tx.position.upsert({ where: { positionKey: posKey }, update: {}, create: { positionKey: posKey } });
 
   const newPgn = `${oldResponse.fromNode.pgn ? `${oldResponse.fromNode.pgn} ` : ""}${chessMove.san}`;
@@ -156,6 +213,7 @@ export async function replaceResponseBranch(input: ReplaceResponseBranchInput) {
     removedResponseId: oldResponse.id,
     removedNodeCount: nodesToDelete.size,
     removedMoveCount: movesToDelete.size,
+    invalidatedExternalSourceNodeIds,
     createdResponseId: newResponse.id,
     createdDestinationNodeId: newDestinationNode.id,
     createdDestinationFullFen: newDestinationNode.fullFen,

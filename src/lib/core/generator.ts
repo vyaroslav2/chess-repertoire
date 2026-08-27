@@ -1,14 +1,28 @@
 import { Chess } from "chess.js";
-import { prisma, getOrCreatePositionCache, getRepertoireNode, createRepertoireNode, createRepertoireMove, createResponseMove, getOrCreateHumanDataSnapshot } from "../db/operations";
-import { parseFullFen, positionKeyFromFen } from "./fen";
+import { prisma, getOrCreatePositionCache, getRepertoireNode, createRepertoireNode, createResponseMove, getOrCreateHumanDataSnapshot } from "../db/operations";
+import { parseFullFen } from "./fen";
 import { fetchAllDatabases } from "../api/lichess";
 import { defaultConfig, computeExplorerRequestProfile } from "../core/config";
 import { selectWhiteCandidates, evaluateBlackMove } from "./evaluator";
 import { reconcileExistingResponse } from "./rm-reconciliation";
 import { delay } from "../api/retry";
 import { createEmptyCard } from "ts-fsrs";
+import {
+  canonicalizeOpponentCandidates,
+  readExpectedOpponentEdges,
+  reconcileOpponentBranches,
+  type ExpectedOpponentSource
+} from "./rm-opponent-reconciliation";
 
 type ResponseEvaluator = typeof evaluateBlackMove;
+
+export type GenerateRepertoireDependencies = {
+  repertoireId?: string;
+  fetchDatabases?: typeof fetchAllDatabases;
+  responseEvaluator?: ResponseEvaluator;
+  ensurePositionCache?: typeof getOrCreatePositionCache;
+  wait?: typeof delay;
+};
 
 export function historyFromCanonicalPgn(pgn: string): string[] {
   if (typeof pgn !== "string" || pgn.trim() !== pgn) {
@@ -115,6 +129,25 @@ export function dequeueGeneratorQueueItem(
   return item;
 }
 
+export function removeDeletedCanonicalQueueWork(input: {
+  queue: GeneratorQueueItem[];
+  pendingByResponseSource: PendingCanonicalContinuations;
+  deletedNodeIds: Iterable<string>;
+}) {
+  const deleted = new Set(input.deletedNodeIds);
+  let removedCount = 0;
+  for (let index = input.queue.length - 1; index >= 0; index--) {
+    const item = input.queue[index];
+    if (!deleted.has(item.nodeId) && (!item.responseSourceNodeId || !deleted.has(item.responseSourceNodeId))) continue;
+    input.queue.splice(index, 1);
+    removedCount++;
+    if (item.responseSourceNodeId && input.pendingByResponseSource.get(item.responseSourceNodeId) === item) {
+      input.pendingByResponseSource.delete(item.responseSourceNodeId);
+    }
+  }
+  return removedCount;
+}
+
 export async function persistCanonicalMaxCumulativeProbability(input: {
   node: { id: string; cumulativeProb: number };
   incomingPathProb: number;
@@ -134,7 +167,11 @@ export async function persistCanonicalMaxCumulativeProbability(input: {
   return currentNode;
 }
 
-export async function generateRepertoire(startFen: string, maxDepth: number) {
+export async function generateRepertoire(
+  startFen: string,
+  maxDepth: number,
+  dependencies: GenerateRepertoireDependencies = {}
+) {
   console.log("Initializing BFS Tree Generator...");
   
   const startTime = Date.now();
@@ -147,18 +184,26 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
   let totalMissingBlackMoves = 0;
   let totalNaEvals = 0;
 
-  let user = await prisma.user.findUnique({ where: { username: "Yaroslav" } });
-  if (!user) { user = await prisma.user.create({ data: { username: "Yaroslav" } }); }
-
-  let repertoire = await prisma.repertoire.findFirst({ where: { title: "Black Universal Repertoire", userId: user.id } });
-  if (!repertoire) {
-    repertoire = await prisma.repertoire.create({
-      data: { title: "Black Universal Repertoire", color: "black", userId: user.id }
-    });
+  const fetchDatabases = dependencies.fetchDatabases ?? fetchAllDatabases;
+  const ensurePositionCache = dependencies.ensurePositionCache ?? getOrCreatePositionCache;
+  const wait = dependencies.wait ?? delay;
+  let repertoire;
+  if (dependencies.repertoireId) {
+    repertoire = await prisma.repertoire.findUnique({ where: { id: dependencies.repertoireId } });
+    if (!repertoire) throw new Error(`Requested repertoire ${dependencies.repertoireId} does not exist`);
+  } else {
+    let user = await prisma.user.findUnique({ where: { username: "Yaroslav" } });
+    if (!user) { user = await prisma.user.create({ data: { username: "Yaroslav" } }); }
+    repertoire = await prisma.repertoire.findFirst({ where: { title: "Black Universal Repertoire", userId: user.id } });
+    if (!repertoire) {
+      repertoire = await prisma.repertoire.create({
+        data: { title: "Black Universal Repertoire", color: "black", userId: user.id }
+      });
+    }
   }
 
   // Ensure root node exists
-  await getOrCreatePositionCache(startFen);
+  await ensurePositionCache(startFen);
   let rootNode = await getRepertoireNode(repertoire.id, "");
   if (!rootNode) {
     rootNode = await createRepertoireNode(repertoire.id, startFen, "", 1.0);
@@ -211,8 +256,16 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
       totalBranchesAborted++;
       continue;
     }
-    const [masters, elite, amateur] = await fetchAllDatabases(node.fen, snapshotId);
-    await getOrCreatePositionCache(node.fen, masters.opening, node.history);
+    const canonicalSourceNode = await prisma.repertoireNode.findUnique({ where: { id: node.nodeId } });
+    if (!canonicalSourceNode || canonicalSourceNode.repertoireId !== repertoire.id) {
+      throw new Error("Queued canonical source node disappeared or changed repertoire");
+    }
+    if (canonicalSourceNode.fullFen !== node.fen || canonicalSourceNode.pgn !== pgnString) {
+      throw new Error("Queued canonical source state no longer matches its node/history");
+    }
+
+    const [masters, elite, amateur] = await fetchDatabases(canonicalSourceNode.fullFen, snapshotId);
+    await ensurePositionCache(canonicalSourceNode.fullFen, masters.opening, node.history);
     
     const whiteCandidates = selectWhiteCandidates(
       node.currentMoveNumber,
@@ -220,6 +273,60 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
       elite.moves || [],
       amateur.moves || [],
       amateur.totalGames || 0
+    );
+
+    const canonicalOpponentCandidates = canonicalizeOpponentCandidates({
+      sourceFullFen: canonicalSourceNode.fullFen,
+      sourcePgn: canonicalSourceNode.pgn,
+      sourceCumulativeProb: canonicalSourceNode.cumulativeProb,
+      candidates: whiteCandidates.map(candidate => ({
+        san: candidate.san,
+        probability: candidate.probability
+      }))
+    });
+    for (const candidate of canonicalOpponentCandidates) {
+      await ensurePositionCache(
+        candidate.destinationFullFen,
+        undefined,
+        candidate.destinationPgn === "" ? [] : candidate.destinationPgn.split(" ")
+      );
+    }
+    const expectedOpponentSource: ExpectedOpponentSource = {
+      id: canonicalSourceNode.id,
+      repertoireId: canonicalSourceNode.repertoireId,
+      fullFen: canonicalSourceNode.fullFen,
+      positionKey: canonicalSourceNode.positionKey,
+      pgn: canonicalSourceNode.pgn,
+      cumulativeProb: canonicalSourceNode.cumulativeProb
+    };
+    const expectedStoredOpponentEdges = await readExpectedOpponentEdges(canonicalSourceNode.id);
+    const opponentReconciliation = await reconcileOpponentBranches({
+      repertoireId: repertoire.id,
+      expectedSource: expectedOpponentSource,
+      expectedStoredEdges: expectedStoredOpponentEdges,
+      recomputedCandidates: canonicalOpponentCandidates
+    });
+    removeDeletedCanonicalQueueWork({
+      queue,
+      pendingByResponseSource: pendingCanonicalContinuations,
+      deletedNodeIds: opponentReconciliation.removedNodeIds
+    });
+    for (const invalidatedId of opponentReconciliation.invalidatedExternalSourceNodeIds) {
+      if (invalidatedId === node.nodeId) continue;
+      const invalidNode = await prisma.repertoireNode.findUnique({ where: { id: invalidatedId } });
+      if (invalidNode) {
+        visitedPgns.delete(invalidNode.pgn);
+        queue.push({
+          nodeId: invalidNode.id,
+          fen: invalidNode.fullFen,
+          currentMoveNumber: fullmoveNumberFromFullFen(invalidNode.fullFen),
+          cumulativeProb: invalidNode.cumulativeProb,
+          history: historyFromCanonicalPgn(invalidNode.pgn)
+        });
+      }
+    }
+    const reconciledOpponentByUci = new Map(
+      opponentReconciliation.branches.map(branch => [branch.uci, branch] as const)
     );
 
     if (whiteCandidates.length === 0) {
@@ -233,41 +340,20 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
     }
     totalWhiteMovesFound += whiteCandidates.length;
 
-    for (const whiteMove of whiteCandidates) {
+    for (let candidateIndex = 0; candidateIndex < whiteCandidates.length; candidateIndex++) {
+      const whiteMove = whiteCandidates[candidateIndex];
+      const canonicalWhiteMove = canonicalOpponentCandidates[candidateIndex];
+      const reconciledOpponent = reconciledOpponentByUci.get(canonicalWhiteMove.uci);
+      if (!reconciledOpponent) throw new Error(`Reconciled OPPONENT branch ${canonicalWhiteMove.uci} is missing`);
       console.log(`\nEvaluating White Move: ${whiteMove.san} (Reason: ${whiteMove.reason}, Prob: ${whiteMove.probability ? (whiteMove.probability*100).toFixed(1) : 0}%)`);
-      const tempChess = new Chess(node.fen);
-      tempChess.move(whiteMove.san);
-      const fenAfterWhite = tempChess.fen();
-      
-      const newHistory = [...node.history, whiteMove.san];
-      const newPgn = newHistory.join(" ");
-      
-      await getOrCreatePositionCache(fenAfterWhite, undefined, newHistory);
-      
-      const incomingPathProb = node.cumulativeProb * (whiteMove.probability || 1.0);
-      let posAfterWhiteNode = await prisma.repertoireNode.findFirst({
-          where: { repertoireId: repertoire.id, positionKey: positionKeyFromFen(parseFullFen(fenAfterWhite)) }
+      const newPgn = canonicalWhiteMove.destinationPgn;
+      const posAfterWhiteNode = await prisma.repertoireNode.findUnique({
+        where: { id: reconciledOpponent.destinationNodeId }
       });
-
-      if (!posAfterWhiteNode) {
-          posAfterWhiteNode = await createRepertoireNode(repertoire.id, fenAfterWhite, newPgn, incomingPathProb);
-      } else {
-          posAfterWhiteNode = await persistCanonicalMaxCumulativeProbability({
-              node: posAfterWhiteNode,
-              incomingPathProb
-          });
+      if (!posAfterWhiteNode || posAfterWhiteNode.repertoireId !== repertoire.id) {
+        throw new Error("Reconciled OPPONENT destination disappeared or changed repertoire");
       }
-      const effectiveCanonicalProb = posAfterWhiteNode.cumulativeProb;
-
-      await createRepertoireMove({
-          repertoireId: repertoire.id,
-          fromNodeId: node.nodeId,
-          toNodeId: posAfterWhiteNode.id,
-          san: whiteMove.san,
-          playerTurn: "OPPONENT",
-          prob: whiteMove.probability,
-          trueProbability: incomingPathProb
-      });
+      const effectiveCanonicalProb = reconciledOpponent.effectiveCumulativeProb;
 
       // A canonical transposition RESPONSE is reconciled once per generator pass.
       // A pre-existing stat alone is never treated as proof that it was reconciled.
@@ -301,7 +387,8 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
       const canonicalSelection = await evaluateCanonicalResponse({
           responseNode: posAfterWhiteNode,
           routePgn: newPgn,
-          snapshotId
+          snapshotId,
+          evaluator: dependencies.responseEvaluator
       });
       const algoResult = canonicalSelection.result;
       const selectedWeightedCount = algoResult.moveOrigin === "Human Move"
@@ -328,7 +415,7 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
       const selectedHistory = [...canonicalSelection.canonicalHistory, canonicalSelection.selectedSan];
       const blackPgn = selectedHistory.join(" ");
 
-      await getOrCreatePositionCache(selectedDestinationFen, undefined, selectedHistory);
+      await ensurePositionCache(selectedDestinationFen, undefined, selectedHistory);
 
       let resultingDestinationId: string;
       let resultingDestinationFen: string = selectedDestinationFen;
@@ -438,7 +525,7 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
           item: continuationItem
       });
 
-      await delay(100); // Shorter delay since we hit cache!
+      await wait(100); // Shorter delay since we hit cache!
     }
 
     // --- TEMPORARY DETAILED SUMMARY PER NODE ---
@@ -466,4 +553,12 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
   console.log(`Total N/A Evals (Null):   ${totalNaEvals}`);
   console.log("========================================================\n");
   console.log("Generation Complete!");
+  return {
+    totalPositionsProcessed,
+    totalWhiteMovesFound,
+    totalBlackMovesEvaluated,
+    totalSkippedMoves,
+    totalMissingWhiteMoves,
+    totalMissingBlackMoves
+  };
 }
