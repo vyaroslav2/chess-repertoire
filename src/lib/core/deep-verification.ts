@@ -23,6 +23,9 @@ export type ProposedDeepCorrection = {
   moveOrigin: "Human Move" | "Engine Move";
   deepVerified: true;
   localEvaluationProfile: string;
+  baselineUci: string;
+  baselineCp: number | null;
+  baselineMate: number | null;
 };
 
 export type DeepVerificationResult =
@@ -30,7 +33,7 @@ export type DeepVerificationResult =
   | {
       status: "FAILED_RESPONSE";
       verifiedCount: number;
-      failed: { responseId: string; uci: string; san: string; fullFen: string; cp: number | null; mate: number | null; source: ResponseEvaluationSource };
+      failed: { responseId: string; uci: string; san: string; fullFen: string; cp: number | null; mate: number | null; source: ResponseEvaluationSource; fromNodeId: string; toNodeId: string; };
       proposal: ProposedDeepCorrection;
     };
 
@@ -59,7 +62,8 @@ function proposalFromLocal(result: LocalCandidateVerification, moveOrigin: "Huma
   return {
     uci: evaluation.uci, san: evaluation.san, cp: evaluation.cp, mate: evaluation.mate,
     source: "Local Deep Stockfish", selectionMethod: "Corrected after Deep Verification",
-    moveOrigin, deepVerified: true, localEvaluationProfile: result.evaluationProfile
+    moveOrigin, deepVerified: true, localEvaluationProfile: result.evaluationProfile,
+    baselineUci: result.baseline.uci, baselineCp: result.baseline.cp, baselineMate: result.baseline.mate
   };
 }
 
@@ -124,7 +128,7 @@ export async function runDeepVerification(
     proposal ??= proposalFromLocal(local, "Engine Move");
     return {
       status: "FAILED_RESPONSE", verifiedCount,
-      failed: { responseId: response.id, uci: response.uci!, san: response.san, fullFen, cp: response.cp, mate: response.mate, source: response.source as ResponseEvaluationSource },
+      failed: { responseId: response.id, uci: response.uci!, san: response.san, fullFen, cp: response.cp, mate: response.mate, source: response.source as ResponseEvaluationSource, fromNodeId: response.fromNodeId, toNodeId: response.toNodeId },
       proposal
     };
   }
