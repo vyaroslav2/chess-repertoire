@@ -62,6 +62,10 @@ test('Slice 12 B4 Local Deep integration', async (t) => {
       assert.equal(result.selectedMate, null);
       assert.equal(result.evalSource, 'Local Deep Stockfish');
       assert.equal(result.deepVerified, true);
+      assert.equal(result.selectedUci, 'b8d7');
+      assert.equal(result.selectionMethod, 'Ordinary API');
+      assert.equal(result.moveOrigin, 'Human Move');
+      assert.ok(result.localEvaluationProfile);
       assert.equal(typeof result.localEvaluationProfile, 'string');
       assert.deepEqual(requested, [undefined, 'b8d7']);
     } finally {
@@ -126,6 +130,9 @@ test('Slice 12 B4 Local Deep integration', async (t) => {
       assert.equal(result.selectedEngineCp, -25);
       assert.equal(result.evalSource, 'Local Deep Stockfish');
       assert.equal(result.deepVerified, true);
+      assert.equal(result.selectionMethod, 'Local Engine Fallback');
+      assert.equal(result.moveOrigin, 'Engine Move');
+      assert.ok(result.localEvaluationProfile);
       assert.equal(calls, 1);
     } finally {
       await cleanup(state.user.id, state.repertoire.id);
@@ -170,6 +177,8 @@ test('Slice 12 B4 Local Deep integration', async (t) => {
       assert.equal(result.selectedEngineCp, 42);
       assert.equal(result.evalSource, 'Local Deep Stockfish');
       assert.equal(result.deepVerified, false);
+      assert.equal(result.selectionMethod, 'Hardcoded Opening');
+      assert.equal(result.moveOrigin, 'Hardcoded Move');
       assert.deepEqual(requested, ['c7c6']);
 
       const second = await setupPosition(e4Fen, []);

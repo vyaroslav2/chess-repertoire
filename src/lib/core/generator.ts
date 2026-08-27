@@ -1,5 +1,5 @@
 import { Chess } from "chess.js";
-import { prisma, getOrCreatePositionCache, getRepertoireNode, createRepertoireNode, createRepertoireMove, getOrCreateHumanDataSnapshot } from "../db/operations";
+import { prisma, getOrCreatePositionCache, getRepertoireNode, createRepertoireNode, createRepertoireMove, createResponseMove, getOrCreateHumanDataSnapshot } from "../db/operations";
 import { parseFullFen, positionKeyFromFen } from "./fen";
 import { fetchAllDatabases } from "../api/lichess";
 import { defaultConfig, computeExplorerRequestProfile } from "../core/config";
@@ -168,6 +168,11 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
       if (existingStat) {
         const dbBlackMove = await prisma.repertoireMove.findUnique({ where: { id: existingStat.targetMoveId } });
         if (dbBlackMove) {
+          if (!dbBlackMove.uci || !dbBlackMove.source || !dbBlackMove.selectionMethod || !dbBlackMove.moveOrigin ||
+              !((typeof dbBlackMove.cp === "number" && dbBlackMove.mate === null) || (dbBlackMove.cp === null && typeof dbBlackMove.mate === "number" && dbBlackMove.mate !== 0)) ||
+              (dbBlackMove.deepVerified && !dbBlackMove.localEvaluationProfile)) {
+            throw new Error(`Stored RESPONSE ${dbBlackMove.id} is legacy/incomplete and cannot be reused`);
+          }
           console.log(`[SKIPPED API] Already generated in DB! Black responds with: ${dbBlackMove.san}`);
           
           tempChess.move(dbBlackMove.san);
@@ -189,26 +194,20 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
       const algoResult = await evaluateBlackMove(fenAfterWhite, tempChess, node.currentMoveNumber, newHistory, snapshotId);
 
 
-      if (!algoResult.selectedMoveSan) {
-        console.log(`[ALERT - ERROR] No valid Black move found after ${newPgn}. Stopping branch.`);
-        totalMissingBlackMoves++;
-        continue;
-      }
-      
       totalBlackMovesEvaluated++;
-      if (algoResult.selectedEngineCp === null) {
+      if (algoResult.cp === null) {
           totalNaEvals++;
       }
 
       let scoreStr = "N/A";
       let volStr = "0";
       if (algoResult.selectedStats) {
-          scoreStr = (algoResult.selectedStats.score * 100).toFixed(1) + "%";
-          volStr = algoResult.selectedStats.weightedCount.toString();
+          scoreStr = (algoResult.selectedStats.blackScore * 100).toFixed(1) + "%";
+          volStr = algoResult.selectedStats.weightedGames.toString();
       }
 
-      console.log(`Black responds with: ${algoResult.selectedMoveSan} -> Score: ${scoreStr} | Weighted Vol: ${volStr} | ${algoResult.evalSource} Eval: ${algoResult.selectedEngineCp !== null ? (algoResult.selectedEngineCp / 100).toFixed(2) : (algoResult.selectedMate !== null ? 'M' + Math.abs(algoResult.selectedMate) : "N/A")}`);
-      let explanation = `Score: ${scoreStr} | Weighted Vol: ${volStr} | Eval: ${algoResult.selectedEngineCp !== null ? (algoResult.selectedEngineCp/100).toFixed(2) : (algoResult.selectedMate !== null ? 'M' + Math.abs(algoResult.selectedMate) : "N/A")}`;
+      console.log(`Black responds with: ${algoResult.selectedMoveSan} -> Score: ${scoreStr} | Weighted Vol: ${volStr} | ${algoResult.source} Eval: ${algoResult.cp !== null ? (algoResult.cp / 100).toFixed(2) : 'M' + Math.abs(algoResult.mate!)}`);
+      const explanation = `Score: ${scoreStr} | Weighted Vol: ${volStr} | Eval: ${algoResult.cp !== null ? (algoResult.cp/100).toFixed(2) : 'M' + Math.abs(algoResult.mate!)}`;
 
       tempChess.move(algoResult.selectedMoveSan);
       const fenAfterBlack = tempChess.fen();
@@ -227,16 +226,19 @@ export async function generateRepertoire(startFen: string, maxDepth: number) {
           });
       }
 
-      const dbBlackMove = await createRepertoireMove({
-          repertoireId: repertoire.id,
+      const dbBlackMove = await createResponseMove({
           fromNodeId: posAfterWhiteNode.id,
           toNodeId: posAfterBlackNode.id,
+          uci: algoResult.selectedUci,
           san: algoResult.selectedMoveSan,
-          playerTurn: "RESPONSE",
-          lichessCp: typeof algoResult.lichessCp === 'number' ? algoResult.lichessCp / 100 : undefined,
-          chessdbCp: typeof algoResult.chessdbCp === 'number' ? algoResult.chessdbCp / 100 : undefined,
-          weightedCount: algoResult.selectedStats?.weightedCount || 0,
-          engineSource: algoResult.evalSource
+          cp: algoResult.cp,
+          mate: algoResult.mate,
+          weightedCount: algoResult.selectedStats?.weightedGames ?? null,
+          source: algoResult.source,
+          selectionMethod: algoResult.selectionMethod,
+          moveOrigin: algoResult.moveOrigin,
+          deepVerified: algoResult.deepVerified,
+          localEvaluationProfile: algoResult.localEvaluationProfile
       });
 
       const emptyCard = createEmptyCard();

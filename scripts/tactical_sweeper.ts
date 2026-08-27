@@ -35,7 +35,7 @@ async function main() {
         const unverifiedMoves = await prisma.repertoireMove.findMany({
             where: {
                 playerTurn: "RESPONSE",
-                isDeepVerified: false
+                deepVerified: false
             },
             include: {
                 fromNode: true,
@@ -68,11 +68,8 @@ async function main() {
 
             // 2. If the Fast Pick matches the #1 Deep Move, mark it verified.
             if (bestLan === fastLan) {
-                console.log(`[Sweeper] ${move.san} is the absolute best move. Verified.`);
-                await prisma.repertoireMove.update({
-                    where: { id: move.id },
-                    data: { isDeepVerified: true }
-                });
+                console.log(`[Sweeper] ${move.san} is the absolute best move in this legacy diagnostic.`);
+                console.log('[Sweeper] Legacy sweeper cannot persist deepVerified without compatible Local evidence/profile linkage.');
                 continue;
             }
 
@@ -122,11 +119,8 @@ async function main() {
                 
                 // Do not mark as verified, leave for manual review.
             } else {
-                console.log(`[Sweeper] Move is sub-optimal but acceptable. Verified.`);
-                await prisma.repertoireMove.update({
-                    where: { id: move.id },
-                    data: { isDeepVerified: true }
-                });
+                console.log(`[Sweeper] Move is sub-optimal but acceptable in this legacy diagnostic.`);
+                console.log('[Sweeper] Legacy sweeper cannot persist deepVerified without compatible Local evidence/profile linkage.');
             }
         }
         

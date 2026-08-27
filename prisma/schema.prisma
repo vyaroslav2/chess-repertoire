@@ -163,11 +163,12 @@ model RepertoireNode {
 }
 
 model RepertoireMove {
-  id           String @id @default(uuid())
+  id           String  @id @default(uuid())
   repertoireId String
   fromNodeId   String
   toNodeId     String
   san          String
+  uci          String?
   playerTurn   String // "OPPONENT" or "RESPONSE"
 
   // Opponent specific fields
@@ -175,18 +176,21 @@ model RepertoireMove {
   trueProbability Float?
 
   // Response specific fields
-  weightedCount  Float?
-  lichessCp      Float?
-  chessdbCp      Float?
-  engineSource   String?
-  isDeepVerified Boolean @default(false)
+  weightedCount          Float?
+  cp                     Float?
+  mate                   Int?
+  source                 String?
+  selectionMethod        String?
+  moveOrigin             String?
+  deepVerified           Boolean @default(false)
+  localEvaluationProfile String?
 
   fromNode   RepertoireNode           @relation("OutgoingMoves", fields: [fromNodeId], references: [id], onDelete: Cascade)
   toNode     RepertoireNode           @relation("IncomingMoves", fields: [toNodeId], references: [id], onDelete: Cascade)
   repertoire Repertoire               @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
   stats      RepertoirePositionStat[]
 
-  @@unique([fromNodeId, san])
+  @@unique([fromNodeId, uci])
 }
 
 model RepertoirePositionStat {

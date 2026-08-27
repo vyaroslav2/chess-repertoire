@@ -311,6 +311,38 @@ export type LocalEngineEvaluation = {
   mate: number | null;
 };
 
+export const RESPONSE_EVALUATION_SOURCES = ["Lichess Cloud Evaluation", "ChessDB", "Local Deep Stockfish"] as const;
+export const RESPONSE_SELECTION_METHODS = ["Ordinary API", "Corrected after Deep Verification", "Local Engine Fallback", "Hardcoded Opening"] as const;
+export const RESPONSE_MOVE_ORIGINS = ["Human Move", "Engine Move", "Hardcoded Move"] as const;
+export type ResponseEvaluationSource = typeof RESPONSE_EVALUATION_SOURCES[number];
+export type ResponseSelectionMethod = typeof RESPONSE_SELECTION_METHODS[number];
+export type ResponseMoveOrigin = typeof RESPONSE_MOVE_ORIGINS[number];
+export type ResponsePersistenceInput = {
+  fromNodeId: string; toNodeId: string; uci: string; san?: string | null;
+  cp: number | null; mate: number | null; source: ResponseEvaluationSource;
+  selectionMethod: ResponseSelectionMethod; moveOrigin: ResponseMoveOrigin;
+  deepVerified: boolean; localEvaluationProfile: string | null; weightedCount?: number | null;
+};
+
+function isNonEmptyCanonicalString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.trim() === value;
+}
+
+export function validateResponsePersistence(input: ResponsePersistenceInput): void {
+  if (!RESPONSE_EVALUATION_SOURCES.includes(input.source as ResponseEvaluationSource)) throw new Error("Invalid RESPONSE source");
+  if (!RESPONSE_SELECTION_METHODS.includes(input.selectionMethod as ResponseSelectionMethod)) throw new Error("Invalid RESPONSE selectionMethod");
+  if (!RESPONSE_MOVE_ORIGINS.includes(input.moveOrigin as ResponseMoveOrigin)) throw new Error("Invalid RESPONSE moveOrigin");
+  if (!isValidUciMove(input.uci)) throw new Error("Invalid RESPONSE UCI/LAN move");
+  const hasCp = typeof input.cp === "number" && Number.isFinite(input.cp);
+  const hasMate = typeof input.mate === "number" && Number.isInteger(input.mate) && input.mate !== 0;
+  if (!((hasCp && input.mate === null) || (input.cp === null && hasMate))) throw new Error("Invalid RESPONSE evaluation: exactly one of finite cp or non-zero integer mate is required");
+  if (typeof input.deepVerified !== "boolean") throw new Error("Invalid RESPONSE deepVerified value");
+  if (input.deepVerified && !isNonEmptyCanonicalString(input.localEvaluationProfile)) throw new Error("Invalid RESPONSE: deepVerified requires localEvaluationProfile");
+  if (input.localEvaluationProfile !== null && !isNonEmptyCanonicalString(input.localEvaluationProfile)) throw new Error("Invalid RESPONSE localEvaluationProfile");
+  if (input.weightedCount !== undefined && input.weightedCount !== null &&
+      (typeof input.weightedCount !== "number" || !Number.isFinite(input.weightedCount) || input.weightedCount < 0)) throw new Error("Invalid RESPONSE weightedCount");
+}
+
 function validateLocalEngineIdentity(fullFen: string, evaluationProfile: string): string {
   const canonicalFullFen = parseFullFen(fullFen);
   if (canonicalFullFen !== fullFen) {
@@ -370,7 +402,10 @@ export async function saveLocalEngineBaseline(
   evaluation: LocalEngineEvaluation
 ) {
   const validated = validateLocalEngineEvaluation(fullFen, evaluationProfile, evaluation);
-  return prisma.localEngineBaseline.upsert({
+  return prisma.$transaction(async tx => {
+    const previous = await tx.localEngineBaseline.findUnique({ where: { fullFen_evaluationProfile: { fullFen, evaluationProfile } } });
+    const changed = previous !== null && (previous.bestUci !== validated.uci || previous.cp !== validated.cp || previous.mate !== validated.mate);
+    const saved = await tx.localEngineBaseline.upsert({
     where: { fullFen_evaluationProfile: { fullFen, evaluationProfile } },
     update: {
       bestUci: validated.uci,
@@ -387,6 +422,12 @@ export async function saveLocalEngineBaseline(
       cp: validated.cp,
       mate: validated.mate
     }
+    });
+    if (changed) await tx.repertoireMove.updateMany({
+      where: { playerTurn: "RESPONSE", deepVerified: true, localEvaluationProfile: evaluationProfile, fromNode: { fullFen } },
+      data: { deepVerified: false }
+    });
+    return saved;
   });
 }
 
@@ -415,7 +456,10 @@ export async function saveLocalEngineCandidate(
     throw new Error("Invalid Local Engine candidate identity");
   }
   const validated = validateLocalEngineEvaluation(fullFen, evaluationProfile, evaluation, candidateUci);
-  return prisma.localEngineCandidate.upsert({
+  return prisma.$transaction(async tx => {
+    const previous = await tx.localEngineCandidate.findUnique({ where: { fullFen_candidateUci_evaluationProfile: { fullFen, candidateUci, evaluationProfile } } });
+    const changed = previous !== null && (previous.cp !== validated.cp || previous.mate !== validated.mate);
+    const saved = await tx.localEngineCandidate.upsert({
     where: { fullFen_candidateUci_evaluationProfile: { fullFen, candidateUci, evaluationProfile } },
     update: {
       san: validated.san,
@@ -431,6 +475,12 @@ export async function saveLocalEngineCandidate(
       cp: validated.cp,
       mate: validated.mate
     }
+    });
+    if (changed) await tx.repertoireMove.updateMany({
+      where: { playerTurn: "RESPONSE", uci: candidateUci, deepVerified: true, localEvaluationProfile: evaluationProfile, fromNode: { fullFen } },
+      data: { deepVerified: false }
+    });
+    return saved;
   });
 }
 
@@ -478,29 +528,84 @@ export async function createRepertoireNode(repertoireId: string, rawFen: string,
   });
 }
 
-export async function createRepertoireMove(data: {
+export async function createOpponentMove(data: {
   repertoireId: string,
   fromNodeId: string,
   toNodeId: string,
   san: string,
-  playerTurn: string,
+  uci?: string,
   prob?: number,
-  trueProbability?: number,
-  weightedCount?: number,
-  lichessCp?: number,
-  chessdbCp?: number,
-  engineSource?: string
+  trueProbability?: number
 }) {
+  const [fromNode, toNode] = await Promise.all([
+    prisma.repertoireNode.findUnique({ where: { id: data.fromNodeId } }),
+    prisma.repertoireNode.findUnique({ where: { id: data.toNodeId } })
+  ]);
+  if (!fromNode || !toNode) throw new Error("OPPONENT source or destination node does not exist");
+  if (fromNode.repertoireId !== toNode.repertoireId) throw new Error("OPPONENT cannot cross repertoires");
+  if (data.repertoireId !== fromNode.repertoireId) throw new Error("OPPONENT repertoireId does not match source node repertoire");
+  const chess = new Chess(fromNode.fullFen);
+  let move;
+  try { move = data.uci ? chess.move({ from: data.uci.slice(0, 2), to: data.uci.slice(2, 4), promotion: data.uci[4] }) : chess.move(data.san); }
+  catch { throw new Error("Invalid OPPONENT move"); }
+  if (!move || (data.uci && move.lan !== data.uci) || move.san !== data.san) throw new Error("Invalid OPPONENT UCI/SAN state");
+  const resultingFullFen = parseFullFen(chess.fen());
+  if (resultingFullFen !== toNode.fullFen) throw new Error("Invalid OPPONENT destination: resulting FullFen does not match toNode.fullFen");
+  const complete = { ...data, repertoireId: fromNode.repertoireId, uci: move.lan, san: move.san, playerTurn: "OPPONENT", weightedCount: null, cp: null, mate: null, source: null, selectionMethod: null, moveOrigin: null, deepVerified: false, localEvaluationProfile: null };
   return prisma.repertoireMove.upsert({
     where: {
-      fromNodeId_san: {
+      fromNodeId_uci: {
         fromNodeId: data.fromNodeId,
-        san: data.san
+        uci: move.lan
       }
     },
-    update: data,
-    create: data
+    update: complete,
+    create: complete
   });
+}
+
+export async function createResponseMove(input: ResponsePersistenceInput) {
+  validateResponsePersistence(input);
+  const [fromNode, toNode] = await Promise.all([
+    prisma.repertoireNode.findUnique({ where: { id: input.fromNodeId } }),
+    prisma.repertoireNode.findUnique({ where: { id: input.toNodeId } })
+  ]);
+  if (!fromNode || !toNode) throw new Error("RESPONSE source or destination node does not exist");
+  if (fromNode.repertoireId !== toNode.repertoireId) throw new Error("RESPONSE cannot cross repertoires");
+  if (input.deepVerified) {
+    const [baseline, candidate] = await Promise.all([
+      prisma.localEngineBaseline.findUnique({ where: { fullFen_evaluationProfile: { fullFen: fromNode.fullFen, evaluationProfile: input.localEvaluationProfile! } } }),
+      prisma.localEngineCandidate.findUnique({ where: { fullFen_candidateUci_evaluationProfile: { fullFen: fromNode.fullFen, candidateUci: input.uci, evaluationProfile: input.localEvaluationProfile! } } })
+    ]);
+    if (!baseline || (baseline.bestUci !== input.uci && !candidate)) throw new Error("Invalid RESPONSE: compatible Local Deep evidence is missing");
+  }
+  const chess = new Chess(fromNode.fullFen);
+  let move;
+  try { move = chess.move({ from: input.uci.slice(0, 2), to: input.uci.slice(2, 4), promotion: input.uci[4] }); }
+  catch { throw new Error(`Invalid RESPONSE: illegal UCI move ${input.uci}`); }
+  if (!move || move.lan !== input.uci) throw new Error(`Invalid RESPONSE: illegal UCI move ${input.uci}`);
+  if (input.san !== undefined && input.san !== null && input.san !== move.san) throw new Error("Invalid RESPONSE: SAN does not match UCI");
+  const resultingFullFen = parseFullFen(chess.fen());
+  if (resultingFullFen !== toNode.fullFen) throw new Error("Invalid RESPONSE destination: resulting FullFen does not match toNode.fullFen");
+  const complete = {
+    repertoireId: fromNode.repertoireId, fromNodeId: input.fromNodeId, toNodeId: input.toNodeId,
+    uci: input.uci, san: move.san, playerTurn: "RESPONSE", prob: null, trueProbability: null,
+    weightedCount: input.weightedCount ?? null, cp: input.cp, mate: input.mate, source: input.source,
+    selectionMethod: input.selectionMethod, moveOrigin: input.moveOrigin, deepVerified: input.deepVerified,
+    localEvaluationProfile: input.localEvaluationProfile
+  };
+  return prisma.$transaction(async tx => {
+    const existing = await tx.repertoireMove.findFirst({ where: { fromNodeId: input.fromNodeId, playerTurn: "RESPONSE" } });
+    if (existing) return tx.repertoireMove.update({ where: { id: existing.id }, data: complete });
+    return tx.repertoireMove.create({ data: complete });
+  });
+}
+
+/** Compatibility API for existing OPPONENT callers only. */
+export async function createRepertoireMove(data: Parameters<typeof createOpponentMove>[0] & { playerTurn: string }) {
+  if (data.playerTurn !== "OPPONENT") throw new Error("Use createResponseMove for complete RESPONSE persistence");
+  const { playerTurn: _playerTurn, ...opponent } = data;
+  return createOpponentMove(opponent);
 }
 
 export async function getCompatibleHumanDataSnapshot(repertoireId: string, explorerRequestProfile: string) {

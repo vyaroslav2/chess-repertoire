@@ -17,6 +17,7 @@ import { analyseLichessMateSnapshot, verifyCandidateAgainstLichessMate, type Lic
 
 import { parseFullFen } from "./fen";
 import { computeRemoteEngineEvaluationProfile, defaultConfig, getMoveBand } from "./config";
+import type { ResponseEvaluationSource, ResponseMoveOrigin, ResponseSelectionMethod } from "../db/operations";
 
 function compareRemoteEvaluationsForBlack(a: RemoteEngineEvaluation, b: RemoteEngineEvaluation): number {
   const category = (evaluation: RemoteEngineEvaluation) =>
@@ -92,6 +93,27 @@ export type EvaluateBlackMoveDependencies = {
   localSearchRunner?: LocalSearchRunner;
 };
 
+export type SelectedResponseResult = {
+  selectedUci: string;
+  selectedMoveSan: string;
+  cp: number | null;
+  mate: number | null;
+  source: ResponseEvaluationSource;
+  selectionMethod: ResponseSelectionMethod;
+  moveOrigin: ResponseMoveOrigin;
+  deepVerified: boolean;
+  localEvaluationProfile: string | null;
+  selectedStats: any;
+  candidateMoves: ReturnType<typeof buildBlackHumanShortlist>;
+  enginePvs: any[];
+  /** @deprecated diagnostic compatibility; persistence uses source/cp/mate. */
+  evalSource: ResponseEvaluationSource;
+  /** @deprecated diagnostic compatibility; persistence uses cp. */
+  selectedEngineCp: any;
+  /** @deprecated diagnostic compatibility; persistence uses mate. */
+  selectedMate: number | null;
+};
+
 export async function evaluateBlackMove(
   fen: string,
   chess: Chess,
@@ -99,10 +121,10 @@ export async function evaluateBlackMove(
   previousMovesSan: string[],
   snapshotId: string,
   dependencies: EvaluateBlackMoveDependencies = {}
-): Promise<any> {
+): Promise<SelectedResponseResult> {
   const fullFen = parseFullFen(fen);
   const localSearchRunner = dependencies.localSearchRunner ?? runTrustedLocalSearch;
-  let evalSource = 'Lichess Cloud Evaluation';
+  let evalSource: ResponseEvaluationSource = 'Lichess Cloud Evaluation';
 
   // 1. Check Explorer Cache via lichess.ts
   const [mastersData, eliteData, amateurData] = await fetchAllDatabases(fen, snapshotId);
@@ -145,24 +167,20 @@ export async function evaluateBlackMove(
   let lichessMateContext: LichessMateContext = { kind: "NO_MATE" };
   let lichessOrdinarySnapshot: OrdinaryCpSnapshotEntry[] | null = null;
   let lichessPvs: any[] = [];
-  let lichessCp: number | null = null;
 
   if (lichessResult.status === "success") {
     lichessMateContext = analyseLichessMateSnapshot(lichessResult.evaluations);
     lichessOrdinarySnapshot = toOrdinaryCpSnapshot(lichessResult.evaluations);
     lichessPvs = toLegacyEnginePvs(lichessResult.evaluations);
-    lichessCp = lichessPvs.find(pv => typeof pv.cp === "number")?.cp ?? null;
   }
 
   // 3. Lazy ChessDB resolver
   let chessDbResult = await readRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile);
   let chessDbUnavailable = false;
   let chessDbOrdinarySnapshot: OrdinaryCpSnapshotEntry[] | null = null;
-  let chessdbCp: number | null = null;
   
   if (chessDbResult.status === "success") {
     chessDbOrdinarySnapshot = toOrdinaryCpSnapshot(chessDbResult.evaluations);
-    chessdbCp = toLegacyEnginePvs(chessDbResult.evaluations).find(pv => typeof pv.cp === "number")?.cp ?? null;
   }
 
   const ensureChessDb = async () => {
@@ -182,7 +200,6 @@ export async function evaluateBlackMove(
         chessDbResult = await readRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile);
         if (chessDbResult.status === "success") {
           chessDbOrdinarySnapshot = toOrdinaryCpSnapshot(chessDbResult.evaluations);
-          chessdbCp = toLegacyEnginePvs(chessDbResult.evaluations).find(pv => typeof pv.cp === "number")?.cp ?? null;
         }
       } else {
         chessDbUnavailable = true;
@@ -196,11 +213,14 @@ export async function evaluateBlackMove(
 
   // 4. Verification loop helper
   let selectedMoveSan: string | null = null;
+  let selectedUci: string | null = null;
   let selectedStats: any = null;
   let selectedEngineCp: number | null = null;
   let selectedMate: number | null = null;
   let deepVerified = false;
   let localEvaluationProfile: string | null = null;
+  let selectionMethod: ResponseSelectionMethod = "Ordinary API";
+  let moveOrigin: ResponseMoveOrigin = "Human Move";
 
   const evaluateCandidateThroughWaterfall = async (candidate: any, isHardcoded: boolean = false) => {
     const lan = candidate.uci || (() => { const mr = chess.move(candidate.san); chess.undo(); return mr.lan; })();
@@ -298,11 +318,14 @@ export async function evaluateBlackMove(
       const candidate = candidateMoves.find(m => m.san === forcedSan) || { san: forcedSan, uci: forcedSan === "c6" ? "c7c6" : "d7d5" };
       const res = await evaluateCandidateThroughWaterfall(candidate, true);
       selectedMoveSan = forcedSan;
+      selectedUci = candidate.uci;
+      selectionMethod = "Hardcoded Opening";
+      moveOrigin = "Hardcoded Move";
       selectedStats = candidateMoves.find(m => m.san === forcedSan) || null;
       if (res.source) {
         selectedEngineCp = res.cp;
         selectedMate = res.mate;
-        evalSource = res.source;
+        evalSource = res.source as ResponseEvaluationSource;
         deepVerified = res.deepVerified ?? false;
         localEvaluationProfile = res.localEvaluationProfile ?? null;
       } else {
@@ -317,10 +340,11 @@ export async function evaluateBlackMove(
       const res = await evaluateCandidateThroughWaterfall(candidate);
       if (res.source) {
         selectedMoveSan = candidate.san;
+        selectedUci = candidate.uci;
         selectedStats = candidate;
         selectedEngineCp = res.cp;
         selectedMate = res.mate;
-        evalSource = res.source;
+        evalSource = res.source as ResponseEvaluationSource;
         deepVerified = res.deepVerified ?? false;
         localEvaluationProfile = res.localEvaluationProfile ?? null;
         break;
@@ -348,9 +372,11 @@ export async function evaluateBlackMove(
 
     chess.undo();
     selectedMoveSan = moveResult.san;
+    selectedUci = lan;
     selectedMate = lichessMateContext.fallbackMate;
     selectedStats = candidateMoves.find(m => m.san === selectedMoveSan) || null;
     evalSource = "Lichess Cloud Evaluation";
+    moveOrigin = "Engine Move";
   }
 
   if (!selectedMoveSan) {
@@ -376,32 +402,39 @@ export async function evaluateBlackMove(
       
       chess.undo();
       selectedMoveSan = moveResult.san;
+      selectedUci = lan;
       selectedEngineCp = baseline.cp;
       selectedMate = baseline.mate;
       selectedStats = candidateMoves.find(m => m.san === selectedMoveSan) || null;
       evalSource = "Local Deep Stockfish";
       deepVerified = true;
       localEvaluationProfile = baselineResult.evaluationProfile;
+      selectionMethod = "Local Engine Fallback";
+      moveOrigin = "Engine Move";
     } else {
       throw new Error(`Local Deep Stockfish fallback returned zero usable results for position ${fullFen}.`);
     }
   }
 
-  if (!selectedMoveSan) {
+  if (!selectedMoveSan || !selectedUci) {
     throw new Error(`evaluateBlackMove failed to select a move for position ${fullFen}.`);
   }
 
-  return { 
-    selectedMoveSan, 
-    selectedStats, 
-    selectedEngineCp, 
-    selectedMate, 
-    lichessCp, 
-    chessdbCp, 
-    evalSource, 
+  return {
+    selectedUci,
+    selectedMoveSan,
+    cp: selectedEngineCp,
+    mate: selectedMate,
+    source: evalSource,
+    selectionMethod,
+    moveOrigin,
     deepVerified,
     localEvaluationProfile,
-    candidateMoves, 
+    evalSource,
+    selectedEngineCp,
+    selectedMate,
+    selectedStats,
+    candidateMoves,
     enginePvs: lichessPvs.length > 0 ? lichessPvs : (chessDbOrdinarySnapshot ? toLegacyEnginePvs((chessDbResult as any).evaluations) : []) 
   };
 }

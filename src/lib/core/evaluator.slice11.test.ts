@@ -52,6 +52,11 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
       assert.strictEqual(res.evalSource, "Lichess Cloud Evaluation");
       assert.strictEqual(res.selectedMate, -3);
       assert.strictEqual(res.selectedEngineCp, null);
+      assert.strictEqual(res.selectedUci, "b8d7");
+      assert.strictEqual(res.selectionMethod, "Ordinary API");
+      assert.strictEqual(res.moveOrigin, "Human Move");
+      assert.strictEqual(res.cp, null);
+      assert.strictEqual(res.mate, -3);
       assert.strictEqual(chessDbFetched, false, "Should not fetch ChessDB if Lichess accepts");
 
     } finally {
@@ -103,6 +108,9 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
       assert.strictEqual(res.evalSource, "ChessDB");
       assert.strictEqual(res.selectedMate, null);
       assert.strictEqual(res.selectedEngineCp, 100);
+      assert.strictEqual(res.selectionMethod, "Ordinary API");
+      assert.strictEqual(res.moveOrigin, "Human Move");
+      assert.strictEqual(res.source, "ChessDB");
       assert.strictEqual(chessDbFetched, true, "Should fetch ChessDB when Lichess is inconclusive");
 
     } finally {
@@ -192,6 +200,9 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
       assert.strictEqual(res.selectedMoveSan, "c6");
       assert.strictEqual(res.evalSource, "Lichess Cloud Evaluation");
       assert.strictEqual(res.selectedEngineCp, 42);
+      assert.strictEqual(res.selectedUci, "c7c6");
+      assert.strictEqual(res.selectionMethod, "Hardcoded Opening");
+      assert.strictEqual(res.moveOrigin, "Hardcoded Move");
 
     } finally {
       global.fetch = originalFetch;
@@ -373,7 +384,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
         async init() {}
         async setoption() {}
         async position() {}
-        async go() { return { info: [{ cp: 777, depth: 1, multipv: 1, score: { value: 777 }, pv: "c7c6" }] }; } // Exact searchmoves returns exactly c6
+        async go() { return { info: [{ depth: 1, multipv: 1, score: { unit: "cp", value: 777 }, pv: "c7c6" }] }; } // Exact searchmoves returns exactly c6
         async quit() {}
       };
 
