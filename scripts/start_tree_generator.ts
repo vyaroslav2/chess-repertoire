@@ -1,6 +1,14 @@
 import { format } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
+import * as dotenv from "dotenv";
+
+if (fs.existsSync("C:\\Files\\.env")) {
+  dotenv.config({ path: "C:\\Files\\.env" });
+} else {
+  dotenv.config();
+}
+
 import { generateRepertoire } from "../src/lib/core/generator";
 import { prisma } from "../src/lib/db/operations";
 import { acquireLock, type LockHandle } from "../src/lib/core/lockfile";
