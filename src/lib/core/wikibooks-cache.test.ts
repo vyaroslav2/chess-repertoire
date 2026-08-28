@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { PrismaClient } from "@prisma/client";
 import type { WikibooksResult } from "../api/wikibooks";
@@ -12,18 +13,20 @@ test("history-specific RepertoireNode Wikibooks cache", async t => {
     ensureRepertoireNodeWikibooks,
     prisma: operationsPrisma
   } = await import("../db/operations");
-  const { attemptCanonicalNodeWikibooks } = await import("./generator");
+  const {
+    attemptCanonicalNodeWikibooks,
+    captureRebuildWikibooksCache,
+    restoreRebuildWikibooksState
+  } = await import("./generator");
 
-  await prisma.repertoirePositionStat.deleteMany();
-  await prisma.repertoireMove.deleteMany();
-  await prisma.repertoireNode.deleteMany();
-  await prisma.humanDataSnapshot.deleteMany();
-  await prisma.repertoire.deleteMany();
-  await prisma.user.deleteMany();
-
-  const user = await prisma.user.create({ data: { username: `wikibooks-${Date.now()}` } });
+  const user = await prisma.user.create({ data: { username: `wikibooks-${randomUUID()}` } });
   const repertoire = await prisma.repertoire.create({
     data: { title: "Wikibooks cache tests", color: "black", userId: user.id }
+  });
+  t.after(async () => {
+    await prisma.user.delete({ where: { id: user.id } });
+    await operationsPrisma.$disconnect();
+    await prisma.$disconnect();
   });
   let sequence = 0;
   const createNode = (pgn: string) => createRepertoireNode(repertoire.id, START_FEN, pgn, 1 - sequence++ * 0.01);
@@ -110,6 +113,54 @@ test("history-specific RepertoireNode Wikibooks cache", async t => {
     assert.equal(saved.wikiText, "Canonical history text");
   });
 
-  await operationsPrisma.$disconnect();
-  await prisma.$disconnect();
+  await t.test("rebuild restores checked states by exact history without preserving failures", async () => {
+    const described = await createNode("g3");
+    const absent = await createNode("b3");
+    const failed = await createNode("f4");
+    await prisma.repertoireNode.update({
+      where: { id: described.id },
+      data: { wikibooksChecked: true, wikiText: "History-specific description" }
+    });
+    await prisma.repertoireNode.update({
+      where: { id: absent.id },
+      data: { wikibooksChecked: true, wikiText: null }
+    });
+
+    const preserved = await captureRebuildWikibooksCache(repertoire.id);
+    assert.equal(preserved.get("g3"), "History-specific description");
+    assert.equal(preserved.has("b3"), true);
+    assert.equal(preserved.get("b3"), null);
+    assert.equal(preserved.has("f4"), false);
+
+    await prisma.repertoireNode.deleteMany({ where: { repertoireId: repertoire.id } });
+    const rebuiltDescription = await createNode("g3");
+    const rebuiltAbsence = await createNode("b3");
+    const rebuiltFailure = await createNode("f4");
+    await restoreRebuildWikibooksState(rebuiltDescription.id, preserved);
+    await restoreRebuildWikibooksState(rebuiltAbsence.id, preserved);
+    await restoreRebuildWikibooksState(rebuiltFailure.id, preserved);
+
+    let fetches = 0;
+    const fetcher = async (): Promise<WikibooksResult> => {
+      fetches++;
+      return { status: "TECHNICAL_FAILURE", reason: "temporary" };
+    };
+    await ensureRepertoireNodeWikibooks(rebuiltDescription.id, fetcher);
+    await ensureRepertoireNodeWikibooks(rebuiltAbsence.id, fetcher);
+    await ensureRepertoireNodeWikibooks(rebuiltFailure.id, fetcher);
+
+    const [savedDescription, savedAbsence, savedFailure] = await Promise.all([
+      prisma.repertoireNode.findUniqueOrThrow({ where: { id: rebuiltDescription.id } }),
+      prisma.repertoireNode.findUniqueOrThrow({ where: { id: rebuiltAbsence.id } }),
+      prisma.repertoireNode.findUniqueOrThrow({ where: { id: rebuiltFailure.id } })
+    ]);
+    assert.equal(fetches, 1, "only the previously failed history should be fetched after rebuild");
+    assert.equal(savedDescription.wikibooksChecked, true);
+    assert.equal(savedDescription.wikiText, "History-specific description");
+    assert.equal(savedAbsence.wikibooksChecked, true);
+    assert.equal(savedAbsence.wikiText, null);
+    assert.equal(savedFailure.wikibooksChecked, false);
+    assert.equal(savedFailure.wikiText, null);
+  });
+
 });

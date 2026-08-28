@@ -37,6 +37,32 @@ export async function attemptCanonicalNodeWikibooks(
   return ensureNodeWikibooks(nodeId);
 }
 
+export type RebuildWikibooksCache = Map<string, string | null>;
+
+export async function captureRebuildWikibooksCache(repertoireId: string): Promise<RebuildWikibooksCache> {
+  const checkedNodes = await prisma.repertoireNode.findMany({
+    where: { repertoireId, wikibooksChecked: true },
+    select: { history: true, wikiText: true }
+  });
+  return new Map(checkedNodes.map(node => [node.history, node.wikiText]));
+}
+
+export async function restoreRebuildWikibooksState(
+  nodeId: string,
+  cache: RebuildWikibooksCache
+): Promise<void> {
+  const node = await prisma.repertoireNode.findUniqueOrThrow({
+    where: { id: nodeId },
+    select: { history: true, wikibooksChecked: true }
+  });
+  if (node.wikibooksChecked || !cache.has(node.history)) return;
+
+  await prisma.repertoireNode.update({
+    where: { id: nodeId },
+    data: { wikibooksChecked: true, wikiText: cache.get(node.history) ?? null }
+  });
+}
+
 export function historyFromCanonicalPgn(pgn: string): string[] {
   if (typeof pgn !== "string" || pgn.trim() !== pgn) {
     throw new Error("Canonical repertoire PGN must be a trimmed string");
@@ -224,6 +250,7 @@ export async function generateRepertoire(
   const reqProfile = computeExplorerRequestProfile(runtime.config);
   const snapshot = await getOrCreateHumanDataSnapshot(repertoire.id, reqProfile);
   const snapshotId = snapshot.id;
+  const rebuildWikibooksCache = await captureRebuildWikibooksCache(repertoire.id);
 
   try {
   await prisma.$transaction(async tx => {
@@ -236,6 +263,7 @@ export async function generateRepertoire(
     displayPgn: "",
     humanDataSnapshotId: snapshotId
   });
+  await restoreRebuildWikibooksState(rootNode.id, rebuildWikibooksCache);
 
   const queue: GeneratorQueueItem[] = [{
     nodeId: rootNode.id,
@@ -405,6 +433,7 @@ export async function generateRepertoire(
         continue;
       }
       await ensurePositionCache(posAfterWhiteNode.fullFen);
+      await restoreRebuildWikibooksState(posAfterWhiteNode.id, rebuildWikibooksCache);
       await attemptCanonicalNodeWikibooks(posAfterWhiteNode.id, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
       const effectiveCanonicalProb = reconciledOpponent.effectiveCumulativeProb;
 
@@ -597,6 +626,7 @@ export async function generateRepertoire(
 
       await ensurePositionCache(resultingDestinationFen);
       await propagateRepertoireProbabilities(repertoire.id, resultingDestinationId);
+      await restoreRebuildWikibooksState(resultingDestinationId, rebuildWikibooksCache);
       await attemptCanonicalNodeWikibooks(resultingDestinationId, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
 
       const resultingResponse = await prisma.repertoireMove.findFirst({

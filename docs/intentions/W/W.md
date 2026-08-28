@@ -96,6 +96,8 @@ A technical failure is not.
 
 Wikibooks text should instead belong to the surviving repertoire progression/node, or another history-specific record if the data model later separates shared positions from progression records.
 
+#bug Rebuild-from-root must not erase successful history-specific Wikibooks cache state merely because it replaces the repertoire nodes. Before deleting the old tree, preserve checked descriptions and checked valid absences by exact history; restore them only when the same exact canonical history survives in the rebuilt tree. Do not preserve an unchecked technical failure as a successful result.
+
 ## Fetch behaviour
 
 `Known:` For each new surviving move history:
