@@ -17,26 +17,16 @@ export async function getOrCreatePosition(rawFen: string) {
   });
 }
 
-export async function getOrCreatePositionCache(fen: string, openingMetadata?: { eco: string, name: string }, _legacyHistory?: string[]) {
+export async function getOrCreatePositionCache(fen: string, _legacyOpeningMetadata?: { eco: string, name: string }, _legacyHistory?: string[]) {
   const normFen = positionKeyFromFen(parseFullFen(fen));
   let pos = await prisma.positionCache.findUnique({ where: { fen: normFen } });
   
   if (!pos) { 
     pos = await prisma.positionCache.create({ 
       data: { 
-        fen: normFen,
-        eco: openingMetadata?.eco || null,
-        openingName: openingMetadata?.name || null
+        fen: normFen
       } 
     }); 
-  } else if (openingMetadata && openingMetadata.name) {
-    pos = await prisma.positionCache.update({
-      where: { fen: normFen },
-      data: {
-        eco: openingMetadata.eco,
-        openingName: openingMetadata.name
-      }
-    });
   }
   return pos;
 }
@@ -59,11 +49,11 @@ export async function ensureRepertoireNodeWikibooks(
   if (node.wikibooksChecked) {
     return { status: "CACHED" as const, text: node.wikiText };
   }
-  if (node.pgn.trim() !== node.pgn) {
+  if (node.displayPgn.trim() !== node.displayPgn) {
     throw new Error("Cannot enrich RepertoireNode with non-canonical PGN history");
   }
 
-  const result = await fetcher(node.pgn === "" ? [] : node.pgn.split(/\s+/));
+  const result = await fetcher(node.displayPgn === "" ? [] : node.displayPgn.split(/\s+/));
   if (result.status === "TECHNICAL_FAILURE") return result;
 
   const wikiText = result.status === "DESCRIPTION" ? result.text : null;
@@ -292,6 +282,17 @@ export async function saveRemoteEngineResult(
   });
 }
 
+/** Explicit refresh entry point: fetch a complete source snapshot, then replace it atomically. */
+export async function refreshRemoteEngineResult(
+  fullFen: string,
+  source: RemoteEngineSource,
+  evaluationProfile: string,
+  fetchSnapshot: () => Promise<RemoteEngineEvaluation[]>
+) {
+  const evaluations = await fetchSnapshot();
+  return saveRemoteEngineResult(fullFen, source, evaluationProfile, evaluations);
+}
+
 export type ReadRemoteEngineResult =
   | { status: "missing" }
   | { status: "empty", fetch: { id: string; fullFen: string; source: string; evaluationProfile: string; fetchedAt: Date } }
@@ -353,6 +354,9 @@ export type ResponsePersistenceInput = {
   cp: number | null; mate: number | null; source: ResponseEvaluationSource;
   selectionMethod: ResponseSelectionMethod; moveOrigin: ResponseMoveOrigin;
   deepVerified: boolean; localEvaluationProfile: string | null; weightedCount?: number | null;
+  routeHistory?: string | null; stopReason?: "Repetition" | "Transposition" | null;
+  mastersGames?: number | null; eliteGames?: number | null; totalRelevantGames?: number | null;
+  moveShare?: number | null; engineRank?: number | null;
 };
 
 function isNonEmptyCanonicalString(value: unknown): value is string {
@@ -372,6 +376,12 @@ export function validateResponsePersistence(input: ResponsePersistenceInput): vo
   if (input.localEvaluationProfile !== null && !isNonEmptyCanonicalString(input.localEvaluationProfile)) throw new Error("Invalid RESPONSE localEvaluationProfile");
   if (input.weightedCount !== undefined && input.weightedCount !== null &&
       (typeof input.weightedCount !== "number" || !Number.isFinite(input.weightedCount) || input.weightedCount < 0)) throw new Error("Invalid RESPONSE weightedCount");
+  for (const [label, value] of [["mastersGames", input.mastersGames], ["eliteGames", input.eliteGames], ["totalRelevantGames", input.totalRelevantGames], ["engineRank", input.engineRank]] as const) {
+    if (value !== undefined && value !== null && (!Number.isInteger(value) || value < 0)) throw new Error(`Invalid RESPONSE ${label}`);
+  }
+  if (input.moveShare !== undefined && input.moveShare !== null && (!Number.isFinite(input.moveShare) || input.moveShare < 0 || input.moveShare > 1)) {
+    throw new Error("Invalid RESPONSE moveShare");
+  }
 }
 
 function validateLocalEngineIdentity(fullFen: string, evaluationProfile: string): string {
@@ -531,30 +541,46 @@ export async function readLocalEngineCandidate(fullFen: string, candidateUci: st
   return { ...row, ...evaluation };
 }
 
-export async function getRepertoireNode(repertoireId: string, pgn: string) {
-  return prisma.repertoireNode.findUnique({
-    where: {
-      repertoireId_pgn: {
-        repertoireId,
-        pgn
-      }
-    }
-  });
+export async function getRepertoireNode(repertoireId: string, history: string) {
+  return prisma.repertoireNode.findFirst({ where: { repertoireId, history } });
 }
 
-export async function createRepertoireNode(repertoireId: string, rawFen: string, pgn: string, cumulativeProb: number) {
+export async function createRepertoireNode(
+  repertoireId: string,
+  rawFen: string,
+  history: string,
+  cumulativeProb: number,
+  options: { displayPgn?: string; humanDataSnapshotId?: string; eco?: string | null; openingName?: string | null } = {}
+) {
   const fullFen = parseFullFen(rawFen);
   const positionKey = positionKeyFromFen(fullFen);
 
   await getOrCreatePosition(fullFen);
-
+  const existingCanonical = await prisma.repertoireNode.findFirst({ where: { repertoireId, history } });
+  if (existingCanonical) {
+    if (options.eco !== undefined || options.openingName !== undefined) {
+      return prisma.repertoireNode.update({
+        where: { id: existingCanonical.id },
+        data: {
+          ...(options.eco !== undefined ? { eco: options.eco } : {}),
+          ...(options.openingName !== undefined ? { openingName: options.openingName } : {})
+        }
+      });
+    }
+    return existingCanonical;
+  }
   return prisma.repertoireNode.create({
     data: {
       repertoireId,
       fullFen,
       positionKey,
-      pgn,
-      cumulativeProb
+      history,
+      displayPgn: options.displayPgn ?? history,
+      pgn: options.displayPgn ?? history,
+      eco: options.eco ?? null,
+      openingName: options.openingName ?? null,
+      cumulativeProb,
+      humanDataSnapshotId: options.humanDataSnapshotId ?? null
     }
   });
 }
@@ -566,6 +592,7 @@ export async function createOpponentMove(data: {
   san: string,
   uci?: string,
   prob?: number,
+  routeProbability?: number,
   trueProbability?: number
 }) {
   const [fromNode, toNode] = await Promise.all([
@@ -582,7 +609,8 @@ export async function createOpponentMove(data: {
   if (!move || (data.uci && move.lan !== data.uci) || move.san !== data.san) throw new Error("Invalid OPPONENT UCI/SAN state");
   const resultingFullFen = parseFullFen(chess.fen());
   if (resultingFullFen !== toNode.fullFen) throw new Error("Invalid OPPONENT destination: resulting FullFen does not match toNode.fullFen");
-  const complete = { ...data, repertoireId: fromNode.repertoireId, uci: move.lan, san: move.san, playerTurn: "OPPONENT", weightedCount: null, cp: null, mate: null, source: null, selectionMethod: null, moveOrigin: null, deepVerified: false, localEvaluationProfile: null };
+  const routeProbability = data.routeProbability ?? data.trueProbability ?? null;
+  const complete = { ...data, routeProbability, trueProbability: routeProbability, repertoireId: fromNode.repertoireId, uci: move.lan, san: move.san, playerTurn: "OPPONENT", humanDataSnapshotId: fromNode.humanDataSnapshotId, weightedCount: null, cp: null, mate: null, source: null, selectionMethod: null, moveOrigin: null, deepVerified: false, localEvaluationProfile: null };
   return prisma.repertoireMove.upsert({
     where: {
       fromNodeId_uci: {
@@ -592,6 +620,65 @@ export async function createOpponentMove(data: {
     },
     update: complete,
     create: complete
+  });
+}
+
+/** Recompute every reachable route from canonical incoming-edge sums. */
+export async function propagateRepertoireProbabilities(repertoireId: string, startNodeId: string) {
+  return prisma.$transaction(async tx => {
+    const incomingToStart = await tx.repertoireMove.aggregate({
+      where: { toNodeId: startNodeId, NOT: { stopReason: "Repetition" } },
+      _sum: { routeProbability: true }
+    });
+    const incomingCountToStart = await tx.repertoireMove.count({
+      where: { toNodeId: startNodeId, NOT: { stopReason: "Repetition" } }
+    });
+    if (incomingCountToStart > 0) {
+      await tx.repertoireNode.updateMany({
+        where: { id: startNodeId, repertoireId },
+        data: {
+          cumulativeProb: incomingToStart._sum.routeProbability ?? 0,
+          isTransposition: incomingCountToStart > 1
+        }
+      });
+    }
+    const pending = [startNodeId];
+    const nodeCount = await tx.repertoireNode.count({ where: { repertoireId } });
+    const maximumSteps = Math.max(1, nodeCount * nodeCount);
+    let steps = 0;
+    while (pending.length > 0) {
+      if (++steps > maximumSteps) throw new Error("Repertoire probability graph did not converge");
+      const sourceId = pending.shift()!;
+      const source = await tx.repertoireNode.findUnique({ where: { id: sourceId } });
+      if (!source || source.repertoireId !== repertoireId) continue;
+      const outgoing = await tx.repertoireMove.findMany({ where: { fromNodeId: sourceId } });
+      for (const edge of outgoing) {
+        if (edge.stopReason === "Repetition") continue;
+        const routeProbability = edge.playerTurn === "OPPONENT"
+          ? source.cumulativeProb * (edge.prob ?? 0)
+          : source.cumulativeProb;
+        await tx.repertoireMove.update({
+          where: { id: edge.id },
+          data: { routeProbability, trueProbability: routeProbability }
+        });
+        const incoming = await tx.repertoireMove.aggregate({
+          where: { toNodeId: edge.toNodeId, NOT: { stopReason: "Repetition" } },
+          _sum: { routeProbability: true }
+        });
+        const cumulativeProb = incoming._sum.routeProbability ?? 0;
+        const incomingCount = await tx.repertoireMove.count({
+          where: { toNodeId: edge.toNodeId, NOT: { stopReason: "Repetition" } }
+        });
+        const destination = await tx.repertoireNode.findUnique({ where: { id: edge.toNodeId } });
+        if (destination && (destination.cumulativeProb !== cumulativeProb || destination.isTransposition !== (incomingCount > 1))) {
+          await tx.repertoireNode.update({
+            where: { id: destination.id },
+            data: { cumulativeProb, isTransposition: incomingCount > 1 }
+          });
+          pending.push(destination.id);
+        }
+      }
+    }
   });
 }
 
@@ -620,8 +707,14 @@ export async function createResponseMove(input: ResponsePersistenceInput) {
   if (resultingFullFen !== toNode.fullFen) throw new Error("Invalid RESPONSE destination: resulting FullFen does not match toNode.fullFen");
   const complete = {
     repertoireId: fromNode.repertoireId, fromNodeId: input.fromNodeId, toNodeId: input.toNodeId,
-    uci: input.uci, san: move.san, playerTurn: "RESPONSE", prob: null, trueProbability: null,
+    uci: input.uci, san: move.san, playerTurn: "RESPONSE", prob: null,
+    routeProbability: input.stopReason === "Repetition" ? 0 : fromNode.cumulativeProb,
+    trueProbability: input.stopReason === "Repetition" ? 0 : fromNode.cumulativeProb,
+    routeHistory: input.routeHistory ?? null, stopReason: input.stopReason ?? null, humanDataSnapshotId: fromNode.humanDataSnapshotId,
     weightedCount: input.weightedCount ?? null, cp: input.cp, mate: input.mate, source: input.source,
+    mastersGames: input.mastersGames ?? null, eliteGames: input.eliteGames ?? null,
+    totalRelevantGames: input.totalRelevantGames ?? null, moveShare: input.moveShare ?? null,
+    engineRank: input.engineRank ?? null,
     selectionMethod: input.selectionMethod, moveOrigin: input.moveOrigin, deepVerified: input.deepVerified,
     localEvaluationProfile: input.localEvaluationProfile
   };

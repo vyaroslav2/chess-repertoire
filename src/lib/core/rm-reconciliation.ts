@@ -160,6 +160,11 @@ export async function reconcileExistingResponse(input: ReconcileExistingResponse
           selectionMethod: input.recomputed.selectionMethod,
           moveOrigin: input.recomputed.moveOrigin,
           weightedCount: input.recomputed.weightedCount,
+          mastersGames: input.recomputed.mastersGames ?? null,
+          eliteGames: input.recomputed.eliteGames ?? null,
+          totalRelevantGames: input.recomputed.totalRelevantGames ?? null,
+          moveShare: input.recomputed.moveShare ?? null,
+          engineRank: input.recomputed.engineRank ?? null,
           deepVerified: finalDeepVerified,
           localEvaluationProfile: finalProfile
         }
@@ -188,6 +193,11 @@ export async function reconcileExistingResponse(input: ReconcileExistingResponse
       newDeepVerified: input.recomputed.deepVerified,
       newLocalEvaluationProfile: input.recomputed.localEvaluationProfile,
       newWeightedCount: input.recomputed.weightedCount,
+      newMastersGames: input.recomputed.mastersGames,
+      newEliteGames: input.recomputed.eliteGames,
+      newTotalRelevantGames: input.recomputed.totalRelevantGames,
+      newMoveShare: input.recomputed.moveShare,
+      newEngineRank: input.recomputed.engineRank,
       cumulativeProb: input.cumulativeProb
     });
     return {

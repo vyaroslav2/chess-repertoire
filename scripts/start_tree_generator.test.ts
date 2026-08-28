@@ -33,10 +33,12 @@ test("default log is project-relative from another cwd and creates docs/logs", a
       generate: async () => undefined,
       disconnect: async () => undefined
     });
-    const expected = path.join(fixtureRoot, "docs", "logs", "TreeGenLog.md");
-    assert.equal(fs.existsSync(expected), true);
+    const logDirectory = path.join(fixtureRoot, "docs", "logs");
+    const generatedLogs = fs.readdirSync(logDirectory).filter(name => /^treegen-.*\.md$/.test(name));
+    assert.equal(generatedLogs.length, 1);
+    const expected = path.join(logDirectory, generatedLogs[0]);
     assert.match(fs.readFileSync(expected, "utf8"), /\[FINISHED\]/);
-    assert.equal(fs.existsSync(path.join(otherCwd, "docs", "logs", "TreeGenLog.md")), false);
+    assert.equal(fs.existsSync(path.join(otherCwd, "docs", "logs")), false);
   } finally {
     process.chdir(originalCwd);
     fs.rmSync(fixtureRoot, { recursive: true, force: true });

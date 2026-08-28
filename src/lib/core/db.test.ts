@@ -133,21 +133,21 @@ test('Slice 3 Database Architecture Tests', async (t) => {
         assert.ok(!positionKeys.includes('openingName'));
         assert.ok(!positionKeys.includes('wikiText'));
         const cacheKeys = Object.keys(prisma.positionCache.fields);
-        assert.ok(cacheKeys.includes('eco'));
-        assert.ok(cacheKeys.includes('openingName'));
+        assert.ok(!cacheKeys.includes('eco'));
+        assert.ok(!cacheKeys.includes('openingName'));
         assert.ok(!cacheKeys.includes('wikiText'));
         const nodeKeys = Object.keys(prisma.repertoireNode.fields);
         assert.ok(nodeKeys.includes('wikibooksChecked'));
         assert.ok(nodeKeys.includes('wikiText'));
     });
 
-    await t.test('8a. later authoritative opening metadata replaces cached ECO and name', async () => {
+    await t.test('8a. later authoritative opening metadata replaces metadata on its history', async () => {
         const fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
-        const original = await getOrCreatePositionCache(fen, { eco: "A00", name: "Old opening metadata" });
+        const rep = await prisma.repertoire.create({ data: { title: "Metadata", color: "black", userId: user.id } });
+        const original = await createRepertoireNode(rep.id, fen, "e2e4", 1, { displayPgn: "e4", eco: "A00", openingName: "Old opening metadata" });
+        const updated = await createRepertoireNode(rep.id, fen, "e2e4", 1, { displayPgn: "e4", eco: "B00", openingName: "King's Pawn Opening" });
 
-        const updated = await getOrCreatePositionCache(fen, { eco: "B00", name: "King's Pawn Opening" });
-
-        assert.strictEqual(updated.fen, original.fen);
+        assert.strictEqual(updated.id, original.id);
         assert.strictEqual(updated.eco, "B00");
         assert.strictEqual(updated.openingName, "King's Pawn Opening");
     });
@@ -263,21 +263,20 @@ test('Slice 3 Database Architecture Tests', async (t) => {
         assert.ok(!emptyRow, "Recording successful fetch marker must not insert _EMPTY_ string markers");
     });
 
-    await t.test('15. deleting snapshot deletes its fetch markers but not Position or RepertoireNode', async () => {
+    await t.test('15. a snapshot referenced by generated history cannot be deleted', async () => {
         const { createHumanDataSnapshot, recordHumanExplorerFetch, createRepertoireNode } = await import('../db/operations');
         const rep = await prisma.repertoire.create({ data: { title: "Delete Test", color: "white", userId: user.id } });
         const snap = await createHumanDataSnapshot(rep.id, "del_profile");
         const rawFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-        const node = await createRepertoireNode(rep.id, rawFen, "", 1.0);
+        const node = await createRepertoireNode(rep.id, rawFen, "", 1.0, { humanDataSnapshotId: snap.id });
 
         await recordHumanExplorerFetch(snap.id, node.positionKey, "MASTERS");
-        // Delete snapshot
-        await prisma.humanDataSnapshot.delete({ where: { id: snap.id } });
-        // deleting snapshot deletes its fetch markers
+        await assert.rejects(
+            prisma.humanDataSnapshot.delete({ where: { id: snap.id } }),
+            /Foreign key constraint violated/
+        );
         const fetchCount = await prisma.humanExplorerFetch.count({ where: { snapshotId: snap.id } });
-        assert.strictEqual(fetchCount, 0);
-
-        // deleting snapshot does not delete Position or RepertoireNode
+        assert.strictEqual(fetchCount, 1);
         const nodeAfter = await prisma.repertoireNode.findUnique({ where: { id: node.id } });
         assert.ok(nodeAfter);
         const posAfter = await prisma.position.findUnique({ where: { positionKey: node.positionKey } });

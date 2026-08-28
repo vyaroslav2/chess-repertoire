@@ -19,6 +19,7 @@ export type CanonicalOpponentCandidate = {
   destinationFullFen: string;
   destinationPositionKey: string;
   destinationPgn: string;
+  destinationHistory: string;
 };
 
 export type ExpectedOpponentEdge = {
@@ -72,6 +73,10 @@ function validateCanonicalPgn(pgn: string, label: string): void {
   }
 }
 
+function isAncestorHistory(ancestor: string, current: string): boolean {
+  return ancestor === "" || current === ancestor || current.startsWith(`${ancestor} `);
+}
+
 function applyOpponentMove(fullFen: string, uci: string) {
   if (!isValidUciMove(uci)) throw new Error(`Invalid OPPONENT UCI/LAN move ${uci}`);
   const chess = new Chess(fullFen);
@@ -94,6 +99,7 @@ function applyOpponentMove(fullFen: string, uci: string) {
 export function canonicalizeOpponentCandidates(input: {
   sourceFullFen: string;
   sourcePgn: string;
+  sourceHistory?: string;
   sourceCumulativeProb: number;
   candidates: OpponentCandidateInput[];
 }): CanonicalOpponentCandidate[] {
@@ -132,7 +138,8 @@ export function canonicalizeOpponentCandidates(input: {
       trueProbability: input.sourceCumulativeProb * candidate.probability,
       destinationFullFen,
       destinationPositionKey: positionKeyFromFen(destinationFullFen),
-      destinationPgn: `${input.sourcePgn ? `${input.sourcePgn} ` : ""}${move.san}`
+      destinationPgn: `${input.sourcePgn ? `${input.sourcePgn} ` : ""}${move.san}`,
+      destinationHistory: `${(input.sourceHistory ?? input.sourcePgn) ? `${input.sourceHistory ?? input.sourcePgn} ` : ""}${move.lan}`
     };
   });
 }
@@ -286,6 +293,17 @@ export async function reconcileOpponentBranches(input: {
     });
 
     const branches: ReconciledOpponentBranch[] = [];
+    const recomputeDestinationProbability = async (nodeId: string) => {
+      const aggregate = await tx.repertoireMove.aggregate({
+        where: { toNodeId: nodeId, NOT: { stopReason: "Repetition" } },
+        _sum: { routeProbability: true }
+      });
+      const cumulativeProb = aggregate._sum.routeProbability ?? 0;
+      return tx.repertoireNode.update({
+        where: { id: nodeId },
+        data: { cumulativeProb, isTransposition: await tx.repertoireMove.count({ where: { toNodeId: nodeId, NOT: { stopReason: "Repetition" } } }) > 1 }
+      });
+    };
     for (const candidate of [...input.recomputedCandidates].sort((a, b) => a.uci.localeCompare(b.uci))) {
       const stored = storedByUci.get(candidate.uci);
       if (stored) {
@@ -293,17 +311,21 @@ export async function reconcileOpponentBranches(input: {
         if (!retainedDestination) {
           throw new Error("Retained OPPONENT destination was removed with an obsolete canonical owner");
         }
+        const isRepetition = isAncestorHistory(retainedDestination.pgn, source.pgn);
+        const isTransposition = !isRepetition && retainedDestination.pgn !== candidate.destinationPgn;
         const updated = await tx.repertoireMove.update({
           where: { id: stored.id },
-          data: { san: candidate.san, prob: candidate.prob, trueProbability: candidate.trueProbability }
+          data: {
+            san: candidate.san,
+            prob: candidate.prob,
+            routeProbability: isRepetition ? 0 : candidate.trueProbability,
+            trueProbability: isRepetition ? 0 : candidate.trueProbability,
+            routeHistory: isRepetition || isTransposition ? candidate.destinationHistory : null,
+            stopReason: isRepetition ? "Repetition" : isTransposition ? "Transposition" : null
+          }
         });
-        const effectiveCumulativeProb = Math.max(retainedDestination.cumulativeProb, candidate.trueProbability);
-        if (effectiveCumulativeProb > retainedDestination.cumulativeProb) {
-          await tx.repertoireNode.update({
-            where: { id: retainedDestination.id },
-            data: { cumulativeProb: effectiveCumulativeProb }
-          });
-        }
+        const refreshedDestination = await recomputeDestinationProbability(retainedDestination.id);
+        const effectiveCumulativeProb = refreshedDestination.cumulativeProb;
         branches.push({
           ...candidate,
           action: "RETAINED",
@@ -312,7 +334,7 @@ export async function reconcileOpponentBranches(input: {
           destinationCanonicalPgn: retainedDestination.pgn,
           destinationCanonicalFullFen: retainedDestination.fullFen,
           effectiveCumulativeProb,
-          isTransposition: retainedDestination.pgn !== candidate.destinationPgn
+          isTransposition
         });
         continue;
       }
@@ -342,18 +364,16 @@ export async function reconcileOpponentBranches(input: {
             repertoireId: input.repertoireId,
             fullFen: candidate.destinationFullFen,
             positionKey: candidate.destinationPositionKey,
+            history: candidate.destinationHistory,
+            displayPgn: candidate.destinationPgn,
             pgn: candidate.destinationPgn,
-            cumulativeProb: candidate.trueProbability
+            cumulativeProb: candidate.trueProbability,
+            humanDataSnapshotId: source.humanDataSnapshotId
           }
         });
       }
-      const effectiveCumulativeProb = Math.max(destination.cumulativeProb, candidate.trueProbability);
-      if (effectiveCumulativeProb > destination.cumulativeProb) {
-        destination = await tx.repertoireNode.update({
-          where: { id: destination.id },
-          data: { cumulativeProb: effectiveCumulativeProb }
-        });
-      }
+      const isRepetition = isAncestorHistory(destination.pgn, source.pgn);
+      const isTransposition = !isRepetition && destination.pgn !== candidate.destinationPgn;
       const created = await tx.repertoireMove.create({
         data: {
           repertoireId: source.repertoireId,
@@ -363,7 +383,11 @@ export async function reconcileOpponentBranches(input: {
           san: candidate.san,
           playerTurn: "OPPONENT",
           prob: candidate.prob,
-          trueProbability: candidate.trueProbability,
+          routeProbability: isRepetition ? 0 : candidate.trueProbability,
+          trueProbability: isRepetition ? 0 : candidate.trueProbability,
+          routeHistory: isTransposition || isRepetition ? candidate.destinationHistory : null,
+          stopReason: isRepetition ? "Repetition" : isTransposition ? "Transposition" : null,
+          humanDataSnapshotId: source.humanDataSnapshotId,
           weightedCount: null,
           cp: null,
           mate: null,
@@ -374,6 +398,8 @@ export async function reconcileOpponentBranches(input: {
           localEvaluationProfile: null
         }
       });
+      destination = await recomputeDestinationProbability(destination.id);
+      const effectiveCumulativeProb = destination.cumulativeProb;
       branches.push({
         ...candidate,
         action: "ADDED",
@@ -382,7 +408,7 @@ export async function reconcileOpponentBranches(input: {
         destinationCanonicalPgn: destination.pgn,
         destinationCanonicalFullFen: destination.fullFen,
         effectiveCumulativeProb,
-        isTransposition: destination.pgn !== candidate.destinationPgn
+        isTransposition
       });
     }
 

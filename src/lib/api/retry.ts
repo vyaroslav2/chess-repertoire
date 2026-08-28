@@ -15,23 +15,30 @@ export class UserRequestedStopError extends Error {
 
 export const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
-let explorerRequestQueue = Promise.resolve();
-let nextExplorerRequestAt = 0;
+function automaticRetryDelay(baseMs: number, attemptIndex: number): number {
+  return Math.min(
+    defaultConfig.api.maximumRetryDelayMs,
+    baseMs * Math.pow(defaultConfig.api.retryBackoffMultiplier, attemptIndex)
+  );
+}
 
-async function waitForExplorerRequestSlot(): Promise<void> {
-  const previousRequest = explorerRequestQueue;
+let lichessRequestQueue = Promise.resolve();
+let nextLichessRequestAt = 0;
+
+async function waitForLichessRequestSlot(): Promise<void> {
+  const previousRequest = lichessRequestQueue;
   let releaseRequest!: () => void;
-  explorerRequestQueue = new Promise<void>(resolve => {
+  lichessRequestQueue = new Promise<void>(resolve => {
     releaseRequest = resolve;
   });
 
   await previousRequest;
   try {
-    const waitMs = Math.max(0, nextExplorerRequestAt - Date.now());
+    const waitMs = Math.max(0, nextLichessRequestAt - Date.now());
     if (waitMs > 0) {
       await delay(waitMs);
     }
-    nextExplorerRequestAt = Date.now() + defaultConfig.api.betweenRequestDelayMs;
+    nextLichessRequestAt = Date.now() + defaultConfig.api.betweenRequestDelayMs;
   } finally {
     releaseRequest();
   }
@@ -75,14 +82,14 @@ export async function fetchWithRetry(url: string, retryAttempts: number, useToke
 
   for (let i = 0; i < retryAttempts; i++) {
     try {
-      if (apiType === 'explorer') {
-        await waitForExplorerRequestSlot();
+      if (apiType === 'explorer' || apiType === 'eval') {
+        await waitForLichessRequestSlot();
       }
-      const response = await fetch(url, { headers });
+      const response = await fetch(url, { headers, signal: AbortSignal.timeout(defaultConfig.api.requestTimeoutMs) });
       if (response.status === 429) {
         if (i < retryAttempts - 1) {
             console.log(`[WARNING] Rate limit (429) on ${url}. Auto-retrying in ${defaultConfig.api.rateLimitRetryDelayMs}ms (Attempt ${i+1}/${retryAttempts})...`);
-            await delay(defaultConfig.api.rateLimitRetryDelayMs);
+            await delay(automaticRetryDelay(defaultConfig.api.rateLimitRetryDelayMs, i));
             continue;
         }
 
@@ -92,7 +99,7 @@ export async function fetchWithRetry(url: string, retryAttempts: number, useToke
       if (response.status >= 500 && response.status <= 599) {
         console.log(`[WARNING] Temporary HTTP ${response.status} on ${url}.`);
         if (i < retryAttempts - 1) {
-          await delay(defaultConfig.api.networkRetryDelayMs);
+          await delay(automaticRetryDelay(defaultConfig.api.networkRetryDelayMs, i));
           continue;
         }
         return handleExhaustedRetries(`HTTP ${response.status} retries exhausted.`);
@@ -114,7 +121,7 @@ export async function fetchWithRetry(url: string, retryAttempts: number, useToke
       if (i === retryAttempts - 1) {
           return handleExhaustedRetries('Network retries exhausted.');
       }
-      await delay(defaultConfig.api.networkRetryDelayMs);
+      await delay(automaticRetryDelay(defaultConfig.api.networkRetryDelayMs, i));
       continue;
     }
   }

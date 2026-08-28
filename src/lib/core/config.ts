@@ -62,6 +62,14 @@ export interface Config {
         };
     };
     api: {
+        wikibooks: {
+            retryAttempts: number;
+            initialRetryDelayMs: number;
+            retryBackoffMultiplier: number;
+            maxLagSeconds: number;
+            requestTimeoutMs: number;
+            userAgent: string;
+        };
         lichessCloudEval: {
             multiPv: number;
             retryAttempts: number;
@@ -76,6 +84,16 @@ export interface Config {
         networkRetryDelayMs: number;
         rateLimitRetryDelayMs: number;
         betweenRequestDelayMs: number;
+        requestTimeoutMs: number;
+        retryBackoffMultiplier: number;
+        maximumRetryDelayMs: number;
+    };
+    generation: {
+        commonProbability: number;
+        uncommonProbability: number;
+        commonDepthBudget: number;
+        uncommonDepthBudget: number;
+        rareDepthBudget: number;
     };
 }
 
@@ -182,6 +200,14 @@ export const defaultConfig: Config = {
     // Controls retries, rate-limits, and multi-PV for external services.
     // ---------------------------------------------------------
     api: {
+        wikibooks: {
+            retryAttempts: 3,
+            initialRetryDelayMs: 1000,
+            retryBackoffMultiplier: 2,
+            maxLagSeconds: 5,
+            requestTimeoutMs: 15000,
+            userAgent: "chess-repertoire/0.1 Wikibooks opening enrichment"
+        },
         // Lichess Cloud Evaluation API
         // Guidance: https://lichess.org/api#tag/Chess-bot/operation/apiCloudEval
         // Last checked: 2026-08
@@ -206,7 +232,18 @@ export const defaultConfig: Config = {
         // Delay durations (in milliseconds)
         networkRetryDelayMs: 1000,
         rateLimitRetryDelayMs: 2000,
-        betweenRequestDelayMs: 1000
+        betweenRequestDelayMs: 1000,
+        requestTimeoutMs: 15000,
+        retryBackoffMultiplier: 2,
+        maximumRetryDelayMs: 30000
+    },
+
+    generation: {
+        commonProbability: 0.02,
+        uncommonProbability: 0.005,
+        commonDepthBudget: 15,
+        uncommonDepthBudget: 8,
+        rareDepthBudget: 5
     }
 };
 
@@ -268,6 +305,25 @@ export function validateConfig(config: Config) {
     if (typeof config.api?.networkRetryDelayMs !== 'number' || config.api.networkRetryDelayMs < 0 || !Number.isFinite(config.api.networkRetryDelayMs)) throw new Error("Invalid api.networkRetryDelayMs");
     if (typeof config.api?.rateLimitRetryDelayMs !== 'number' || config.api.rateLimitRetryDelayMs < 0 || !Number.isFinite(config.api.rateLimitRetryDelayMs)) throw new Error("Invalid api.rateLimitRetryDelayMs");
     if (typeof config.api?.betweenRequestDelayMs !== 'number' || config.api.betweenRequestDelayMs < 0 || !Number.isFinite(config.api.betweenRequestDelayMs)) throw new Error("Invalid api.betweenRequestDelayMs");
+    if (!Number.isInteger(config.api?.requestTimeoutMs) || config.api.requestTimeoutMs < 1) throw new Error("Invalid api.requestTimeoutMs");
+    if (typeof config.api?.retryBackoffMultiplier !== 'number' || config.api.retryBackoffMultiplier < 1 || !Number.isFinite(config.api.retryBackoffMultiplier)) throw new Error("Invalid api.retryBackoffMultiplier");
+    if (!Number.isInteger(config.api?.maximumRetryDelayMs) || config.api.maximumRetryDelayMs < 0) throw new Error("Invalid api.maximumRetryDelayMs");
+
+    const wikibooks = config.api?.wikibooks;
+    if (!Number.isInteger(wikibooks?.retryAttempts) || wikibooks.retryAttempts < 1) throw new Error("Invalid api.wikibooks.retryAttempts");
+    if (!Number.isInteger(wikibooks?.initialRetryDelayMs) || wikibooks.initialRetryDelayMs < 0) throw new Error("Invalid api.wikibooks.initialRetryDelayMs");
+    if (typeof wikibooks?.retryBackoffMultiplier !== 'number' || wikibooks.retryBackoffMultiplier < 1 || !Number.isFinite(wikibooks.retryBackoffMultiplier)) throw new Error("Invalid api.wikibooks.retryBackoffMultiplier");
+    if (!Number.isInteger(wikibooks?.maxLagSeconds) || wikibooks.maxLagSeconds < 1) throw new Error("Invalid api.wikibooks.maxLagSeconds");
+    if (!Number.isInteger(wikibooks?.requestTimeoutMs) || wikibooks.requestTimeoutMs < 1) throw new Error("Invalid api.wikibooks.requestTimeoutMs");
+    if (typeof wikibooks?.userAgent !== "string" || wikibooks.userAgent.trim() === "") throw new Error("Invalid api.wikibooks.userAgent");
+
+    const generation = config.generation;
+    for (const key of ["commonProbability", "uncommonProbability"] as const) {
+        if (typeof generation?.[key] !== "number" || generation[key] < 0 || generation[key] > 1 || !Number.isFinite(generation[key])) throw new Error(`Invalid generation.${key}`);
+    }
+    for (const key of ["commonDepthBudget", "uncommonDepthBudget", "rareDepthBudget"] as const) {
+        if (!Number.isInteger(generation?.[key]) || generation[key] < 1) throw new Error(`Invalid generation.${key}`);
+    }
 }
 
 function canonicalStringify(obj: unknown): string {

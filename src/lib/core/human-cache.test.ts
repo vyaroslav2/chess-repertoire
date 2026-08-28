@@ -19,10 +19,12 @@ const prisma = new PrismaClient({
 
 test('Slice 5 Human Cache Rewrite Tests', async (t) => {
   // Clean DB
+  await prisma.repertoirePositionStat.deleteMany();
+  await prisma.repertoireMove.deleteMany();
+  await prisma.repertoireNode.deleteMany();
   await prisma.explorerMoveCache.deleteMany();
   await prisma.humanExplorerFetch.deleteMany();
   await prisma.humanDataSnapshot.deleteMany();
-  await prisma.repertoireNode.deleteMany();
   await prisma.position.deleteMany();
   await prisma.repertoire.deleteMany();
   await prisma.user.deleteMany();

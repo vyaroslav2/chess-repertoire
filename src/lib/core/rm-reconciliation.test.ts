@@ -444,7 +444,7 @@ describe("RM Reconciliation", () => {
             assert.strictEqual(newStat!.stability, 0);
             assert.strictEqual(newStat!.difficulty, 0);
             assert.strictEqual(newStat!.state, 0);
-            assert.strictEqual(await prisma.repertoirePositionStat.findUnique({ where: { id: stat.id } }), null);
+            assert.strictEqual(newStat!.id, stat.id, "the history-specific card is reset in place");
         });
 
         it("preserves an externally owned transposition target while removing its obsolete incoming edge", async () => {
@@ -675,8 +675,9 @@ describe("RM Reconciliation", () => {
                 cp: -22, mate: null, source: "ChessDB", selectionMethod: "Ordinary API",
                 moveOrigin: "Human Move", deepVerified: false, localEvaluationProfile: null, weightedCount: 18
             });
-            await prisma.repertoirePositionStat.create({
-                data: { repertoireId: repertoire.id, nodeId: sourceNode.id, targetMoveId: currentResponse.id, reps: 3 }
+            await prisma.repertoirePositionStat.update({
+                where: { repertoireId_nodeId: { repertoireId: repertoire.id, nodeId: sourceNode.id } },
+                data: { targetMoveId: currentResponse.id, targetUci: "c7c5", reps: 3 }
             });
             await assert.rejects(reconcileExistingResponse({
                 repertoireId: repertoire.id, sourceNodeId: sourceNode.id, cumulativeProb: 1,

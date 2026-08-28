@@ -18,7 +18,8 @@ function retryDelayMs(response: Response | null, attempt: number): number {
     const dateMs = Date.parse(retryAfter);
     if (Number.isFinite(dateMs)) return Math.max(0, dateMs - Date.now());
   }
-  return attempt * 1000;
+  const config = defaultConfig.api.wikibooks;
+  return config.initialRetryDelayMs * Math.pow(config.retryBackoffMultiplier, attempt - 1);
 }
 
 function parseResult(data: unknown): WikibooksResult {
@@ -49,23 +50,26 @@ export async function fetchWikibooksSnippet(history: string[], dependencies: Wik
 
   const request = dependencies.fetch ?? fetch;
   const sleep = dependencies.wait ?? wait;
-  const url = `https://en.wikibooks.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&maxlag=5&titles=${encodeURIComponent(pagePath)}&format=json`;
+  const config = defaultConfig.api.wikibooks;
+  const url = `https://en.wikibooks.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&maxlag=${config.maxLagSeconds}&titles=${encodeURIComponent(pagePath)}&format=json`;
   let lastReason = "unknown failure";
 
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt = 1; attempt <= config.retryAttempts; attempt++) {
     let response: Response | null = null;
     try {
       response = await request(url, {
-        headers: { "User-Agent": "chess-repertoire/0.1 Wikibooks opening enrichment" }
+        headers: { "User-Agent": config.userAgent },
+        signal: AbortSignal.timeout(config.requestTimeoutMs)
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return parseResult(await response.json());
     } catch (error) {
       lastReason = error instanceof Error ? error.message : String(error);
-      if (attempt < 3) await sleep(retryDelayMs(response, attempt));
+      if (attempt < config.retryAttempts) await sleep(retryDelayMs(response, attempt));
     }
   }
 
-  console.warn(`[WARNING] Wikibooks lookup failed after 3 attempts: ${lastReason}`);
+  console.warn(`[WARNING] Wikibooks lookup failed after ${config.retryAttempts} attempts: ${lastReason}`);
   return { status: "TECHNICAL_FAILURE", reason: lastReason };
 }
+import { defaultConfig } from "../core/config";

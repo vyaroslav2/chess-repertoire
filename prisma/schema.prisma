@@ -50,6 +50,8 @@ model HumanDataSnapshot {
   repertoire        Repertoire           @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
   fetches           HumanExplorerFetch[]
   ExplorerMoveCache ExplorerMoveCache[]
+  nodes             RepertoireNode[]
+  moves             RepertoireMove[]
 }
 
 model HumanExplorerFetch {
@@ -67,9 +69,7 @@ model HumanExplorerFetch {
 // --- THE CACHE LAYER ---
 
 model PositionCache {
-  fen         String  @id // Normalized FEN (no clocks)
-  eco         String?
-  openingName String?
+  fen String @id // Legacy position-level cache identity only
 }
 
 model ExplorerMoveCache {
@@ -144,23 +144,31 @@ model LocalEngineCandidate {
 // --- THE ALGORITHM LAYER ---
 
 model RepertoireNode {
-  id               String  @id @default(uuid()) // Unique ID for this specific path
-  repertoireId     String
-  fullFen          String // Canonical exact state
-  positionKey      String // FK to permanent Position
-  pgn              String // The unique move history
-  cumulativeProb   Float   @default(0)
-  wikibooksChecked Boolean @default(false)
-  wikiText         String?
+  id                  String  @id @default(uuid()) // Unique ID for this specific path
+  repertoireId        String
+  fullFen             String // Canonical exact state
+  positionKey         String // FK to permanent Position
+  history             String  @default("") // Canonical UCI/LAN move sequence
+  displayPgn          String  @default("") // Derived SAN display history
+  pgn                 String  @default("") // Legacy SAN display alias during migration
+  eco                 String?
+  openingName         String?
+  cumulativeProb      Float   @default(0)
+  isTransposition     Boolean @default(false)
+  humanDataSnapshotId String?
+  wikibooksChecked    Boolean @default(false)
+  wikiText            String?
 
-  position   Position   @relation(fields: [positionKey], references: [positionKey], onDelete: Restrict)
-  repertoire Repertoire @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
+  position          Position           @relation(fields: [positionKey], references: [positionKey], onDelete: Restrict)
+  repertoire        Repertoire         @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
+  humanDataSnapshot HumanDataSnapshot? @relation(fields: [humanDataSnapshotId], references: [id], onDelete: Restrict)
 
   incomingMoves RepertoireMove[]         @relation("IncomingMoves")
   outgoingMoves RepertoireMove[]         @relation("OutgoingMoves")
   stats         RepertoirePositionStat[]
 
-  @@unique([repertoireId, pgn]) // A specific PGN history is unique per repertoire
+  @@index([repertoireId, history])
+  @@index([repertoireId, positionKey])
 }
 
 model RepertoireMove {
@@ -173,11 +181,20 @@ model RepertoireMove {
   playerTurn   String // "OPPONENT" or "RESPONSE"
 
   // Opponent specific fields
-  prob            Float?
-  trueProbability Float?
+  prob                Float?
+  routeProbability    Float?
+  trueProbability     Float? // Legacy alias; new writes use routeProbability
+  routeHistory        String?
+  stopReason          String?
+  humanDataSnapshotId String?
 
   // Response specific fields
   weightedCount          Float?
+  mastersGames           Int?
+  eliteGames             Int?
+  totalRelevantGames     Int?
+  moveShare              Float?
+  engineRank             Int?
   cp                     Float?
   mate                   Int?
   source                 String?
@@ -186,23 +203,26 @@ model RepertoireMove {
   deepVerified           Boolean @default(false)
   localEvaluationProfile String?
 
-  fromNode   RepertoireNode           @relation("OutgoingMoves", fields: [fromNodeId], references: [id], onDelete: Cascade)
-  toNode     RepertoireNode           @relation("IncomingMoves", fields: [toNodeId], references: [id], onDelete: Cascade)
-  repertoire Repertoire               @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
-  stats      RepertoirePositionStat[]
+  fromNode          RepertoireNode           @relation("OutgoingMoves", fields: [fromNodeId], references: [id], onDelete: Cascade)
+  toNode            RepertoireNode           @relation("IncomingMoves", fields: [toNodeId], references: [id], onDelete: Cascade)
+  repertoire        Repertoire               @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
+  humanDataSnapshot HumanDataSnapshot?       @relation(fields: [humanDataSnapshotId], references: [id], onDelete: Restrict)
+  stats             RepertoirePositionStat[]
 
   @@unique([fromNodeId, uci])
 }
 
 model RepertoirePositionStat {
-  id           String @id @default(uuid())
+  id           String  @id @default(uuid())
   repertoireId String
-  nodeId       String
-  targetMoveId String
+  positionKey  String?
+  targetUci    String?
+  nodeId       String?
+  targetMoveId String?
 
-  repertoire Repertoire     @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
-  node       RepertoireNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
-  targetMove RepertoireMove @relation(fields: [targetMoveId], references: [id], onDelete: Cascade)
+  repertoire Repertoire      @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
+  node       RepertoireNode? @relation(fields: [nodeId], references: [id], onDelete: SetNull)
+  targetMove RepertoireMove? @relation(fields: [targetMoveId], references: [id], onDelete: SetNull)
 
   // Natural Language Explanation of the plan (e.g. from Gemini)
   explanation String?
@@ -221,5 +241,6 @@ model RepertoirePositionStat {
 
   createdAt DateTime @default(now())
 
-  @@unique([repertoireId, nodeId]) // Ensure a user has only one set of stats per node per repertoire
+  @@unique([repertoireId, positionKey, targetUci])
+  @@unique([repertoireId, nodeId])
 }

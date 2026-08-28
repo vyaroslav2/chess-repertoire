@@ -16,7 +16,7 @@ export interface ReplaceResponseBranchInput {
     fromNodeId: string;
     toNodeId: string;
     san: string;
-    fromNode: { pgn: string; fullFen: string; cumulativeProb: number };
+    fromNode: { pgn: string; fullFen: string; cumulativeProb: number; positionKey?: string; history?: string; humanDataSnapshotId?: string | null };
   };
   newUci: string;
   expectedNewSan: string;
@@ -28,6 +28,11 @@ export interface ReplaceResponseBranchInput {
   newDeepVerified: boolean;
   newLocalEvaluationProfile: string | null;
   newWeightedCount: number | null;
+  newMastersGames?: number | null;
+  newEliteGames?: number | null;
+  newTotalRelevantGames?: number | null;
+  newMoveShare?: number | null;
+  newEngineRank?: number | null;
   cumulativeProb: number;
 }
 
@@ -118,6 +123,11 @@ export async function replaceResponseBranch(input: ReplaceResponseBranchInput) {
     deepVerified: input.newDeepVerified,
     localEvaluationProfile: input.newLocalEvaluationProfile,
     weightedCount: input.newWeightedCount
+    ,mastersGames: input.newMastersGames
+    ,eliteGames: input.newEliteGames
+    ,totalRelevantGames: input.newTotalRelevantGames
+    ,moveShare: input.newMoveShare
+    ,engineRank: input.newEngineRank
   });
 
   const canonicalSource = parseFullFen(oldResponse.fromNode.fullFen);
@@ -168,9 +178,18 @@ export async function replaceResponseBranch(input: ReplaceResponseBranchInput) {
   await tx.position.upsert({ where: { positionKey: posKey }, update: {}, create: { positionKey: posKey } });
 
   const newPgn = `${oldResponse.fromNode.pgn ? `${oldResponse.fromNode.pgn} ` : ""}${chessMove.san}`;
-  const newDestinationNode = await tx.repertoireNode.create({
-    data: { repertoireId, fullFen: canonicalFullFen, positionKey: posKey, pgn: newPgn, cumulativeProb: input.cumulativeProb }
-  });
+  const newHistory = `${oldResponse.fromNode.history ? `${oldResponse.fromNode.history} ` : ""}${input.newUci}`;
+  const newDestinationNode = await tx.repertoireNode.findFirst({ where: { repertoireId, positionKey: posKey } }) ??
+    await tx.repertoireNode.create({
+      data: {
+        repertoireId, fullFen: canonicalFullFen, positionKey: posKey, history: newHistory,
+        displayPgn: newPgn, pgn: newPgn, cumulativeProb: input.cumulativeProb,
+        humanDataSnapshotId: oldResponse.fromNode.humanDataSnapshotId ?? null
+      }
+    });
+  const isRepetition = newDestinationNode.history === "" ||
+    (oldResponse.fromNode.history?.startsWith(`${newDestinationNode.history} `) ?? false);
+  const isTransposition = !isRepetition && newDestinationNode.history !== newHistory;
   const newResponse = await tx.repertoireMove.create({
     data: {
       repertoireId,
@@ -180,6 +199,11 @@ export async function replaceResponseBranch(input: ReplaceResponseBranchInput) {
       uci: input.newUci,
       playerTurn: "RESPONSE",
       weightedCount: input.newWeightedCount,
+      mastersGames: input.newMastersGames ?? null,
+      eliteGames: input.newEliteGames ?? null,
+      totalRelevantGames: input.newTotalRelevantGames ?? null,
+      moveShare: input.newMoveShare ?? null,
+      engineRank: input.newEngineRank ?? null,
       cp: input.newCp,
       mate: input.newMate,
       source: input.newSource,
@@ -188,14 +212,37 @@ export async function replaceResponseBranch(input: ReplaceResponseBranchInput) {
       deepVerified: input.newDeepVerified,
       localEvaluationProfile: input.newLocalEvaluationProfile,
       prob: null,
-      trueProbability: null
+      routeProbability: isRepetition ? 0 : input.cumulativeProb,
+      trueProbability: isRepetition ? 0 : input.cumulativeProb,
+      routeHistory: isTransposition || isRepetition ? newHistory : null,
+      stopReason: isRepetition ? "Repetition" : isTransposition ? "Transposition" : null,
+      humanDataSnapshotId: oldResponse.fromNode.humanDataSnapshotId ?? null
     }
   });
-  await tx.repertoirePositionStat.create({
-    data: {
+  await tx.repertoirePositionStat.upsert({
+    where: { repertoireId_nodeId: { repertoireId, nodeId: oldResponse.fromNodeId } },
+    update: {
+      targetMoveId: newResponse.id,
+      positionKey: oldResponse.fromNode.positionKey,
+      targetUci: input.newUci,
+      due: new Date(),
+      stability: 0,
+      difficulty: 0,
+      elapsed_days: 0,
+      scheduled_days: 0,
+      reps: 0,
+      lapses: 0,
+      state: 0,
+      last_review: null,
+      explanation: null,
+      tags: null
+    },
+    create: {
       repertoireId,
       nodeId: oldResponse.fromNodeId,
       targetMoveId: newResponse.id,
+      positionKey: oldResponse.fromNode.positionKey,
+      targetUci: input.newUci,
       due: new Date(),
       stability: 0,
       difficulty: 0,

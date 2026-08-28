@@ -226,10 +226,11 @@ test('applyApprovedDeepCorrection handles cycle safety, deletes subgraphs and cr
     assert.equal(newResponse.weightedCount, null, "Weighted count reset to null");
 
     const oldStatCheck = await prisma.repertoirePositionStat.findUnique({ where: { id: oldStat.id } });
-    assert.equal(oldStatCheck, null, "Old stat should be deleted via cascade");
+    assert.ok(oldStatCheck, "The history-specific card should be reset in place");
 
     const newStatCheck = await prisma.repertoirePositionStat.findFirst({ where: { targetMoveId: newResponse.id } });
     assert.ok(newStatCheck);
+    assert.equal(newStatCheck.id, oldStat.id);
     assert.equal(newStatCheck.reps, 0, "New stat should have reps 0");
     assert.equal(newStatCheck.explanation, null, "New stat should not inherit explanation");
 });
