@@ -44,7 +44,7 @@ export async function fetchAllDatabases(fen: string, snapshotId: string) {
       return { moves, totalGames, opening: null };
     }
 
-    const data = await fetchWithRetry(url, retryCount, false, "explorer");
+    const data = await fetchWithRetry(url, retryCount, true, "explorer");
     if (!data) {
       throw new Error(`Failed to fetch ${dbType} data for ${fullFen}`);
     }
