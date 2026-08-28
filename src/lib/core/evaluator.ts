@@ -156,6 +156,8 @@ export async function evaluateBlackMove(
         lichessResult = await readRemoteEngineResult(fullFen, "LICHESS", lichessProfile);
       } else {
         lichessUnavailable = true;
+        await saveRemoteEngineResult(fullFen, "LICHESS", lichessProfile, []);
+        lichessResult = await readRemoteEngineResult(fullFen, "LICHESS", lichessProfile);
       }
     } catch (e: any) {
       if (e instanceof Error && (e.message.startsWith("Malformed successful") || e.message.startsWith("Invalid remote engine result"))) throw e;
@@ -203,6 +205,8 @@ export async function evaluateBlackMove(
         }
       } else {
         chessDbUnavailable = true;
+        await saveRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile, []);
+        chessDbResult = await readRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile);
       }
     } catch (e: any) {
       if (e instanceof Error && (e.message.startsWith("Malformed successful") || e.message.startsWith("Invalid remote engine result"))) throw e;
