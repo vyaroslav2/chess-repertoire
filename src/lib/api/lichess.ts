@@ -46,7 +46,9 @@ export async function fetchAllDatabases(fen: string, snapshotId: string) {
 
     const data = await fetchWithRetry(url, retryCount, true, "explorer");
     if (!data) {
-      throw new Error(`Failed to fetch ${dbType} data for ${fullFen}`);
+      // Cache as empty so we don't hammer the API on subsequent runs
+      await saveHumanExplorerBucket(snapshotId, posKey, dbType, []);
+      return undefined;
     }
 
     const chess = new Chess(fullFen);
