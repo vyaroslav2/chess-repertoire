@@ -1,4 +1,4 @@
-﻿---
+---
 tags:
   - roadmap
 ---
@@ -14,5 +14,6 @@ Additionally, requests to Google Gemini and ElevenLabs APIs are routed through a
 
 ### Implementation Checklist
 - [x] Configure generator scripts (\start_tree_generator.ts\) to load \dotenv\ from \C:\Files\.env\ globally.
-- [x] Use \process.env.LICHESS_API_TOKEN\ dynamically when querying the Lichess Masters Explorer (handled via \etry.ts\ HTTP headers).
+- [x] Use \process.env.LICHESS_API_TOKEN\ dynamically when querying the Lichess Masters Explorer (handled via \
+etry.ts\ HTTP headers).
 - [ ] Make all application processes (web server, scripts) automatically fall back to \C:\Files\.env\ when local keys are not found.

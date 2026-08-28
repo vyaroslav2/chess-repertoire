@@ -50,3 +50,6 @@ docs/.obsidian/
 
 # run logs
 docs/logs/
+
+# engine
+/bin/
