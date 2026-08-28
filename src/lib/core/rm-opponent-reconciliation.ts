@@ -349,8 +349,7 @@ export async function reconcileOpponentBranches(input: {
       if (destination) {
         const canonicalDestinationFullFen = parseFullFen(destination.fullFen);
         if (canonicalDestinationFullFen !== destination.fullFen ||
-            positionKeyFromFen(canonicalDestinationFullFen) !== destination.positionKey ||
-            destination.fullFen !== candidate.destinationFullFen) {
+            positionKeyFromFen(canonicalDestinationFullFen) !== destination.positionKey) {
           throw new Error("Invalid canonical OPPONENT transposition destination");
         }
       } else {
