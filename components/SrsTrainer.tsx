@@ -36,6 +36,7 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
   const currentStat = stats[currentIndex];
   const lineMoves: string[] = currentStat?.lineMoves || [];
   const targetPlyIndex = lineMoves.length; // The ply they are supposed to guess from (after opponent's move)
+  const currentOpening = currentStat?.openingByPly?.[Math.max(0, currentPlyIndex)] ?? null;
 
   // Derived lock state
   const expectedPlyIndex = (testStatus === 'idle' || testStatus === 'wrong') ? targetPlyIndex : targetPlyIndex + 1;
@@ -369,6 +370,11 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
         <h2>Reviewing: {currentStat.repertoire.title}</h2>
         <p style={{ color: "var(--lichess-text-muted)" }}>
           Position {currentIndex + 1} of {stats.length}
+        </p>
+        <p style={{ color: "var(--lichess-text-muted)", minHeight: "1.5em" }}>
+          {currentOpening?.openingMetadataStatus === "PRESENT"
+            ? `${currentOpening.eco} · ${currentOpening.openingName}`
+            : "Opening classification unavailable"}
         </p>
       </div>
 

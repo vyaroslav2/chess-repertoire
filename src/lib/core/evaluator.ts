@@ -106,6 +106,8 @@ export type SelectedResponseResult = {
   selectedStats: any;
   candidateMoves: ReturnType<typeof buildBlackHumanShortlist>;
   enginePvs: any[];
+  openingMetadata?: { eco?: string | null; name?: string | null } | null;
+  openingMetadataRetrieval?: "CACHE" | "FRESH";
   /** @deprecated diagnostic compatibility; persistence uses source/cp/mate. */
   evalSource: ResponseEvaluationSource;
   /** @deprecated diagnostic compatibility; persistence uses cp. */
@@ -439,6 +441,8 @@ export async function evaluateBlackMove(
     selectedMate,
     selectedStats,
     candidateMoves,
+    openingMetadata: mastersData.opening,
+    openingMetadataRetrieval: mastersData.retrieval,
     enginePvs: lichessPvs.length > 0 ? lichessPvs : (chessDbOrdinarySnapshot ? toLegacyEnginePvs((chessDbResult as any).evaluations) : []) 
   };
 }

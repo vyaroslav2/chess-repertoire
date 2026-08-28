@@ -36,7 +36,7 @@ export async function fetchDuePositions(repertoireId: string) {
       due: { lte: new Date() }
     },
     include: {
-      position: true,
+      node: true,
       targetMove: true,
       repertoire: true
     },
@@ -51,22 +51,26 @@ export async function fetchDuePositions(repertoireId: string) {
     return [];
   }
 
-  // Attach full line history to each stat
+  // Attach exact-history move and opening metadata for live move-list browsing.
   const enrichedStats = await Promise.all(stats.map(async (stat) => {
-    const lineMoves = [];
-    let currPosId = stat.positionId;
-    while (true) {
-      const incoming = await prisma.move.findFirst({
-        where: { toPositionId: currPosId }
+    if (!stat.node || !stat.targetMove) throw new Error(`Incomplete repertoire card ${stat.id}`);
+    const lineMoves = stat.node.displayPgn === "" ? [] : stat.node.displayPgn.split(/\s+/);
+    const historyUcis = stat.node.history === "" ? [] : stat.node.history.split(/\s+/);
+    const histories = ["", ...historyUcis.map((_, index) => historyUcis.slice(0, index + 1).join(" "))];
+    const historyNodes = await prisma.repertoireNode.findMany({
+      where: { repertoireId, history: { in: histories } },
+      select: { history: true, eco: true, openingName: true, openingMetadataStatus: true, openingMetadataSource: true }
+    });
+    const metadataByHistory = new Map(historyNodes.map(node => [node.history, node]));
+    const openingByPly = histories.map(history => metadataByHistory.get(history) ?? null);
+    if (stat.targetMove.toNodeId) {
+      const destination = await prisma.repertoireNode.findUnique({
+        where: { id: stat.targetMove.toNodeId },
+        select: { history: true, eco: true, openingName: true, openingMetadataStatus: true, openingMetadataSource: true }
       });
-      if (incoming) {
-        lineMoves.unshift(incoming.san);
-        currPosId = incoming.fromPositionId;
-      } else {
-        break;
-      }
+      openingByPly.push(destination);
     }
-    return { ...stat, lineMoves };
+    return { ...stat, lineMoves, openingByPly };
   }));
 
   // Sort by depth (shallower lines first) to ensure new cards are introduced logically

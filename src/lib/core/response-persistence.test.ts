@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { after, before, beforeEach, test } from "node:test";
 import { prisma, createOpponentMove, createRepertoireNode, createResponseMove, saveLocalEngineBaseline, saveLocalEngineCandidate, saveRemoteEngineResult, validateResponsePersistence } from "../db/operations";
+import { Chess } from "chess.js";
 
 const FEN = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
 const PROFILE = "local-test-profile";
@@ -51,6 +52,29 @@ test("RESPONSE legal UCI with unrelated destination FullFen hard-errors without 
     /resulting FullFen does not match/
   );
   assert.equal(await prisma.repertoireMove.count({ where: { fromNodeId } }), 0);
+});
+
+test("RESPONSE repetition is a terminal move with no destination and retains route probability", async () => {
+  const rootChess = new Chess();
+  await createRepertoireNode(repertoireId, rootChess.fen(), "", 1, { displayPgn: "" });
+  rootChess.move("Nf3"); rootChess.move("Nf6"); rootChess.move("Ng1");
+  const source = await createRepertoireNode(repertoireId, rootChess.fen(), "g1f3 g8f6 f3g1", 0.00002, {
+    displayPgn: "Nf3 Nf6 Ng1"
+  });
+  const move = await createResponseMove({
+    ...base({
+      fromNodeId: source.id,
+      toNodeId: null,
+      uci: "f6g8",
+      san: "Ng8",
+      routeHistory: "g1f3 g8f6 f3g1 f6g8",
+      stopReason: "Repetition"
+    })
+  });
+  assert.equal(move.toNodeId, null);
+  assert.equal(move.stopReason, "Repetition");
+  assert.equal(move.routeProbability, 0.00002);
+  assert.equal(move.trueProbability, 0.00002);
 });
 
 test("OPPONENT legal UCI with unrelated destination FullFen hard-errors without writing", async () => {

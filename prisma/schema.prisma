@@ -144,20 +144,22 @@ model LocalEngineCandidate {
 // --- THE ALGORITHM LAYER ---
 
 model RepertoireNode {
-  id                  String  @id @default(uuid()) // Unique ID for this specific path
-  repertoireId        String
-  fullFen             String // Canonical exact state
-  positionKey         String // FK to permanent Position
-  history             String  @default("") // Canonical UCI/LAN move sequence
-  displayPgn          String  @default("") // Derived SAN display history
-  pgn                 String  @default("") // Legacy SAN display alias during migration
-  eco                 String?
-  openingName         String?
-  cumulativeProb      Float   @default(0)
-  isTransposition     Boolean @default(false)
-  humanDataSnapshotId String?
-  wikibooksChecked    Boolean @default(false)
-  wikiText            String?
+  id                    String  @id @default(uuid()) // Unique ID for this specific path
+  repertoireId          String
+  fullFen               String // Canonical exact state
+  positionKey           String // FK to permanent Position
+  history               String  @default("") // Canonical UCI/LAN move sequence
+  displayPgn            String  @default("") // Derived SAN display history
+  pgn                   String  @default("") // Legacy SAN display alias during migration
+  eco                   String?
+  openingName           String?
+  openingMetadataStatus String? // "PRESENT" or "VALID_ABSENCE"
+  openingMetadataSource String? // "LICHESS_MASTERS"
+  cumulativeProb        Float   @default(0)
+  isTransposition       Boolean @default(false)
+  humanDataSnapshotId   String?
+  wikibooksChecked      Boolean @default(false)
+  wikiText              String?
 
   position          Position           @relation(fields: [positionKey], references: [positionKey], onDelete: Restrict)
   repertoire        Repertoire         @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
@@ -175,7 +177,7 @@ model RepertoireMove {
   id           String  @id @default(uuid())
   repertoireId String
   fromNodeId   String
-  toNodeId     String
+  toNodeId     String?
   san          String
   uci          String?
   playerTurn   String // "OPPONENT" or "RESPONSE"
@@ -204,7 +206,7 @@ model RepertoireMove {
   localEvaluationProfile String?
 
   fromNode          RepertoireNode           @relation("OutgoingMoves", fields: [fromNodeId], references: [id], onDelete: Cascade)
-  toNode            RepertoireNode           @relation("IncomingMoves", fields: [toNodeId], references: [id], onDelete: Cascade)
+  toNode            RepertoireNode?          @relation("IncomingMoves", fields: [toNodeId], references: [id], onDelete: Cascade)
   repertoire        Repertoire               @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
   humanDataSnapshot HumanDataSnapshot?       @relation(fields: [humanDataSnapshotId], references: [id], onDelete: Restrict)
   stats             RepertoirePositionStat[]

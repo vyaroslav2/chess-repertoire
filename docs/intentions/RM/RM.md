@@ -1030,7 +1030,7 @@ A same-route repetition terminal is not another probability contribution into th
 
   
 
-It may record the probability mass that reached its terminal move for logging/UI if useful, but:
+It must record the probability mass that reached its terminal move for logging/UI, but:
 
   
 
@@ -2164,7 +2164,7 @@ stopReason = "Repetition"
 
   
 
-→ store terminal move if required
+→ store the terminal move
 
   
 

@@ -7,7 +7,7 @@ import {
   type ResponseSelectionMethod,
   validateResponsePersistence
 } from "../db/operations";
-import { parseFullFen } from "./fen";
+import { parseFullFen, positionKeyFromFen } from "./fen";
 import { replaceResponseBranch } from "./rm-structural";
 
 export type RecomputedResponse = Omit<ResponsePersistenceInput, "fromNodeId" | "toNodeId" | "uci" | "san"> & {
@@ -24,7 +24,7 @@ export interface ReconcileExistingResponseInput {
     id: string;
     uci: string;
     fromNodeId: string;
-    toNodeId: string;
+    toNodeId: string | null;
     fullFen: string;
   };
   recomputed: RecomputedResponse;
@@ -33,7 +33,7 @@ export interface ReconcileExistingResponseInput {
 export type ReconcileResult = {
   action: "KEPT" | "REPLACED";
   responseId: string;
-  destinationNodeId: string;
+  destinationNodeId: string | null;
   destinationFullFen: string;
   destinationPgn: string;
   san: string;
@@ -69,7 +69,9 @@ export async function reconcileExistingResponse(input: ReconcileExistingResponse
     moveOrigin: input.recomputed.moveOrigin,
     deepVerified: input.recomputed.deepVerified,
     localEvaluationProfile: input.recomputed.localEvaluationProfile,
-    weightedCount: input.recomputed.weightedCount
+    weightedCount: input.recomputed.weightedCount,
+    stopReason: input.expectedStoredResponse.toNodeId === null ? "Repetition" : null,
+    routeHistory: input.expectedStoredResponse.toNodeId === null ? "stored-repetition-route" : null
   });
 
   return prisma.$transaction(async tx => {
@@ -81,7 +83,7 @@ export async function reconcileExistingResponse(input: ReconcileExistingResponse
       throw new Error("Stale stored RESPONSE: not found or wrong repertoire");
     }
     if (oldResponse.fromNode.repertoireId !== input.repertoireId) throw new Error("Stale stored RESPONSE: fromNode foreign repertoire");
-    if (oldResponse.toNode.repertoireId !== input.repertoireId) throw new Error("Stale stored RESPONSE: toNode foreign repertoire");
+    if (oldResponse.toNode && oldResponse.toNode.repertoireId !== input.repertoireId) throw new Error("Stale stored RESPONSE: toNode foreign repertoire");
     if (oldResponse.playerTurn !== "RESPONSE") throw new Error("Stale stored RESPONSE: not a RESPONSE");
     if (oldResponse.uci !== input.expectedStoredResponse.uci) throw new Error("Stale stored RESPONSE: UCI changed");
     if (oldResponse.fromNodeId !== input.expectedStoredResponse.fromNodeId || oldResponse.fromNodeId !== input.sourceNodeId) {
@@ -103,12 +105,22 @@ export async function reconcileExistingResponse(input: ReconcileExistingResponse
       deepVerified: oldResponse.deepVerified,
       localEvaluationProfile: oldResponse.localEvaluationProfile,
       weightedCount: oldResponse.weightedCount
+      ,stopReason: oldResponse.stopReason === "Repetition" || oldResponse.stopReason === "Transposition" ? oldResponse.stopReason : null
+      ,routeHistory: oldResponse.routeHistory
     });
 
     const storedMove = deriveMove(oldResponse.fromNode.fullFen, oldResponse.uci);
     if (storedMove.san !== oldResponse.san) throw new Error("Stored RESPONSE SAN does not match its authoritative UCI");
-    if (storedMove.destinationFullFen !== oldResponse.toNode.fullFen) {
+    if (oldResponse.toNode && storedMove.destinationFullFen !== oldResponse.toNode.fullFen) {
       throw new Error("Stored RESPONSE destination FullFen does not match its authoritative UCI");
+    }
+    if (oldResponse.stopReason === "Repetition") {
+      const repeatedAncestor = await tx.repertoireNode.findFirst({
+        where: { repertoireId: input.repertoireId, positionKey: positionKeyFromFen(storedMove.destinationFullFen) }
+      });
+      if (!repeatedAncestor || !(repeatedAncestor.history === "" || oldResponse.fromNode.history.startsWith(`${repeatedAncestor.history} `))) {
+        throw new Error("Stored RESPONSE repetition does not return to an ancestor position");
+      }
     }
     const recomputedMove = deriveMove(oldResponse.fromNode.fullFen, input.recomputed.selectedUci);
     if (recomputedMove.san !== input.recomputed.selectedMoveSan) {
@@ -167,14 +179,16 @@ export async function reconcileExistingResponse(input: ReconcileExistingResponse
           engineRank: input.recomputed.engineRank ?? null,
           deepVerified: finalDeepVerified,
           localEvaluationProfile: finalProfile
+          ,routeProbability: input.cumulativeProb
+          ,trueProbability: input.cumulativeProb
         }
       });
       return {
         action: "KEPT",
         responseId: oldResponse.id,
         destinationNodeId: oldResponse.toNodeId,
-        destinationFullFen: oldResponse.toNode.fullFen,
-        destinationPgn: oldResponse.toNode.pgn,
+        destinationFullFen: oldResponse.toNode?.fullFen ?? storedMove.destinationFullFen,
+        destinationPgn: oldResponse.toNode?.pgn ?? (oldResponse.routeHistory ?? ""),
         san: recomputedMove.san
       };
     }

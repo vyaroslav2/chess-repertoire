@@ -3144,7 +3144,9 @@ Do not continue propagating only A's `0.10` or B's `0.03` after the merge.
 
   
 
-A repetition terminal edge may record the probability mass that reached the repeated move for logging/UI if useful, but that value is excluded from the repeated node's `cumulativeProb`.
+A repetition terminal edge must record the actual probability mass that reached the repeated move. That terminal probability is diagnostic evidence only: the edge has no destination and is excluded from every canonical node's `cumulativeProb`.
+
+For example, if a route has probability `2%` and the repeating White move has conditional probability `0.10%`, the repetition terminal records `0.002%`. A deterministic Black response does not multiply that value. The `0.002%` is not added back to the repeated ancestor because it is a later revisit contained inside an already-counted route, not another mutually exclusive route into that node.
 
   
 

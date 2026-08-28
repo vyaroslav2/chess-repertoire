@@ -1,7 +1,7 @@
 import { Chess } from "chess.js";
 import { prisma, getOrCreatePositionCache, getRepertoireNode, createRepertoireNode, createResponseMove, getOrCreateHumanDataSnapshot, ensureRepertoireNodeWikibooks, propagateRepertoireProbabilities } from "../db/operations";
 import { parseFullFen, positionKeyFromFen } from "./fen";
-import { fetchAllDatabases } from "../api/lichess";
+import { fetchAllDatabases, fetchMastersOpeningMetadata } from "../api/lichess";
 import { defaultConfig, computeExplorerRequestProfile, createRuntimeConfig } from "../core/config";
 import { selectWhiteCandidates, evaluateBlackMove } from "./evaluator";
 import { reconcileExistingResponse } from "./rm-reconciliation";
@@ -20,6 +20,7 @@ type ResponseEvaluator = typeof evaluateBlackMove;
 export type GenerateRepertoireDependencies = {
   repertoireId?: string;
   fetchDatabases?: typeof fetchAllDatabases;
+  fetchOpeningMetadata?: typeof fetchMastersOpeningMetadata;
   responseEvaluator?: ResponseEvaluator;
   ensurePositionCache?: typeof getOrCreatePositionCache;
   ensureNodeWikibooks?: typeof ensureRepertoireNodeWikibooks;
@@ -38,6 +39,54 @@ export async function attemptCanonicalNodeWikibooks(
 }
 
 export type RebuildWikibooksCache = Map<string, string | null>;
+export type RebuildOpeningMetadataCache = Map<string, {
+  status: "PRESENT" | "VALID_ABSENCE";
+  source: "LICHESS_MASTERS";
+  eco: string | null;
+  openingName: string | null;
+}>;
+
+export async function captureRebuildOpeningMetadataCache(repertoireId: string): Promise<RebuildOpeningMetadataCache> {
+  const nodes = await prisma.repertoireNode.findMany({
+    where: { repertoireId, openingMetadataStatus: { in: ["PRESENT", "VALID_ABSENCE"] } },
+    select: { history: true, openingMetadataStatus: true, openingMetadataSource: true, eco: true, openingName: true }
+  });
+  const cache: RebuildOpeningMetadataCache = new Map();
+  for (const node of nodes) {
+    if (node.openingMetadataSource !== "LICHESS_MASTERS") throw new Error("Stored opening metadata has an invalid or missing source");
+    if (node.openingMetadataStatus === "PRESENT" && (!node.eco || !node.openingName)) throw new Error("Stored PRESENT opening metadata is incomplete");
+    if (node.openingMetadataStatus === "VALID_ABSENCE" && (node.eco !== null || node.openingName !== null)) throw new Error("Stored VALID_ABSENCE opening metadata contains values");
+    cache.set(node.history, {
+      status: node.openingMetadataStatus as "PRESENT" | "VALID_ABSENCE",
+      source: "LICHESS_MASTERS",
+      eco: node.eco,
+      openingName: node.openingName
+    });
+  }
+  return cache;
+}
+
+export async function restoreRebuildOpeningMetadataState(nodeId: string, cache: RebuildOpeningMetadataCache) {
+  const node = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: nodeId }, select: { history: true, openingMetadataStatus: true } });
+  if (node.openingMetadataStatus || !cache.has(node.history)) return false;
+  const restored = cache.get(node.history)!;
+  await prisma.repertoireNode.update({ where: { id: nodeId }, data: {
+    eco: restored.eco, openingName: restored.openingName,
+    openingMetadataStatus: restored.status, openingMetadataSource: restored.source
+  }});
+  return true;
+}
+
+async function persistOpeningMetadata(nodeId: string, opening: { eco?: string | null; name?: string | null } | null) {
+  const present = typeof opening?.eco === "string" && opening.eco.trim() !== "" &&
+    typeof opening?.name === "string" && opening.name.trim() !== "";
+  if (opening && !present) throw new Error("Lichess Masters opening metadata must contain both ECO and opening name");
+  await prisma.repertoireNode.update({ where: { id: nodeId }, data: present ? {
+    eco: opening!.eco!, openingName: opening!.name!, openingMetadataStatus: "PRESENT", openingMetadataSource: "LICHESS_MASTERS"
+  } : {
+    eco: null, openingName: null, openingMetadataStatus: "VALID_ABSENCE", openingMetadataSource: "LICHESS_MASTERS"
+  }});
+}
 
 export async function captureRebuildWikibooksCache(repertoireId: string): Promise<RebuildWikibooksCache> {
   const checkedNodes = await prisma.repertoireNode.findMany({
@@ -220,14 +269,15 @@ export async function generateRepertoire(
   let totalWhiteMovesFound = 0;
   let totalMissingWhiteMoves = 0;
   let totalBlackMovesEvaluated = 0;
-  let totalSkippedMoves = 0;
+  let totalTranspositions = 0;
+  let totalRepetitionStops = 0;
   let totalBranchesAborted = 0;
-  let totalMissingBlackMoves = 0;
   let totalNaEvals = 0;
   let totalDuplicateHistories = 0;
   let maximumQueueSize = 1;
 
   const fetchDatabases = dependencies.fetchDatabases ?? fetchAllDatabases;
+  const fetchOpeningMetadata = dependencies.fetchOpeningMetadata ?? fetchMastersOpeningMetadata;
   const ensurePositionCache = dependencies.ensurePositionCache ?? getOrCreatePositionCache;
   const ensureNodeWikibooks = dependencies.ensureNodeWikibooks ?? ensureRepertoireNodeWikibooks;
   const wait = dependencies.wait ?? delay;
@@ -251,6 +301,7 @@ export async function generateRepertoire(
   const snapshot = await getOrCreateHumanDataSnapshot(repertoire.id, reqProfile);
   const snapshotId = snapshot.id;
   const rebuildWikibooksCache = await captureRebuildWikibooksCache(repertoire.id);
+  const rebuildOpeningMetadataCache = await captureRebuildOpeningMetadataCache(repertoire.id);
 
   try {
   await prisma.$transaction(async tx => {
@@ -264,6 +315,7 @@ export async function generateRepertoire(
     humanDataSnapshotId: snapshotId
   });
   await restoreRebuildWikibooksState(rootNode.id, rebuildWikibooksCache);
+  await restoreRebuildOpeningMetadataState(rootNode.id, rebuildOpeningMetadataCache);
 
   const queue: GeneratorQueueItem[] = [{
     nodeId: rootNode.id,
@@ -325,15 +377,17 @@ export async function generateRepertoire(
     if (canonicalSourceNode.fullFen !== node.fen || canonicalSourceNode.pgn !== pgnString) {
       throw new Error("Queued canonical source state no longer matches its node/history");
     }
+    await restoreRebuildOpeningMetadataState(canonicalSourceNode.id, rebuildOpeningMetadataCache);
     await attemptCanonicalNodeWikibooks(canonicalSourceNode.id, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
 
     const [masters, elite, amateur] = await fetchDatabases(canonicalSourceNode.fullFen, snapshotId);
     await ensurePositionCache(canonicalSourceNode.fullFen);
-    if (masters.opening?.name) {
-      await prisma.repertoireNode.update({
-        where: { id: canonicalSourceNode.id },
-        data: { eco: masters.opening.eco || null, openingName: masters.opening.name }
-      });
+    const existingMetadata = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: canonicalSourceNode.id }, select: { openingMetadataStatus: true } });
+    if (!existingMetadata.openingMetadataStatus) {
+      const opening = masters.retrieval === "CACHE"
+        ? await fetchOpeningMetadata(canonicalSourceNode.fullFen)
+        : masters.opening;
+      await persistOpeningMetadata(canonicalSourceNode.id, opening);
     }
     
     const whiteCandidates = selectWhiteCandidates(
@@ -397,7 +451,9 @@ export async function generateRepertoire(
       opponentReconciliation.branches.map(branch => [branch.uci, branch] as const)
     );
     for (const branch of opponentReconciliation.branches) {
-      await propagateRepertoireProbabilities(repertoire.id, branch.destinationNodeId);
+      if (branch.destinationNodeId !== null) {
+        await propagateRepertoireProbabilities(repertoire.id, branch.destinationNodeId);
+      }
     }
 
     if (whiteCandidates.length === 0) {
@@ -420,19 +476,23 @@ export async function generateRepertoire(
       if (!reconciledOpponent) throw new Error(`Reconciled OPPONENT branch ${canonicalWhiteMove.uci} is missing`);
       console.log(`\nEvaluating White Move: ${whiteMove.san} (Reason: ${whiteMove.reason}, Prob: ${whiteMove.probability ? (whiteMove.probability*100).toFixed(1) : 0}%)`);
       const newPgn = canonicalWhiteMove.destinationPgn;
+      const reconciledEdge = await prisma.repertoireMove.findUnique({ where: { id: reconciledOpponent.edgeId } });
+      if (reconciledEdge?.stopReason === "Repetition") {
+        console.log(`[REPETITION STOP] route=${canonicalWhiteMove.destinationHistory}; repeated=${reconciledOpponent.destinationCanonicalPgn || "(root)"}; repeatingMove=${canonicalWhiteMove.san}; terminalProbability=${reconciledOpponent.effectiveCumulativeProb}; result=move retained and route terminated without a destination edge.`);
+        totalRepetitionStops++;
+        continue;
+      }
+      if (reconciledOpponent.destinationNodeId === null) {
+        throw new Error("Non-repetition OPPONENT branch is missing its destination");
+      }
       const posAfterWhiteNode = await prisma.repertoireNode.findUnique({
         where: { id: reconciledOpponent.destinationNodeId }
       });
       if (!posAfterWhiteNode || posAfterWhiteNode.repertoireId !== repertoire.id) {
         throw new Error("Reconciled OPPONENT destination disappeared or changed repertoire");
       }
-      const reconciledEdge = await prisma.repertoireMove.findUnique({ where: { id: reconciledOpponent.edgeId } });
-      if (reconciledEdge?.stopReason === "Repetition") {
-        console.log(`[STOPPED] ${canonicalWhiteMove.san} repeats an earlier position on this route.`);
-        totalSkippedMoves++;
-        continue;
-      }
       await ensurePositionCache(posAfterWhiteNode.fullFen);
+      await restoreRebuildOpeningMetadataState(posAfterWhiteNode.id, rebuildOpeningMetadataCache);
       await restoreRebuildWikibooksState(posAfterWhiteNode.id, rebuildWikibooksCache);
       await attemptCanonicalNodeWikibooks(posAfterWhiteNode.id, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
       const effectiveCanonicalProb = reconciledOpponent.effectiveCumulativeProb;
@@ -445,7 +505,8 @@ export async function generateRepertoire(
               responseSourceNodeId: posAfterWhiteNode.id,
               effectiveCumulativeProb: effectiveCanonicalProb
           });
-          totalSkippedMoves++;
+          totalTranspositions++;
+          console.log(`[TRANSPOSITION] route=${newPgn}; canonicalRoute=${posAfterWhiteNode.pgn}; result=reused the canonical Black response without duplicate evaluation.`);
           continue;
       }
 
@@ -474,6 +535,13 @@ export async function generateRepertoire(
           evaluator: dependencies.responseEvaluator
       });
       const algoResult = canonicalSelection.result;
+      const responseNodeMetadata = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: posAfterWhiteNode.id }, select: { openingMetadataStatus: true } });
+      if (!responseNodeMetadata.openingMetadataStatus) {
+        const opening = algoResult.openingMetadataRetrieval === "CACHE"
+          ? await fetchOpeningMetadata(posAfterWhiteNode.fullFen)
+          : algoResult.openingMetadata ?? null;
+        await persistOpeningMetadata(posAfterWhiteNode.id, opening);
+      }
       const selectedWeightedCount = algoResult.moveOrigin === "Human Move"
         ? algoResult.selectedStats?.weightedGames ?? null
         : null;
@@ -512,10 +580,10 @@ export async function generateRepertoire(
       const blackPgn = selectedHistory.join(" ");
       const blackHistory = [...(node.uciHistory ?? historyFromCanonicalPgn(canonicalSourceNode.history)), canonicalWhiteMove.uci, algoResult.selectedUci].join(" ");
 
-      let resultingDestinationId: string;
-      let resultingDestinationFen: string = selectedDestinationFen;
-      let resultingDestinationPgn = blackPgn;
-      let resultingDestinationHistory = blackHistory;
+      let resultingDestinationId: string | null;
+      let resultingDestinationFen: string | null = selectedDestinationFen;
+      let resultingDestinationPgn: string | null = blackPgn;
+      let resultingDestinationHistory: string | null = blackHistory;
 
       if (dbBlackMove) {
           const result = await reconcileExistingResponse({
@@ -547,9 +615,11 @@ export async function generateRepertoire(
           resultingDestinationId = result.destinationNodeId;
           resultingDestinationFen = result.destinationFullFen;
           resultingDestinationPgn = result.destinationPgn;
-          const destination = await prisma.repertoireNode.findUnique({ where: { id: resultingDestinationId } });
-          if (!destination) throw new Error("Reconciled RESPONSE destination disappeared");
-          resultingDestinationHistory = destination.history;
+          if (resultingDestinationId !== null) {
+            const destination = await prisma.repertoireNode.findUnique({ where: { id: resultingDestinationId } });
+            if (!destination) throw new Error("Reconciled RESPONSE destination disappeared");
+            resultingDestinationHistory = destination.history;
+          }
 
           // Reconcile explanation but DO NOT wipe SRS progress
           const explanationUpdate = await prisma.repertoirePositionStat.updateMany({
@@ -558,29 +628,32 @@ export async function generateRepertoire(
           });
           if (explanationUpdate.count !== 1) throw new Error("Reconciled RESPONSE stat changed before explanation update");
       } else {
-          let posAfterBlackNode = await getRepertoireNode(repertoire.id, blackHistory);
+          let posAfterBlackNode = await getRepertoireNode(repertoire.id, blackHistory) ??
+            await prisma.repertoireNode.findFirst({
+              where: { repertoireId: repertoire.id, positionKey: positionKeyFromFen(selectedDestinationFen) }
+            });
+          const responseIsRepetition = posAfterBlackNode !== null &&
+            (posAfterBlackNode.history === "" || posAfterWhiteNode.history.startsWith(`${posAfterBlackNode.history} `));
           if (!posAfterBlackNode) {
-              posAfterBlackNode = await prisma.repertoireNode.findFirst({
-                where: { repertoireId: repertoire.id, positionKey: positionKeyFromFen(selectedDestinationFen) }
-              }) ?? await createRepertoireNode(repertoire.id, selectedDestinationFen, blackHistory, effectiveCanonicalProb, {
+              posAfterBlackNode = await createRepertoireNode(repertoire.id, selectedDestinationFen, blackHistory, effectiveCanonicalProb, {
                 displayPgn: blackPgn,
                 humanDataSnapshotId: snapshotId
               });
-          } else {
+          } else if (!responseIsRepetition) {
               await prisma.repertoireNode.update({
                   where: { id: posAfterBlackNode.id },
                   data: { cumulativeProb: Math.max(posAfterBlackNode.cumulativeProb, effectiveCanonicalProb) }
               });
           }
 
-          resultingDestinationId = posAfterBlackNode.id;
+          resultingDestinationId = responseIsRepetition ? null : posAfterBlackNode.id;
           resultingDestinationFen = posAfterBlackNode.fullFen;
           resultingDestinationPgn = posAfterBlackNode.pgn;
           resultingDestinationHistory = posAfterBlackNode.history;
 
           const createdResponse = await createResponseMove({
               fromNodeId: posAfterWhiteNode.id,
-              toNodeId: posAfterBlackNode.id,
+              toNodeId: responseIsRepetition ? null : posAfterBlackNode.id,
               uci: algoResult.selectedUci,
               san: algoResult.selectedMoveSan,
               cp: algoResult.cp,
@@ -592,8 +665,8 @@ export async function generateRepertoire(
               moveOrigin: algoResult.moveOrigin,
               deepVerified: algoResult.deepVerified,
               localEvaluationProfile: algoResult.localEvaluationProfile
-              ,routeHistory: posAfterBlackNode.history !== blackHistory ? blackHistory : null
-              ,stopReason: posAfterBlackNode.history === "" || posAfterWhiteNode.history.startsWith(`${posAfterBlackNode.history} `)
+              ,routeHistory: responseIsRepetition || posAfterBlackNode.history !== blackHistory ? blackHistory : null
+              ,stopReason: responseIsRepetition
                 ? "Repetition"
                 : posAfterBlackNode.history !== blackHistory ? "Transposition" : null
           });
@@ -624,20 +697,23 @@ export async function generateRepertoire(
           });
       }
 
-      await ensurePositionCache(resultingDestinationFen);
-      await propagateRepertoireProbabilities(repertoire.id, resultingDestinationId);
-      await restoreRebuildWikibooksState(resultingDestinationId, rebuildWikibooksCache);
-      await attemptCanonicalNodeWikibooks(resultingDestinationId, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
-
       const resultingResponse = await prisma.repertoireMove.findFirst({
         where: { fromNodeId: posAfterWhiteNode.id, playerTurn: "RESPONSE" }
       });
       if (resultingResponse?.stopReason === "Repetition") {
-        console.log(`[STOPPED] ${algoResult.selectedMoveSan} repeats an earlier position on this route.`);
+        console.log(`[REPETITION STOP] route=${blackHistory}; repeated=${resultingDestinationHistory || "(root)"}; repeatingMove=${algoResult.selectedMoveSan}; terminalProbability=${effectiveCanonicalProb}; result=target move retained and route terminated without a destination edge.`);
         reconciledResponseNodeIds.add(posAfterWhiteNode.id);
-        totalSkippedMoves++;
+        totalRepetitionStops++;
         continue;
       }
+
+      if (!resultingDestinationId || !resultingDestinationFen || resultingDestinationPgn === null || resultingDestinationHistory === null) {
+        throw new Error("Non-repetition RESPONSE is missing its destination");
+      }
+      await ensurePositionCache(resultingDestinationFen);
+      await propagateRepertoireProbabilities(repertoire.id, resultingDestinationId);
+      await restoreRebuildWikibooksState(resultingDestinationId, rebuildWikibooksCache);
+      await attemptCanonicalNodeWikibooks(resultingDestinationId, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
 
       reconciledResponseNodeIds.add(posAfterWhiteNode.id);
       const continuationItem = buildCanonicalContinuationQueueItem({
@@ -663,8 +739,9 @@ export async function generateRepertoire(
     const runningElapsed = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(`\n--- [CHECKPOINT] Node Finished ---`);
     console.log(`Time: ${runningElapsed}s | Positions Looked At: ${totalPositionsProcessed} (Aborted: ${totalBranchesAborted})`);
-    console.log(`White Moves Found: ${totalWhiteMovesFound} (Skipped: ${totalSkippedMoves})`);
-    console.log(`Missing White Moves: ${totalMissingWhiteMoves} | Missing Black Moves: ${totalMissingBlackMoves}`);
+    console.log(`White Moves Found: ${totalWhiteMovesFound}`);
+    console.log(`Transpositions: ${totalTranspositions} | Repetition Stops: ${totalRepetitionStops}`);
+    console.log(`Missing White Moves: ${totalMissingWhiteMoves}`);
     console.log(`--------------------------------------------\n`);
   }
   
@@ -678,9 +755,9 @@ export async function generateRepertoire(
   console.log(`  - Branches Aborted:     ${totalBranchesAborted}`);
   console.log(`White Moves Found:        ${totalWhiteMovesFound}`);
   console.log(`Total Black Responses:    ${totalBlackMovesEvaluated}`);
-  console.log(`Total Skipped (In DB):    ${totalSkippedMoves}`);
+  console.log(`Transpositions:           ${totalTranspositions}`);
+  console.log(`Repetition Stops:         ${totalRepetitionStops}`);
   console.log(`Missing White Moves:      ${totalMissingWhiteMoves}`);
-  console.log(`Missing Black Moves:      ${totalMissingBlackMoves}`);
   console.log(`Total N/A Evals (Null):   ${totalNaEvals}`);
   console.log(`Duplicate Histories:      ${totalDuplicateHistories}`);
   console.log("========================================================\n");
@@ -693,9 +770,10 @@ export async function generateRepertoire(
     totalPositionsProcessed,
     totalWhiteMovesFound,
     totalBlackMovesEvaluated,
-    totalSkippedMoves,
+    totalSkippedMoves: totalTranspositions + totalRepetitionStops,
+    totalTranspositions,
+    totalRepetitionStops,
     totalMissingWhiteMoves,
-    totalMissingBlackMoves
   };
   } catch (error) {
     try {

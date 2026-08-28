@@ -26,7 +26,7 @@ export type ExpectedOpponentEdge = {
   id: string;
   repertoireId: string;
   fromNodeId: string;
-  toNodeId: string;
+  toNodeId: string | null;
   uci: string;
   playerTurn: string;
 };
@@ -43,9 +43,9 @@ export type ExpectedOpponentSource = {
 export type ReconciledOpponentBranch = CanonicalOpponentCandidate & {
   action: "RETAINED" | "ADDED";
   edgeId: string;
-  destinationNodeId: string;
-  destinationCanonicalPgn: string;
-  destinationCanonicalFullFen: string;
+  destinationNodeId: string | null;
+  destinationCanonicalPgn: string | null;
+  destinationCanonicalFullFen: string | null;
   effectiveCumulativeProb: number;
   isTransposition: boolean;
 };
@@ -168,6 +168,18 @@ async function validateStoredOpponentEdge(
   if (derived.san !== edge.san) throw new Error("Malformed stored OPPONENT edge: SAN does not match UCI/LAN");
   validateProbability(edge.prob, "stored prob", true);
   validateProbability(edge.trueProbability, "stored trueProbability", false);
+  if (edge.stopReason === "Repetition") {
+    if (edge.toNodeId !== null) throw new Error("Malformed stored OPPONENT repetition: destination must be null");
+    if (!edge.routeHistory) throw new Error("Malformed stored OPPONENT repetition: routeHistory is missing");
+    const ancestor = await tx.repertoireNode.findFirst({
+      where: { repertoireId: source.repertoireId, positionKey: derived.destinationPositionKey }
+    });
+    if (!ancestor || !isAncestorHistory(ancestor.pgn, source.pgn)) {
+      throw new Error("Malformed stored OPPONENT repetition: resulting position is not an ancestor");
+    }
+    return null;
+  }
+  if (edge.toNodeId === null) throw new Error("Malformed stored OPPONENT edge: destination is missing");
   const destination = await tx.repertoireNode.findUnique({ where: { id: edge.toNodeId } });
   if (!destination) throw new Error("Malformed stored OPPONENT edge: destination is missing");
   if (destination.repertoireId !== source.repertoireId) {
@@ -187,7 +199,7 @@ async function validateStoredOpponentEdge(
 function assertExpectedStoredSet(
   source: ExpectedOpponentSource,
   expected: ExpectedOpponentEdge[],
-  actual: Array<{ id: string; repertoireId: string; fromNodeId: string; toNodeId: string; uci: string | null; playerTurn: string }>
+  actual: Array<{ id: string; repertoireId: string; fromNodeId: string; toNodeId: string | null; uci: string | null; playerTurn: string }>
 ) {
   const expectedById = new Map<string, ExpectedOpponentEdge>();
   for (const edge of expected) {
@@ -219,7 +231,7 @@ export async function readExpectedOpponentEdges(sourceNodeId: string): Promise<E
     toNodeId: edge.toNodeId,
     uci: edge.uci ?? "",
     playerTurn: edge.playerTurn
-  }));
+    }));
 }
 
 export async function reconcileOpponentBranches(input: {
@@ -284,13 +296,17 @@ export async function reconcileOpponentBranches(input: {
     const deleted = await deleteOwnedBranches({
       tx,
       repertoireId: input.repertoireId,
-      roots: removedEdges.map(edge => ({
+      roots: removedEdges.flatMap(edge => edge.toNodeId === null ? [] : [{
         edgeId: edge.id,
         nodeId: edge.toNodeId,
         parentPgn: source.pgn,
         san: edge.san
-      }))
+      }])
     });
+    const removedTerminalIds = removedEdges.filter(edge => edge.toNodeId === null).map(edge => edge.id);
+    if (removedTerminalIds.length > 0) {
+      await tx.repertoireMove.deleteMany({ where: { id: { in: removedTerminalIds } } });
+    }
 
     const branches: ReconciledOpponentBranch[] = [];
     const recomputeDestinationProbability = async (nodeId: string) => {
@@ -306,7 +322,37 @@ export async function reconcileOpponentBranches(input: {
     };
     for (const candidate of [...input.recomputedCandidates].sort((a, b) => a.uci.localeCompare(b.uci))) {
       const stored = storedByUci.get(candidate.uci);
+      const repeatedAncestor = await tx.repertoireNode.findFirst({
+        where: { repertoireId: input.repertoireId, positionKey: candidate.destinationPositionKey }
+      });
+      const candidateIsRepetition = repeatedAncestor !== null && isAncestorHistory(repeatedAncestor.pgn, source.pgn);
       if (stored) {
+        if (candidateIsRepetition) {
+          const updated = await tx.repertoireMove.update({
+            where: { id: stored.id },
+            data: {
+              toNodeId: null,
+              san: candidate.san,
+              prob: candidate.prob,
+              routeProbability: candidate.trueProbability,
+              trueProbability: candidate.trueProbability,
+              routeHistory: candidate.destinationHistory,
+              stopReason: "Repetition"
+            }
+          });
+          branches.push({
+            ...candidate,
+            action: "RETAINED",
+            edgeId: updated.id,
+            destinationNodeId: null,
+            destinationCanonicalPgn: repeatedAncestor!.pgn,
+            destinationCanonicalFullFen: repeatedAncestor!.fullFen,
+            effectiveCumulativeProb: candidate.trueProbability,
+            isTransposition: false
+          });
+          continue;
+        }
+        if (stored.toNodeId === null) throw new Error("Stored OPPONENT repetition no longer repeats and requires branch rebuild");
         const retainedDestination = await tx.repertoireNode.findUnique({ where: { id: stored.toNodeId } });
         if (!retainedDestination) {
           throw new Error("Retained OPPONENT destination was removed with an obsolete canonical owner");
@@ -346,6 +392,43 @@ export async function reconcileOpponentBranches(input: {
       });
       if (matchingNodes.length > 1) throw new Error("Ambiguous canonical OPPONENT destination PositionKey");
       let destination = matchingNodes[0];
+      if (candidateIsRepetition) {
+        const created = await tx.repertoireMove.create({
+          data: {
+            repertoireId: source.repertoireId,
+            fromNodeId: source.id,
+            toNodeId: null,
+            uci: candidate.uci,
+            san: candidate.san,
+            playerTurn: "OPPONENT",
+            prob: candidate.prob,
+            routeProbability: candidate.trueProbability,
+            trueProbability: candidate.trueProbability,
+            routeHistory: candidate.destinationHistory,
+            stopReason: "Repetition",
+            humanDataSnapshotId: source.humanDataSnapshotId,
+            weightedCount: null,
+            cp: null,
+            mate: null,
+            source: null,
+            selectionMethod: null,
+            moveOrigin: null,
+            deepVerified: false,
+            localEvaluationProfile: null
+          }
+        });
+        branches.push({
+          ...candidate,
+          action: "ADDED",
+          edgeId: created.id,
+          destinationNodeId: null,
+          destinationCanonicalPgn: repeatedAncestor!.pgn,
+          destinationCanonicalFullFen: repeatedAncestor!.fullFen,
+          effectiveCumulativeProb: candidate.trueProbability,
+          isTransposition: false
+        });
+        continue;
+      }
       if (destination) {
         const canonicalDestinationFullFen = parseFullFen(destination.fullFen);
         if (canonicalDestinationFullFen !== destination.fullFen ||

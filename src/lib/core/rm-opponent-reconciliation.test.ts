@@ -169,7 +169,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     const result = await reconcile(source, [e4, d4]);
     assert.deepEqual(result.addedUcis, ["d2d4", "e2e4"]);
     const e4Branch = result.branches.find(branch => branch.uci === "e2e4")!;
-    const e4Node = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: e4Branch.destinationNodeId } });
+    const e4Node = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: e4Branch.destinationNodeId! } });
     assert.equal(e4Node.fullFen, e4.destinationFullFen);
     assert.equal(e4Node.positionKey, e4.destinationPositionKey);
     assert.equal(e4Node.pgn, "e4");
@@ -445,7 +445,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     });
     assert.deepEqual(rootEdges.map(edge => edge.uci), ["c2c4", "e2e4", "g1f3"]);
     assert.notEqual(rebuiltRoot.id, root.id, "a rerun must delete and rebuild the tree");
-    assert.equal((await prisma.repertoireNode.findUniqueOrThrow({ where: { id: rootEdges.find(edge => edge.uci === "c2c4")!.toNodeId } })).pgn, "c4");
+    assert.equal((await prisma.repertoireNode.findUniqueOrThrow({ where: { id: rootEdges.find(edge => edge.uci === "c2c4")!.toNodeId! } })).pgn, "c4");
     assert.equal(await prisma.repertoireMove.findUnique({ where: { id: d4.edge.id } }), null);
     assert.equal(await prisma.repertoireNode.findUnique({ where: { id: d4.destination.id } }), null);
     assert.equal(await prisma.repertoireNode.findUnique({ where: { id: d4Response.destination.id } }), null);
@@ -540,7 +540,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     const rebuiltB = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, history: "b1c3 g8f6" } });
     const newB_X = await prisma.repertoireMove.findFirst({ where: { fromNodeId: rebuiltB.id, san: "Nf3" }});
     assert.ok(newB_X);
-    const newX = await prisma.repertoireNode.findUnique({ where: { id: newB_X.toNodeId }});
+    const newX = await prisma.repertoireNode.findUnique({ where: { id: newB_X.toNodeId! }});
     assert.strictEqual(newX?.pgn, "Nc3 Nf6 Nf3");
   });
 
@@ -615,7 +615,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     const rebuiltB = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, history: "b1c3 g8f6" } });
     const newB_X = await prisma.repertoireMove.findFirst({ where: { fromNodeId: rebuiltB.id, san: "Nf3" }});
     assert.ok(newB_X);
-    const newX = await prisma.repertoireNode.findUnique({ where: { id: newB_X.toNodeId }});
+    const newX = await prisma.repertoireNode.findUnique({ where: { id: newB_X.toNodeId! }});
     assert.strictEqual(newX?.pgn, "Nc3 Nf6 Nf3");
   });
 });

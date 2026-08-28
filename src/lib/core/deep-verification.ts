@@ -33,7 +33,7 @@ export type DeepVerificationResult =
   | {
       status: "FAILED_RESPONSE";
       verifiedCount: number;
-      failed: { responseId: string; uci: string; san: string; fullFen: string; cp: number | null; mate: number | null; source: ResponseEvaluationSource; fromNodeId: string; toNodeId: string; };
+      failed: { responseId: string; uci: string; san: string; fullFen: string; cp: number | null; mate: number | null; source: ResponseEvaluationSource; fromNodeId: string; toNodeId: string | null; };
       proposal: ProposedDeepCorrection;
     };
 

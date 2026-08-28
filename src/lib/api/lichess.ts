@@ -41,14 +41,12 @@ export async function fetchAllDatabases(fen: string, snapshotId: string) {
     if (cached.status === "success" || cached.status === "empty") {
       const moves = cached.status === "success" ? cached.moves.map(toPublicMove) : [];
       const totalGames = moves.reduce((sum, m) => sum + m.games, 0);
-      return { moves, totalGames, opening: null };
+      return { moves, totalGames, opening: null, retrieval: "CACHE" as const };
     }
 
     const data = await fetchWithRetry(url, retryCount, true, "explorer");
     if (!data) {
-      // Cache as empty so we don't hammer the API on subsequent runs
-      await saveHumanExplorerBucket(snapshotId, posKey, dbType, []);
-      return undefined;
+      throw new Error(`Required Lichess Explorer ${dbType} request failed for position ${posKey}`);
     }
 
     const chess = new Chess(fullFen);
@@ -106,7 +104,7 @@ export async function fetchAllDatabases(fen: string, snapshotId: string) {
 
     const returnedMoves = validMoves.map(toPublicMove);
     const totalGames = returnedMoves.reduce((sum, m) => sum + m.games, 0);
-    return { moves: returnedMoves, totalGames, opening: data.opening || null };
+    return { moves: returnedMoves, totalGames, opening: data.opening || null, retrieval: "FRESH" as const };
   }
 
   const mastersUrl = `https://explorer.lichess.ovh/masters?fen=${encodeURIComponent(fullFen)}`;
@@ -123,4 +121,25 @@ export async function fetchAllDatabases(fen: string, snapshotId: string) {
   const aRes = await processBucket("AMATEUR", amateurUrl, defaultConfig.api.lichessExplorer.retryAttempts);
 
   return [mRes, eRes, aRes];
+}
+
+export async function fetchMastersOpeningMetadata(fen: string) {
+  const fullFen = parseFullFen(fen);
+  const url = `https://explorer.lichess.ovh/masters?fen=${encodeURIComponent(fullFen)}`;
+  const data = await fetchWithRetry(url, defaultConfig.api.lichessExplorer.retryAttempts, true, "explorer");
+  if (!data || typeof data !== "object") {
+    throw new Error(`Required Lichess Explorer MASTERS metadata request failed for position ${positionKeyFromFen(fullFen)}`);
+  }
+  if (!Array.isArray((data as Record<string, unknown>).moves)) {
+    throw new Error("Invalid Masters opening metadata response: moves is missing or not an array");
+  }
+  const opening = (data as Record<string, unknown>).opening;
+  if (opening === undefined || opening === null) return null;
+  if (typeof opening !== "object") throw new Error("Invalid Masters opening metadata: opening is not an object");
+  const record = opening as Record<string, unknown>;
+  if (typeof record.eco !== "string" || record.eco.trim() === "" ||
+      typeof record.name !== "string" || record.name.trim() === "") {
+    throw new Error("Invalid Masters opening metadata: ECO and name must both be non-empty strings");
+  }
+  return { eco: record.eco, name: record.name };
 }

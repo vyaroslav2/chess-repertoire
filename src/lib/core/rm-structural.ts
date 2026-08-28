@@ -14,7 +14,7 @@ export interface ReplaceResponseBranchInput {
   oldResponse: {
     id: string;
     fromNodeId: string;
-    toNodeId: string;
+    toNodeId: string | null;
     san: string;
     fromNode: { pgn: string; fullFen: string; cumulativeProb: number; positionKey?: string; history?: string; humanDataSnapshotId?: string | null };
   };
@@ -73,7 +73,9 @@ export async function collectOwnedBranchDeletion(input: {
     for (const edge of outgoingEdges) {
       if (edge.repertoireId !== input.repertoireId) throw new Error("Cross-repertoire edge detected");
       movesToDelete.add(edge.id);
-      queue.push({ nodeId: edge.toNodeId, parentPgn: currentNode.pgn, san: edge.san });
+      if (edge.toNodeId !== null) {
+        queue.push({ nodeId: edge.toNodeId, parentPgn: currentNode.pgn, san: edge.san });
+      }
     }
   }
 
@@ -112,7 +114,7 @@ export async function replaceResponseBranch(input: ReplaceResponseBranchInput) {
   const { tx, repertoireId, oldResponse } = input;
   validateResponsePersistence({
     fromNodeId: oldResponse.fromNodeId,
-    toNodeId: oldResponse.toNodeId,
+    toNodeId: "pending-destination",
     uci: input.newUci,
     san: input.expectedNewSan,
     cp: input.newCp,
@@ -168,18 +170,25 @@ export async function replaceResponseBranch(input: ReplaceResponseBranchInput) {
   const { nodesToDelete, movesToDelete, invalidatedExternalSourceNodeIds } = await deleteOwnedBranches({
     tx,
     repertoireId,
-    roots: [{
+    roots: oldResponse.toNodeId === null ? [] : [{
       edgeId: oldResponse.id,
       nodeId: oldResponse.toNodeId,
       parentPgn: oldResponse.fromNode.pgn,
       san: oldResponse.san
     }]
   });
+  if (oldResponse.toNodeId === null) {
+    await tx.repertoireMove.delete({ where: { id: oldResponse.id } });
+    movesToDelete.add(oldResponse.id);
+  }
   await tx.position.upsert({ where: { positionKey: posKey }, update: {}, create: { positionKey: posKey } });
 
   const newPgn = `${oldResponse.fromNode.pgn ? `${oldResponse.fromNode.pgn} ` : ""}${chessMove.san}`;
   const newHistory = `${oldResponse.fromNode.history ? `${oldResponse.fromNode.history} ` : ""}${input.newUci}`;
-  const newDestinationNode = await tx.repertoireNode.findFirst({ where: { repertoireId, positionKey: posKey } }) ??
+  const existingDestinationNode = await tx.repertoireNode.findFirst({ where: { repertoireId, positionKey: posKey } });
+  const isRepetition = existingDestinationNode !== null && (existingDestinationNode.history === "" ||
+    (oldResponse.fromNode.history?.startsWith(`${existingDestinationNode.history} `) ?? false));
+  const newDestinationNode = existingDestinationNode ??
     await tx.repertoireNode.create({
       data: {
         repertoireId, fullFen: canonicalFullFen, positionKey: posKey, history: newHistory,
@@ -187,14 +196,12 @@ export async function replaceResponseBranch(input: ReplaceResponseBranchInput) {
         humanDataSnapshotId: oldResponse.fromNode.humanDataSnapshotId ?? null
       }
     });
-  const isRepetition = newDestinationNode.history === "" ||
-    (oldResponse.fromNode.history?.startsWith(`${newDestinationNode.history} `) ?? false);
   const isTransposition = !isRepetition && newDestinationNode.history !== newHistory;
   const newResponse = await tx.repertoireMove.create({
     data: {
       repertoireId,
       fromNodeId: oldResponse.fromNodeId,
-      toNodeId: newDestinationNode.id,
+      toNodeId: isRepetition ? null : newDestinationNode.id,
       san: chessMove.san,
       uci: input.newUci,
       playerTurn: "RESPONSE",
@@ -212,8 +219,8 @@ export async function replaceResponseBranch(input: ReplaceResponseBranchInput) {
       deepVerified: input.newDeepVerified,
       localEvaluationProfile: input.newLocalEvaluationProfile,
       prob: null,
-      routeProbability: isRepetition ? 0 : input.cumulativeProb,
-      trueProbability: isRepetition ? 0 : input.cumulativeProb,
+      routeProbability: input.cumulativeProb,
+      trueProbability: input.cumulativeProb,
       routeHistory: isTransposition || isRepetition ? newHistory : null,
       stopReason: isRepetition ? "Repetition" : isTransposition ? "Transposition" : null,
       humanDataSnapshotId: oldResponse.fromNode.humanDataSnapshotId ?? null
@@ -262,7 +269,7 @@ export async function replaceResponseBranch(input: ReplaceResponseBranchInput) {
     removedMoveCount: movesToDelete.size,
     invalidatedExternalSourceNodeIds,
     createdResponseId: newResponse.id,
-    createdDestinationNodeId: newDestinationNode.id,
+    createdDestinationNodeId: isRepetition ? null : newDestinationNode.id,
     createdDestinationFullFen: newDestinationNode.fullFen,
     createdDestinationPgn: newDestinationNode.pgn,
     replacementUci: newResponse.uci!,

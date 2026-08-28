@@ -305,6 +305,34 @@ test('Slice 5 Human Cache Rewrite Tests', async (t) => {
     const eRes3 = await readHumanExplorerBucket(snapshotId, posKey3, "ELITE");
     assert.strictEqual(eRes3.status, "missing", "Elite failed and remains missing");
 
+    // A failed Amateur request must not become a successful empty bucket after
+    // Masters and Elite have already succeeded.
+    const amateurFailureSnapshot = await getOrCreateHumanDataSnapshot(rep.id, "amateur-failure-after-successes");
+    global.fetch = async (url: any) => {
+      if (url.toString().includes("ratings=1600")) return new Response("Error", { status: 404 });
+      return new Response(JSON.stringify({ moves: [] }));
+    };
+
+    await assert.rejects(
+      fetchAllDatabases(fen3, amateurFailureSnapshot.id),
+      /Required Lichess Explorer AMATEUR request failed/
+    );
+    assert.strictEqual(
+      (await readHumanExplorerBucket(amateurFailureSnapshot.id, posKey3, "MASTERS")).status,
+      "empty",
+      "Masters successful empty response remains cached"
+    );
+    assert.strictEqual(
+      (await readHumanExplorerBucket(amateurFailureSnapshot.id, posKey3, "ELITE")).status,
+      "empty",
+      "Elite successful empty response remains cached"
+    );
+    assert.strictEqual(
+      (await readHumanExplorerBucket(amateurFailureSnapshot.id, posKey3, "AMATEUR")).status,
+      "missing",
+      "Failed Amateur request must not create a successful-fetch marker"
+    );
+
     // 16. when Masters and Elite are cached but Amateur missing, F fetches only Amateur
     global.fetch = async (url: any) => {
       fetchCalls.push(url.toString());

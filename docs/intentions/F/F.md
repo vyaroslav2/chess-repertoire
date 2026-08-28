@@ -524,6 +524,26 @@ It belongs to the canonical repertoire node whose canonical UCI/LAN history prod
 
 A fresh Masters response may supply useful opening information, but storing it globally by PositionKey would be incorrect.
 
+Opening metadata is cached and restored by exact canonical UCI/LAN history, not by `PositionKey`. Before a from-root rebuild replaces nodes, preserve the opening metadata state of each exact history; restore it only when that same history survives. A transposing history must not inherit or overwrite classification merely because it reaches the same board position.
+
+The stored state is one of:
+
+```text
+PRESENT
+→ both ECO and openingName are present
+→ source = LICHESS_MASTERS
+
+VALID_ABSENCE
+→ the Masters request succeeded but supplied no opening classification
+→ source = LICHESS_MASTERS
+```
+
+Technical Masters failure is neither state. Masters is required human data, so failure after its retry policy is a hard generation error.
+
+Opening metadata source is mandatory whenever an opening metadata state is stored. ECO/opening values without a source, or a source without a valid checked state, are invalid. The diagnostic must print both how the value was obtained in this run (`fresh Masters response` or `restored exact-history cache`) and its source label (`Lichess Opening Explorer — Masters metadata`).
+
+The UI reads ECO/opening metadata from the node for the exact history currently displayed, so the classification changes live as the user moves through the repertoire.
+
   
 
 ## Wikibooks

@@ -350,7 +350,7 @@ export type ResponseEvaluationSource = typeof RESPONSE_EVALUATION_SOURCES[number
 export type ResponseSelectionMethod = typeof RESPONSE_SELECTION_METHODS[number];
 export type ResponseMoveOrigin = typeof RESPONSE_MOVE_ORIGINS[number];
 export type ResponsePersistenceInput = {
-  fromNodeId: string; toNodeId: string; uci: string; san?: string | null;
+  fromNodeId: string; toNodeId: string | null; uci: string; san?: string | null;
   cp: number | null; mate: number | null; source: ResponseEvaluationSource;
   selectionMethod: ResponseSelectionMethod; moveOrigin: ResponseMoveOrigin;
   deepVerified: boolean; localEvaluationProfile: string | null; weightedCount?: number | null;
@@ -381,6 +381,13 @@ export function validateResponsePersistence(input: ResponsePersistenceInput): vo
   }
   if (input.moveShare !== undefined && input.moveShare !== null && (!Number.isFinite(input.moveShare) || input.moveShare < 0 || input.moveShare > 1)) {
     throw new Error("Invalid RESPONSE moveShare");
+  }
+  const stopReason = input.stopReason ?? null;
+  if (stopReason === "Repetition") {
+    if (input.toNodeId !== null) throw new Error("Invalid RESPONSE repetition: toNodeId must be null");
+    if (!isNonEmptyCanonicalString(input.routeHistory)) throw new Error("Invalid RESPONSE repetition: routeHistory is required");
+  } else if (!isNonEmptyCanonicalString(input.toNodeId)) {
+    throw new Error("Invalid RESPONSE: non-repetition requires toNodeId");
   }
 }
 
@@ -550,20 +557,42 @@ export async function createRepertoireNode(
   rawFen: string,
   history: string,
   cumulativeProb: number,
-  options: { displayPgn?: string; humanDataSnapshotId?: string; eco?: string | null; openingName?: string | null } = {}
+  options: {
+    displayPgn?: string;
+    humanDataSnapshotId?: string;
+    eco?: string | null;
+    openingName?: string | null;
+    openingMetadataStatus?: "PRESENT" | "VALID_ABSENCE";
+    openingMetadataSource?: "LICHESS_MASTERS";
+  } = {}
 ) {
   const fullFen = parseFullFen(rawFen);
   const positionKey = positionKeyFromFen(fullFen);
+  const hasOpeningState = options.openingMetadataStatus !== undefined || options.openingMetadataSource !== undefined ||
+    options.eco !== undefined || options.openingName !== undefined;
+  if (hasOpeningState) {
+    if (options.openingMetadataSource !== "LICHESS_MASTERS" || !options.openingMetadataStatus) {
+      throw new Error("Opening metadata state requires source LICHESS_MASTERS");
+    }
+    if (options.openingMetadataStatus === "PRESENT" && (!options.eco || !options.openingName)) {
+      throw new Error("PRESENT opening metadata requires both ECO and opening name");
+    }
+    if (options.openingMetadataStatus === "VALID_ABSENCE" && (options.eco != null || options.openingName != null)) {
+      throw new Error("VALID_ABSENCE opening metadata cannot contain ECO or opening name");
+    }
+  }
 
   await getOrCreatePosition(fullFen);
   const existingCanonical = await prisma.repertoireNode.findFirst({ where: { repertoireId, history } });
   if (existingCanonical) {
-    if (options.eco !== undefined || options.openingName !== undefined) {
+    if (hasOpeningState) {
       return prisma.repertoireNode.update({
         where: { id: existingCanonical.id },
         data: {
           ...(options.eco !== undefined ? { eco: options.eco } : {}),
-          ...(options.openingName !== undefined ? { openingName: options.openingName } : {})
+          ...(options.openingName !== undefined ? { openingName: options.openingName } : {}),
+          openingMetadataStatus: options.openingMetadataStatus,
+          openingMetadataSource: options.openingMetadataSource
         }
       });
     }
@@ -579,6 +608,8 @@ export async function createRepertoireNode(
       pgn: options.displayPgn ?? history,
       eco: options.eco ?? null,
       openingName: options.openingName ?? null,
+      openingMetadataStatus: options.openingMetadataStatus ?? null,
+      openingMetadataSource: options.openingMetadataSource ?? null,
       cumulativeProb,
       humanDataSnapshotId: options.humanDataSnapshotId ?? null
     }
@@ -654,6 +685,7 @@ export async function propagateRepertoireProbabilities(repertoireId: string, sta
       const outgoing = await tx.repertoireMove.findMany({ where: { fromNodeId: sourceId } });
       for (const edge of outgoing) {
         if (edge.stopReason === "Repetition") continue;
+        if (edge.toNodeId === null) throw new Error("Non-repetition repertoire move is missing its destination");
         const routeProbability = edge.playerTurn === "OPPONENT"
           ? source.cumulativeProb * (edge.prob ?? 0)
           : source.cumulativeProb;
@@ -686,10 +718,10 @@ export async function createResponseMove(input: ResponsePersistenceInput) {
   validateResponsePersistence(input);
   const [fromNode, toNode] = await Promise.all([
     prisma.repertoireNode.findUnique({ where: { id: input.fromNodeId } }),
-    prisma.repertoireNode.findUnique({ where: { id: input.toNodeId } })
+    input.toNodeId === null ? Promise.resolve(null) : prisma.repertoireNode.findUnique({ where: { id: input.toNodeId } })
   ]);
-  if (!fromNode || !toNode) throw new Error("RESPONSE source or destination node does not exist");
-  if (fromNode.repertoireId !== toNode.repertoireId) throw new Error("RESPONSE cannot cross repertoires");
+  if (!fromNode || (input.toNodeId !== null && !toNode)) throw new Error("RESPONSE source or destination node does not exist");
+  if (toNode && fromNode.repertoireId !== toNode.repertoireId) throw new Error("RESPONSE cannot cross repertoires");
   if (input.deepVerified) {
     const [baseline, candidate] = await Promise.all([
       prisma.localEngineBaseline.findUnique({ where: { fullFen_evaluationProfile: { fullFen: fromNode.fullFen, evaluationProfile: input.localEvaluationProfile! } } }),
@@ -704,12 +736,20 @@ export async function createResponseMove(input: ResponsePersistenceInput) {
   if (!move || move.lan !== input.uci) throw new Error(`Invalid RESPONSE: illegal UCI move ${input.uci}`);
   if (input.san !== undefined && input.san !== null && input.san !== move.san) throw new Error("Invalid RESPONSE: SAN does not match UCI");
   const resultingFullFen = parseFullFen(chess.fen());
-  if (resultingFullFen !== toNode.fullFen) throw new Error("Invalid RESPONSE destination: resulting FullFen does not match toNode.fullFen");
+  if (toNode && resultingFullFen !== toNode.fullFen) throw new Error("Invalid RESPONSE destination: resulting FullFen does not match toNode.fullFen");
+  if (input.stopReason === "Repetition") {
+    const repeatedAncestor = await prisma.repertoireNode.findFirst({
+      where: { repertoireId: fromNode.repertoireId, positionKey: positionKeyFromFen(resultingFullFen) }
+    });
+    if (!repeatedAncestor || !(repeatedAncestor.history === "" || fromNode.history.startsWith(`${repeatedAncestor.history} `))) {
+      throw new Error("Invalid RESPONSE repetition: resulting position is not an ancestor on this route");
+    }
+  }
   const complete = {
     repertoireId: fromNode.repertoireId, fromNodeId: input.fromNodeId, toNodeId: input.toNodeId,
     uci: input.uci, san: move.san, playerTurn: "RESPONSE", prob: null,
-    routeProbability: input.stopReason === "Repetition" ? 0 : fromNode.cumulativeProb,
-    trueProbability: input.stopReason === "Repetition" ? 0 : fromNode.cumulativeProb,
+    routeProbability: fromNode.cumulativeProb,
+    trueProbability: fromNode.cumulativeProb,
     routeHistory: input.routeHistory ?? null, stopReason: input.stopReason ?? null, humanDataSnapshotId: fromNode.humanDataSnapshotId,
     weightedCount: input.weightedCount ?? null, cp: input.cp, mate: input.mate, source: input.source,
     mastersGames: input.mastersGames ?? null, eliteGames: input.eliteGames ?? null,

@@ -9,7 +9,7 @@ else dotenv.config();
 
 import { generateRepertoire } from "../src/lib/core/generator";
 import { evaluateBlackMove, shouldIncludeWhiteMove, type SelectedResponseResult } from "../src/lib/core/evaluator";
-import { fetchAllDatabases } from "../src/lib/api/lichess";
+import { fetchAllDatabases, fetchMastersOpeningMetadata } from "../src/lib/api/lichess";
 import {
   ensureRepertoireNodeWikibooks,
   prisma,
@@ -42,12 +42,14 @@ let candidateBranch = 0;
 let movePairNumber = 0;
 let currentMovePairNumber = 0;
 let pendingCandidate = false;
+let currentHistorySan = "";
 const liveCounters = {
   positions: 0,
   branchesAborted: 0,
   whiteMoves: 0,
   blackResponses: 0,
-  skipped: 0,
+  transpositions: 0,
+  repetitions: 0,
   missingWhite: 0,
   nullCp: 0
 };
@@ -108,7 +110,8 @@ function printConfiguration(): void {
   console.log("\nCOUNTER DEFINITIONS");
   console.log("Missing White Moves: a non-terminal position for which Explorer produced zero candidate moves before filtering.");
   console.log("N/A Evals (Null): selected Black responses whose CP is null, normally because the result is represented as mate rather than CP.");
-  console.log("Skipped: a repetition or a transposition whose canonical Black response was already processed in this run.");
+  console.log("Transpositions: a different route reached a canonical response position already processed in this run; its response is reused.");
+  console.log("Repetition Stops: the current route returned to one of its own ancestor positions; the terminal move is retained and expansion stops.");
   console.log(`${line()}\n`);
 }
 
@@ -167,11 +170,13 @@ async function diagnosticFetchAllDatabases(fen: string, snapshotId: string) {
   logExplorerRows("AMATEUR RAW DATA — LICHESS OPENING EXPLORER", result[2]);
 
   const storedOpening = await prisma.repertoireNode.findFirst({
-    where: { fullFen },
-    select: { eco: true, openingName: true }
+    where: { fullFen, pgn: currentHistorySan },
+    select: { eco: true, openingName: true, openingMetadataStatus: true, openingMetadataSource: true }
   });
   const fetchedOpening = result[0].opening;
-  console.log(`\n[OPENING METADATA] ECO=${fetchedOpening?.eco ?? storedOpening?.eco ?? "unavailable"}; name=${fetchedOpening?.name ?? storedOpening?.openingName ?? "unavailable"}`);
+  const retrieval = fetchedOpening ? "fresh Masters response" : storedOpening?.openingMetadataStatus ? "exact-history stored metadata" : "not yet available";
+  const source = fetchedOpening ? "Lichess Opening Explorer — Masters metadata" : storedOpening?.openingMetadataSource === "LICHESS_MASTERS" ? "Lichess Opening Explorer — Masters metadata" : "unavailable";
+  console.log(`\n[OPENING METADATA] retrieval=${retrieval}; source=${source}; status=${fetchedOpening || storedOpening?.openingMetadataStatus === "PRESENT" ? "PRESENT" : storedOpening?.openingMetadataStatus ?? "unchecked"}; ECO=${fetchedOpening?.eco ?? storedOpening?.eco ?? "unavailable"}; name=${fetchedOpening?.name ?? storedOpening?.openingName ?? "unavailable"}`);
   if (!fetchedOpening?.name && !storedOpening?.openingName) {
     console.warn("[OPENING METADATA WARNING] No ECO/opening name is available from this cached Explorer result or the rebuilt canonical node.");
   }
@@ -193,6 +198,14 @@ async function diagnosticFetchAllDatabases(fen: string, snapshotId: string) {
   }
   console.log(`[HUMAN EXPLORER COMPLETE] ${elapsed(started)}`);
   return result;
+}
+
+async function diagnosticFetchOpeningMetadata(fen: string) {
+  const opening = await fetchMastersOpeningMetadata(fen);
+  console.log(opening
+    ? `[OPENING METADATA FETCH] retrieval=fresh Masters response; source=Lichess Opening Explorer — Masters metadata; status=PRESENT; ECO=${opening.eco}; name=${opening.name}`
+    : "[OPENING METADATA FETCH] retrieval=fresh Masters response; source=Lichess Opening Explorer — Masters metadata; status=VALID_ABSENCE");
+  return opening;
 }
 
 function logRemoteSnapshot(source: string, result: Awaited<ReturnType<typeof readRemoteEngineResult>>): void {
@@ -354,16 +367,16 @@ async function diagnosticEvaluateBlackMove(
   console.log(`  source=${result.source}; evaluation=${evaluationText(result)}; selection method=${result.selectionMethod}; origin=${result.moveOrigin}; deep verified=${result.deepVerified}`);
   console.log(`  human statistics=${result.selectedStats ? pretty(result.selectedStats) : "none (engine-origin fallback)"}`);
   console.log(`[BLACK RESPONSE COMPLETE] ${elapsed(started)}`);
-  return result;
+  return { ...result, openingMetadata: masters.opening, openingMetadataRetrieval: masters.retrieval };
 }
 
 async function diagnosticWikibooks(nodeId: string) {
   const before = await prisma.repertoireNode.findUniqueOrThrow({
     where: { id: nodeId },
-    select: { history: true, wikibooksChecked: true, wikiText: true, eco: true, openingName: true }
+    select: { history: true, wikibooksChecked: true, wikiText: true, eco: true, openingName: true, openingMetadataStatus: true, openingMetadataSource: true }
   });
   console.log(`\n[WIKIBOOKS] history=${before.history || "(root)"}; ${before.wikibooksChecked ? `CACHE HIT (${before.wikiText === null ? "valid absence" : `${before.wikiText.length} characters`})` : "CACHE MISS — lookup required"}`);
-  console.log(`[OPENING METADATA FOR HISTORY] ECO=${before.eco ?? "unavailable"}; name=${before.openingName ?? "unavailable"}`);
+  console.log(`[OPENING METADATA FOR HISTORY] retrieval=stored exact-history node; source=${before.openingMetadataSource === "LICHESS_MASTERS" ? "Lichess Opening Explorer — Masters metadata" : "unavailable"}; status=${before.openingMetadataStatus ?? "unchecked"}; ECO=${before.eco ?? "unavailable"}; name=${before.openingName ?? "unavailable"}`);
   const started = Date.now();
   const result = await ensureRepertoireNodeWikibooks(nodeId);
   console.log(`[WIKIBOOKS RESULT] ${result.status} in ${elapsed(started)}`);
@@ -386,11 +399,16 @@ function installBlockFormatter(write: (...args: unknown[]) => void): () => void 
     }
     if (normalized.includes("--- [CHECKPOINT] Node Finished ---")) {
       if (pendingCandidate) {
-        liveCounters.skipped++;
+        liveCounters.transpositions++;
         pendingCandidate = false;
-        write(`[LIVE COUNTER] Skipped: +1 => ${liveCounters.skipped} total. Reason: this transposition's canonical Black response was already processed.`);
+        write(`[LIVE COUNTER] Transpositions: +1 => ${liveCounters.transpositions} total.`);
       }
       write(`\n${line("-")}\nMOVE ${currentChessFullMove} POSITION COMPLETE`);
+      return;
+    }
+    if (normalized.startsWith("History:")) {
+      currentHistorySan = normalized.slice("History:".length).trim();
+      write(...args);
       return;
     }
     if (normalized === "--------------------------------------------") return;
@@ -404,8 +422,8 @@ function installBlockFormatter(write: (...args: unknown[]) => void): () => void 
     const evaluating = normalized.match(/^Evaluating White Move: (.+?) \(Reason:/);
     if (evaluating) {
       if (pendingCandidate) {
-        liveCounters.skipped++;
-        write(`[LIVE COUNTER] Skipped: +1 => ${liveCounters.skipped} total. Reason: this transposition's canonical Black response was already processed.`);
+        liveCounters.transpositions++;
+        write(`[LIVE COUNTER] Transpositions: +1 => ${liveCounters.transpositions} total.`);
       }
       candidateBranch++;
       movePairNumber++;
@@ -424,11 +442,18 @@ function installBlockFormatter(write: (...args: unknown[]) => void): () => void 
       write(`[MOVE PAIR ${currentMovePairNumber} COMPLETE] White and Black half-moves are now selected for MOVE ${currentChessFullMove}, BRANCH ${candidateBranch}.\n${line("=")}`);
       return;
     }
-    if (normalized.startsWith("[STOPPED]")) {
-      liveCounters.skipped++;
+    if (normalized.startsWith("[TRANSPOSITION]")) {
+      liveCounters.transpositions++;
       pendingCandidate = false;
       write(normalized);
-      write(`[LIVE COUNTER] Skipped: +1 => ${liveCounters.skipped} total. Reason: repetition.`);
+      write(`[LIVE COUNTER] Transpositions: +1 => ${liveCounters.transpositions} total.`);
+      return;
+    }
+    if (normalized.startsWith("[REPETITION STOP]")) {
+      liveCounters.repetitions++;
+      pendingCandidate = false;
+      write(normalized);
+      write(`[LIVE COUNTER] Repetition Stops: +1 => ${liveCounters.repetitions} total.`);
       return;
     }
     if (normalized.startsWith("[ABORTED]")) {
@@ -447,12 +472,6 @@ function installBlockFormatter(write: (...args: unknown[]) => void): () => void 
       write(`${normalized}\n  “Positions Looked At” includes the starting/root position before any move has been played.`);
       return;
     }
-    const missingMoves = normalized.match(/^Missing White Moves: (\d+) \| Missing Black Moves: \d+$/);
-    if (missingMoves) {
-      write(`Missing White Moves: ${missingMoves[1]}`);
-      return;
-    }
-    if (normalized.startsWith("Missing Black Moves:")) return;
     write(...args);
   };
   console.log = diagnosticLog;
@@ -497,6 +516,7 @@ async function main(): Promise<void> {
     printConfiguration();
     await generateRepertoire(START_FEN, 3, {
       fetchDatabases: diagnosticFetchAllDatabases,
+      fetchOpeningMetadata: diagnosticFetchOpeningMetadata,
       responseEvaluator: diagnosticEvaluateBlackMove,
       ensureNodeWikibooks: diagnosticWikibooks,
       shouldStop: () => stopRequested

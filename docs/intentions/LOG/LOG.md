@@ -34,3 +34,20 @@ When evaluating Black's responses, the log must explicitly trace the engine veri
 - **Local Deep Stockfish**: When the local fallback or local verification is triggered, the engine's exact search constraints (depth/nodes/time) and the resulting evaluations.
 
 By logging this full diagnostic trail, a reader can exactly reproduce and verify the generator's internal decision-making without having to rely on opaque summaries.
+
+### Transpositions and repetitions
+
+Transpositions and same-route repetitions are different events and must never share an ambiguous `Skipped` counter.
+
+The live and final diagnostics must maintain separate counters:
+
+```text
+Transpositions: +1 => N total
+Repetition Stops: +1 => N total
+```
+
+Every transposition event must print the incoming route, the canonical route it merged into, and that the canonical Black response/continuation was reused rather than evaluated twice.
+
+Every repetition event must print the complete terminal route, the earlier route position that it repeated, the terminal move, the actual terminal route probability, and that the move was retained while no destination or continuation was created.
+
+A RESPONSE move that completes a repetition remains the target of the flashcard attached to its source position. Playing that answer completes the card and ends the route. An OPPONENT move that completes a repetition is retained as structural route evidence but does not create a new RESPONSE card.

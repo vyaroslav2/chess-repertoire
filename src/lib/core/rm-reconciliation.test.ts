@@ -429,7 +429,7 @@ describe("RM Reconciliation", () => {
             assert.strictEqual(newR!.localEvaluationProfile, null);
 
             // New destination exists
-            const newDest = await prisma.repertoireNode.findUnique({ where: { id: result.destinationNodeId } });
+            const newDest = await prisma.repertoireNode.findUnique({ where: { id: result.destinationNodeId! } });
             assert.strictEqual(newDest!.pgn, "e4 e5");
             const chess = new Chess(sourceNode.fullFen);
             chess.move({ from: "e7", to: "e5" });
@@ -740,7 +740,7 @@ describe("RM Reconciliation", () => {
         chess.move({ from: "g1", to: "f3" });
         const continuation = await createRepertoireNode(repertoire.id, chess.fen(), "e4 c5 Nf3", 1);
         await createRepertoireMove({
-            repertoireId: repertoire.id, fromNodeId: queued.nodeId, toNodeId: continuation.id,
+            repertoireId: repertoire.id, fromNodeId: queued.nodeId!, toNodeId: continuation.id,
             uci: "g1f3", san: "Nf3", playerTurn: "OPPONENT"
         });
         assert.equal(await prisma.repertoireMove.count({ where: { fromNodeId: destNode.id } }), 1);
@@ -762,7 +762,7 @@ describe("RM Reconciliation", () => {
             responseSourceNodeId: setup.canonicalSource.id,
             item: buildCanonicalContinuationQueueItem({
                 destinationNode: {
-                    id: reconciled.destinationNodeId,
+                    id: reconciled.destinationNodeId!,
                     fullFen: reconciled.destinationFullFen,
                     pgn: reconciled.destinationPgn
                 },
@@ -803,7 +803,7 @@ describe("RM Reconciliation", () => {
             responseSourceNodeId: setup.canonicalSource.id,
             item: buildCanonicalContinuationQueueItem({
                 destinationNode: {
-                    id: reconciled.destinationNodeId,
+                    id: reconciled.destinationNodeId!,
                     fullFen: reconciled.destinationFullFen,
                     pgn: reconciled.destinationPgn
                 },
@@ -950,7 +950,7 @@ describe("RM Reconciliation", () => {
         });
         const queued = buildCanonicalContinuationQueueItem({
             destinationNode: {
-                id: reconciled.destinationNodeId,
+                id: reconciled.destinationNodeId!,
                 fullFen: reconciled.destinationFullFen,
                 pgn: reconciled.destinationPgn
             },

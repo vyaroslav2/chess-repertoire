@@ -18,7 +18,7 @@ export interface CorrectionInput {
     mate: number | null;
     source: string;
     fromNodeId: string;
-    toNodeId: string;
+    toNodeId: string | null;
   };
   proposal: ProposedDeepCorrection;
 };
@@ -28,7 +28,7 @@ export type CorrectionResult = {
   removedNodeCount: number;
   removedMoveCount: number;
   createdResponseId: string;
-  createdDestinationNodeId: string;
+  createdDestinationNodeId: string | null;
   replacementUci: string;
 };
 
@@ -68,7 +68,7 @@ export async function applyApprovedDeepCorrection(input: CorrectionInput): Promi
        throw new Error("Stale failed RESPONSE: not found or wrong repertoire");
     }
     if (oldResponse.fromNode.repertoireId !== input.repertoireId) throw new Error("Stale failed RESPONSE: fromNode foreign repertoire");
-    if (oldResponse.toNode.repertoireId !== input.repertoireId) throw new Error("Stale failed RESPONSE: toNode foreign repertoire");
+    if (oldResponse.toNode && oldResponse.toNode.repertoireId !== input.repertoireId) throw new Error("Stale failed RESPONSE: toNode foreign repertoire");
     if (oldResponse.playerTurn !== "RESPONSE") throw new Error("Stale failed RESPONSE: not a RESPONSE");
     if (oldResponse.uci !== input.failed.uci) throw new Error("Stale failed RESPONSE: UCI changed");
     if (oldResponse.fromNode.fullFen !== input.failed.fullFen) throw new Error("Stale failed RESPONSE: fullFen changed");
@@ -93,6 +93,8 @@ export async function applyApprovedDeepCorrection(input: CorrectionInput): Promi
       deepVerified: false,
       localEvaluationProfile: oldResponse.localEvaluationProfile,
       weightedCount: oldResponse.weightedCount
+      ,stopReason: oldResponse.stopReason === "Repetition" || oldResponse.stopReason === "Transposition" ? oldResponse.stopReason : null
+      ,routeHistory: oldResponse.routeHistory
     });
 
     // 2. Revalidate Local evidence for the proposal
