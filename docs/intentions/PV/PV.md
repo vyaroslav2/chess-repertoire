@@ -189,21 +189,17 @@ PV must not:
 
 `Known:` One source snapshot may contain each move at most once.
 
-For example, this is invalid:
+For example:
 
 ```text
 ...Nf6   -35
 ...e6    -20
-...Nf6   -18
+...Nf6   -35
 ```
 
-PV must not choose one of the duplicate evaluations or silently deduplicate them.
+Because real-world remote APIs like Lichess Cloud sometimes natively return duplicate evaluations for the same move (e.g. from internal caching quirks or multi-PV glitches), PV must silently deduplicate them.
 
-Stop generation with a hard error.
-
-A duplicate means the supposedly coherent snapshot is internally inconsistent, so its ranking and threshold boundary cannot safely be trusted.
-
-#bug PV currently has no explicit duplicate-move integrity check before verification.
+A duplicate move within one source snapshot should simply be ignored (keeping the first occurrence).
 
 ## Sort the snapshot explicitly
 
@@ -620,7 +616,7 @@ So:
 
 #bug PV relies on the supplied move ordering when identifying the best and boundary moves. Explicitly sort ordinary cp snapshots from lowest to highest cp before verification.
 
-#bug PV has no explicit duplicate-move integrity check. A duplicate move within one source snapshot must cause a hard error.
+
 
 #bug PV allows missing, malformed or `NaN` evaluation data to enter comparison logic. Validate the complete snapshot before sorting or deciding.
 

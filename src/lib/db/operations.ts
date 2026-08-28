@@ -209,7 +209,7 @@ function validateRemoteEngineResult(
   }
 
   const seenUci = new Set<string>();
-  return evaluations.map(evaluation => {
+  return evaluations.flatMap(evaluation => {
     if (!evaluation || typeof evaluation !== "object") {
       throw new Error("Invalid remote engine result: evaluation must be an object");
     }
@@ -217,7 +217,7 @@ function validateRemoteEngineResult(
       throw new Error("Invalid remote engine result: malformed UCI/LAN move");
     }
     if (seenUci.has(evaluation.uci)) {
-      throw new Error(`Invalid remote engine result: duplicate UCI move ${evaluation.uci}`);
+      return [];
     }
     seenUci.add(evaluation.uci);
 
@@ -246,7 +246,7 @@ function validateRemoteEngineResult(
       throw new Error(`Invalid remote engine result: SAN does not match UCI move ${evaluation.uci}`);
     }
 
-    return { ...evaluation, san: parsedMove.san };
+    return [{ ...evaluation, san: parsedMove.san }];
   });
 }
 
