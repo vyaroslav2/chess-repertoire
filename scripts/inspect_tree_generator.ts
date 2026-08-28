@@ -1,0 +1,526 @@
+import { format } from "node:util";
+import fs from "node:fs";
+import path from "node:path";
+import * as dotenv from "dotenv";
+import { Chess } from "chess.js";
+
+if (fs.existsSync("C:\\Files\\.env")) dotenv.config({ path: "C:\\Files\\.env" });
+else dotenv.config();
+
+import { generateRepertoire } from "../src/lib/core/generator";
+import { evaluateBlackMove, shouldIncludeWhiteMove, type SelectedResponseResult } from "../src/lib/core/evaluator";
+import { fetchAllDatabases } from "../src/lib/api/lichess";
+import {
+  ensureRepertoireNodeWikibooks,
+  prisma,
+  readHumanExplorerBucket,
+  readRemoteEngineResult,
+  type HumanDatabaseType,
+  type RemoteEngineEvaluation
+} from "../src/lib/db/operations";
+import { buildBlackHumanShortlist } from "../src/lib/core/black-human-shortlist";
+import {
+  computeRemoteEngineEvaluationProfile,
+  computeLocalEngineEvaluationProfile,
+  defaultConfig,
+  getMoveBand
+} from "../src/lib/core/config";
+import { getCpTolerance, verifyOrdinaryCpSnapshot, type OrdinaryCpSnapshotEntry } from "../src/lib/core/verifier";
+import { analyseLichessMateSnapshot, verifyCandidateAgainstLichessMate } from "../src/lib/core/lichess-mate";
+import { parseFullFen, positionKeyFromFen } from "../src/lib/core/fen";
+import { acquireLock, type LockHandle } from "../src/lib/core/lockfile";
+import { UserRequestedStopError } from "../src/lib/api/retry";
+
+const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+const PROJECT_ROOT = path.resolve(__dirname, "..");
+const originalFetch = globalThis.fetch;
+const originalLog = console.log;
+const originalWarn = console.warn;
+const originalError = console.error;
+let currentChessFullMove = 0;
+let candidateBranch = 0;
+let movePairNumber = 0;
+let currentMovePairNumber = 0;
+let pendingCandidate = false;
+const liveCounters = {
+  positions: 0,
+  branchesAborted: 0,
+  whiteMoves: 0,
+  blackResponses: 0,
+  skipped: 0,
+  missingWhite: 0,
+  nullCp: 0
+};
+type ExplorerBucket = NonNullable<Awaited<ReturnType<typeof fetchAllDatabases>>[number]>;
+type ExplorerResultSet = [ExplorerBucket, ExplorerBucket, ExplorerBucket];
+
+function line(char = "=", width = 92): string {
+  return char.repeat(width);
+}
+
+function elapsed(started: number): string {
+  return `${((Date.now() - started) / 1000).toFixed(3)}s`;
+}
+
+function pretty(value: unknown): string {
+  return JSON.stringify(value, null, 2);
+}
+
+function evaluationText(evaluation: { cp: number | null; mate: number | null }): string {
+  if (evaluation.mate !== null) return `mate ${evaluation.mate}`;
+  const pawns = (evaluation.cp ?? 0) / 100;
+  return `${pawns >= 0 ? "+" : ""}${pawns.toFixed(2)}`;
+}
+
+function percentage(part: number, total: number): string {
+  return total > 0 ? `${(part / total * 100).toFixed(2)}%` : "0.00%";
+}
+
+function printConfiguration(): void {
+  console.log(`\n${line()}\nDIAGNOSTIC RUN CONFIGURATION\n${line()}`);
+  console.log("Generation depth cap: 3 full moves (testing run).");
+  console.log(`Dynamic depth budgets: common=${defaultConfig.generation.commonDepthBudget}, uncommon=${defaultConfig.generation.uncommonDepthBudget}, rare=${defaultConfig.generation.rareDepthBudget} full moves.`);
+  console.log(`Dynamic probability bands: common >= ${(defaultConfig.generation.commonProbability * 100).toFixed(2)}%; uncommon >= ${(defaultConfig.generation.uncommonProbability * 100).toFixed(2)}%.`);
+  console.log(`Move-number bands: early through ${defaultConfig.moveBands.earlyThrough}; middle through ${defaultConfig.moveBands.middleThrough}; later moves use the late band.`);
+  console.log(`White Amateur popularity thresholds: early=${(defaultConfig.whiteMoveFiltering.mainlinePopularity.early * 100).toFixed(2)}%, middle=${(defaultConfig.whiteMoveFiltering.mainlinePopularity.middle * 100).toFixed(2)}%, late=${(defaultConfig.whiteMoveFiltering.mainlinePopularity.late * 100).toFixed(2)}%.`);
+  console.log(`API CP tolerances: early=${defaultConfig.engineVerification.apiToleranceCp.early}, middle=${defaultConfig.engineVerification.apiToleranceCp.middle}, late=${defaultConfig.engineVerification.apiToleranceCp.late}.`);
+  console.log(`Local CP tolerances: early=${defaultConfig.engineVerification.localToleranceCp.early}, middle=${defaultConfig.engineVerification.localToleranceCp.middle}, late=${defaultConfig.engineVerification.localToleranceCp.late}.`);
+  console.log(`Black minimum weighted games: ${defaultConfig.humanMoves.minimumWeightedGames}; Masters weight: ${defaultConfig.humanMoves.mastersWeight}.`);
+  console.log(`Black smoothing: anchor games=${defaultConfig.smoothing.anchorGames}; prior Black score=${(defaultConfig.smoothing.blackPrior * 100).toFixed(2)}%.`);
+  console.log(`Lichess Cloud: MultiPV=${defaultConfig.api.lichessCloudEval.multiPv}; retries=${defaultConfig.api.lichessCloudEval.retryAttempts}. ChessDB retries=${defaultConfig.api.chessDb.retryAttempts}.`);
+  console.log(`Local Deep Stockfish: depth=${defaultConfig.engine.deepVerification.depth}; MultiPV=${defaultConfig.engine.deepVerification.multiPv}.`);
+  console.log(`Explorer filters (fixed for this run): Elite speeds=${defaultConfig.humanExplorerRequest.elite.speeds.join(",")}, ratings=${defaultConfig.humanExplorerRequest.elite.ratings.join(",")}; Amateur speeds=${defaultConfig.humanExplorerRequest.amateur.speeds.join(",")}, ratings=${defaultConfig.humanExplorerRequest.amateur.ratings.join(",")}.`);
+  console.log("Move-number band endpoints are inclusive: full move 4 is early and full move 8 is middle.");
+  console.log("All engine evaluations use White's point of view: positive is better for White, negative is better for Black. Example: +0.32 means +32 cp for White.");
+  console.log("A remote-engine cache stores the complete move/evaluation snapshot returned by one source for one exact Full FEN and request profile.");
+  console.log(`The local-engine profile is a SHA-256 cache identity for role=deep-local, depth=${defaultConfig.engine.deepVerification.depth}, and MultiPV=${defaultConfig.engine.deepVerification.multiPv}; it does not currently include the Stockfish binary/version or other engine options.`);
+  console.log("A baseline is Stockfish's unrestricted top move; an exact candidate entry is a search restricted to one human candidate.");
+  console.log("Local verification first finds or reuses one unrestricted Stockfish baseline/top move for the exact Full FEN and profile.");
+  console.log("Each human candidate that still requires local verification is then found or reused through a separate single-PV search restricted with searchmoves, and is compared with that same baseline using the local CP tolerance.");
+  console.log("The searches run sequentially. The baseline is not recalculated for every candidate, and a candidate identical to the baseline move needs no restricted search.");
+  console.log("Local verification example: baseline d5=+0.20; restricted candidate g6=+1.30, loss=110cp => REJECT; restricted candidate Nf6=+0.65, loss=45cp => ACCEPT.");
+  console.log("\nFORMULAS USED THROUGHOUT THE RUN");
+  console.log("White popularity = Amateur games for the move / total Amateur games.");
+  console.log(`Black weighted games = Masters games × ${defaultConfig.humanMoves.mastersWeight} + Elite games.`);
+  console.log(`Black score = (weighted Black wins + 0.5 × weighted draws + ${defaultConfig.smoothing.anchorGames} × ${defaultConfig.smoothing.blackPrior}) / (weighted games + ${defaultConfig.smoothing.anchorGames}).`);
+  console.log("CP loss = candidate evaluation − best evaluation. Black prefers the lowest White-point-of-view CP value.");
+  console.log("CP-loss example: if Black's best move is g6=-10cp and candidate d5=+20cp, loss=20-(-10)=30cp; d5 passes an 80cp tolerance and fails a 20cp tolerance.");
+  console.log("\nCOUNTER DEFINITIONS");
+  console.log("Missing White Moves: a non-terminal position for which Explorer produced zero candidate moves before filtering.");
+  console.log("N/A Evals (Null): selected Black responses whose CP is null, normally because the result is represented as mate rather than CP.");
+  console.log("Skipped: a repetition or a transposition whose canonical Black response was already processed in this run.");
+  console.log(`${line()}\n`);
+}
+
+function fullmoveNumber(fullFen: string): number {
+  return Number(parseFullFen(fullFen).split(" ")[5]);
+}
+
+function installHttpObserver(): void {
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const method = init?.method ?? (input instanceof Request ? input.method : "GET");
+    const started = Date.now();
+    console.log(`\n[HTTP REQUEST] ${method} ${url}`);
+    console.log("  Authentication values are deliberately not printed.");
+    try {
+      const response = await originalFetch(input, init);
+      console.log(`[HTTP RESPONSE] ${response.status} ${response.statusText || ""} in ${elapsed(started)}`);
+      if (!response.ok) console.warn(`[HTTP WARNING] ${url} failed with HTTP ${response.status}; retry/fallback handling follows below.`);
+      try {
+        const clone = response.clone();
+        const contentType = clone.headers.get("content-type") ?? "";
+        const body = contentType.includes("json") ? await clone.json() : await clone.text();
+        console.log("[HTTP RESPONSE BODY]");
+        console.log(typeof body === "string" ? body : pretty(body));
+      } catch (observerError) {
+        console.log(`[HTTP BODY OBSERVER] Could not display the cloned body: ${observerError instanceof Error ? observerError.message : String(observerError)}`);
+      }
+      return response;
+    } catch (error) {
+      console.log(`[HTTP FAILURE] after ${elapsed(started)}: ${error instanceof Error ? error.message : String(error)}`);
+      throw error;
+    }
+  }) as typeof fetch;
+}
+
+function logExplorerRows(label: string, data: ExplorerBucket): void {
+  console.log(`\n[${label}] total games: ${data.totalGames}; returned moves: ${data.moves.length}`);
+  for (const move of [...data.moves].sort((a, b) => b.games - a.games || a.uci.localeCompare(b.uci))) {
+    console.log(`  ${move.san} (${move.uci}): games=${move.games}; White=${move.white} (${percentage(move.white, move.games)}); draws=${move.draws} (${percentage(move.draws, move.games)}); Black=${move.black} (${percentage(move.black, move.games)})`);
+  }
+  if (data.moves.length === 0) console.log("  Successful empty bucket: no moves returned.");
+}
+
+async function diagnosticFetchAllDatabases(fen: string, snapshotId: string) {
+  const started = Date.now();
+  const fullFen = parseFullFen(fen);
+  const positionKey = positionKeyFromFen(fullFen);
+  console.log(`\n[HUMAN EXPLORER INPUT] Full FEN: ${fullFen}`);
+  console.log(`[HUMAN EXPLORER CACHE KEY] snapshot=${snapshotId}; position=${positionKey}`);
+  for (const databaseType of ["MASTERS", "ELITE", "AMATEUR"] as HumanDatabaseType[]) {
+    const cached = await readHumanExplorerBucket(snapshotId, positionKey, databaseType);
+    console.log(`[CACHE ${databaseType}] ${cached.status === "missing" ? "MISS — an API request is required" : `${cached.status.toUpperCase()} HIT — no API request is required`} `);
+  }
+
+  const result = await fetchAllDatabases(fullFen, snapshotId) as ExplorerResultSet;
+  logExplorerRows("AMATEUR RAW DATA — LICHESS OPENING EXPLORER", result[2]);
+
+  const storedOpening = await prisma.repertoireNode.findFirst({
+    where: { fullFen },
+    select: { eco: true, openingName: true }
+  });
+  const fetchedOpening = result[0].opening;
+  console.log(`\n[OPENING METADATA] ECO=${fetchedOpening?.eco ?? storedOpening?.eco ?? "unavailable"}; name=${fetchedOpening?.name ?? storedOpening?.openingName ?? "unavailable"}`);
+  if (!fetchedOpening?.name && !storedOpening?.openingName) {
+    console.warn("[OPENING METADATA WARNING] No ECO/opening name is available from this cached Explorer result or the rebuilt canonical node.");
+  }
+
+  const moveNumber = fullmoveNumber(fullFen);
+  const band = getMoveBand(moveNumber, defaultConfig);
+  const threshold = defaultConfig.whiteMoveFiltering.mainlinePopularity[band];
+  const allSan = new Set(result.flatMap(bucket => bucket.moves.map(move => move.san)));
+  const whiteDecisions = [...allSan].map(san => ({
+    san,
+    decision: shouldIncludeWhiteMove(san, moveNumber, result[2].moves, result[2].totalGames)
+  })).sort((a, b) => b.decision.amateurGames - a.decision.amateurGames || a.san.localeCompare(b.san));
+  console.log(`\n[WHITE FILTER] full move=${moveNumber}; band=${band}; minimum Amateur share=${(threshold * 100).toFixed(2)}%`);
+  for (const { san, decision } of whiteDecisions) {
+    console.log(`  ${san}: Amateur games=${decision.amateurGames}/${result[2].totalGames}; share=${(decision.probability * 100).toFixed(3)}%; ${decision.include ? "KEEP" : "ABORT"}`);
+    console.log(decision.include
+      ? `    Reason: share meets the ${(threshold * 100).toFixed(2)}% threshold.`
+      : `    Reason: share is below the ${(threshold * 100).toFixed(2)}% threshold, or the Amateur bucket has no games.`);
+  }
+  console.log(`[HUMAN EXPLORER COMPLETE] ${elapsed(started)}`);
+  return result;
+}
+
+function logRemoteSnapshot(source: string, result: Awaited<ReturnType<typeof readRemoteEngineResult>>): void {
+  console.log(`\n[${source} SNAPSHOT] cache status=${result.status.toUpperCase()}`);
+  if (result.status === "empty") console.log("  Successful empty snapshot: this source has no usable moves.");
+  if (result.status === "success") {
+    const evaluations = source === "LICHESS"
+      ? [...result.evaluations].sort(compareBlackEvaluations)
+      : result.evaluations;
+    for (const evaluation of evaluations) {
+      console.log(`  ${evaluation.san ?? "?"} (${evaluation.uci}): ${evaluationText(evaluation)}`);
+    }
+  }
+}
+
+function compareBlackEvaluations(a: RemoteEngineEvaluation, b: RemoteEngineEvaluation): number {
+  const category = (evaluation: RemoteEngineEvaluation): number => {
+    if (evaluation.mate !== null && evaluation.mate < 0) return 0;
+    if (evaluation.cp !== null) return 1;
+    if (evaluation.mate !== null && evaluation.mate > 0) return 2;
+    return 3;
+  };
+  const categoryDifference = category(a) - category(b);
+  if (categoryDifference !== 0) return categoryDifference;
+  if (a.cp !== null && b.cp !== null) return a.cp - b.cp || a.uci.localeCompare(b.uci);
+  if (a.mate !== null && b.mate !== null) return b.mate - a.mate || a.uci.localeCompare(b.uci);
+  return a.uci.localeCompare(b.uci);
+}
+
+function ordinaryEntries(evaluations: RemoteEngineEvaluation[]): OrdinaryCpSnapshotEntry[] | null {
+  if (evaluations.some(item => item.mate !== null)) return null;
+  return evaluations.map(item => ({ uci: item.uci, cp: item.cp as number, san: item.san, mate: null }));
+}
+
+function explainOrdinaryCandidate(
+  source: string,
+  candidateUci: string,
+  evaluations: RemoteEngineEvaluation[],
+  tolerance: number
+): "ACCEPT" | "REJECT" | "INCONCLUSIVE" {
+  const snapshot = ordinaryEntries(evaluations);
+  if (!snapshot || snapshot.length === 0) {
+    console.log(`    ${source}: INCONCLUSIVE because the snapshot is empty or contains mate evaluations.`);
+    return "INCONCLUSIVE";
+  }
+  const ordered = [...snapshot].sort((a, b) => a.cp - b.cp || a.uci.localeCompare(b.uci));
+  const best = ordered[0];
+  const candidate = ordered.find(item => item.uci === candidateUci);
+  const decision = verifyOrdinaryCpSnapshot(candidateUci, snapshot, tolerance);
+  if (candidate) {
+    const loss = candidate.cp - best.cp;
+    console.log(`    ${source}: best=${best.uci} ${best.cp}cp; candidate=${candidate.cp}cp; loss=${loss}cp; allowed=${tolerance}cp => ${decision}`);
+  } else {
+    const boundary = ordered[ordered.length - 1];
+    const boundaryLoss = boundary.cp - best.cp;
+    console.log(`    ${source}: candidate absent; last returned move=${boundary.uci} at loss=${boundaryLoss}cp; allowed=${tolerance}cp => ${decision}`);
+    console.log(decision === "REJECT"
+      ? "      The returned boundary is already outside tolerance, so an absent move cannot survive."
+      : "      The returned boundary is still inside tolerance, so this source cannot decide; fall through.");
+  }
+  return decision;
+}
+
+async function diagnosticEvaluateBlackMove(
+  fen: string,
+  chess: Chess,
+  moveNumber: number,
+  previousMovesSan: string[],
+  snapshotId: string
+): Promise<SelectedResponseResult> {
+  const started = Date.now();
+  const fullFen = parseFullFen(fen);
+  const [masters, elite] = await fetchAllDatabases(fullFen, snapshotId) as ExplorerResultSet;
+  const candidates = buildBlackHumanShortlist(masters.moves, elite.moves, defaultConfig);
+  const lichessProfile = computeRemoteEngineEvaluationProfile("LICHESS", defaultConfig);
+  const chessDbProfile = computeRemoteEngineEvaluationProfile("CHESSDB", defaultConfig);
+  const lichessBefore = await readRemoteEngineResult(fullFen, "LICHESS", lichessProfile);
+  const chessDbBefore = await readRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile);
+  const localProfile = computeLocalEngineEvaluationProfile(defaultConfig);
+  const [localBaselineBefore, localCandidatesBefore] = await Promise.all([
+    prisma.localEngineBaseline.findUnique({ where: { fullFen_evaluationProfile: { fullFen, evaluationProfile: localProfile } } }),
+    prisma.localEngineCandidate.findMany({ where: { fullFen, evaluationProfile: localProfile } })
+  ]);
+
+  console.log(`\n[BLACK RESPONSE INPUT] history=${previousMovesSan.join(" ")}; Full FEN=${fullFen}`);
+  logExplorerRows("BLACK MASTERS RAW DATA — LICHESS OPENING EXPLORER", masters);
+  logExplorerRows("BLACK ELITE RAW DATA — LICHESS OPENING EXPLORER", elite);
+  console.log(`[REMOTE CACHE BEFORE] Lichess=${lichessBefore.status}; ChessDB=${chessDbBefore.status}`);
+  console.log(`[LOCAL CACHE BEFORE] baseline=${localBaselineBefore ? "hit" : "miss"}; exact candidates=${localCandidatesBefore.length}`);
+  console.log(`[MINIMUM WEIGHTED GAMES] ${defaultConfig.humanMoves.minimumWeightedGames}`);
+  const survivingUci = new Set(candidates.map(candidate => candidate.uci));
+  const rawByUci = new Map<string, { san: string; masters: number; elite: number }>();
+  for (const move of masters.moves) rawByUci.set(move.uci, { san: move.san, masters: move.games, elite: 0 });
+  for (const move of elite.moves) {
+    const raw = rawByUci.get(move.uci) ?? { san: move.san, masters: 0, elite: 0 };
+    raw.elite = move.games;
+    rawByUci.set(move.uci, raw);
+  }
+  for (const [uci, raw] of rawByUci) {
+    if (survivingUci.has(uci)) continue;
+    const weighted = raw.masters * defaultConfig.humanMoves.mastersWeight + raw.elite;
+    console.log(`  ${raw.san} (${uci}): Masters=${raw.masters}, Elite=${raw.elite}, weighted=${weighted} => ABORT`);
+    console.log(`    Reason: ${weighted} weighted games is below the required ${defaultConfig.humanMoves.minimumWeightedGames}.`);
+  }
+  for (const candidate of candidates) {
+    console.log(`  ${candidate.san} (${candidate.uci}): Masters=${candidate.mastersGames}, Elite=${candidate.eliteGames}, weighted=${candidate.weightedGames}, weighted Black wins=${candidate.weightedBlackWins}, weighted draws=${candidate.weightedDraws}, Black score=${(candidate.blackScore * 100).toFixed(3)}%`);
+  }
+  if (candidates.length === 0) console.log("  No human response survived the weighted-games threshold; local fallback will be required.");
+
+  const result = await evaluateBlackMove(fullFen, chess, moveNumber, previousMovesSan, snapshotId);
+  const lichessAfter = await readRemoteEngineResult(fullFen, "LICHESS", lichessProfile);
+  const chessDbAfter = await readRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile);
+  const [localBaselineAfter, localCandidatesAfter] = await Promise.all([
+    prisma.localEngineBaseline.findUnique({ where: { fullFen_evaluationProfile: { fullFen, evaluationProfile: localProfile } } }),
+    prisma.localEngineCandidate.findMany({ where: { fullFen, evaluationProfile: localProfile }, orderBy: { candidateUci: "asc" } })
+  ]);
+  logRemoteSnapshot("LICHESS", lichessAfter);
+  logRemoteSnapshot("CHESSDB", chessDbAfter);
+  console.log(`\n[LOCAL ENGINE SNAPSHOT] profile=${localProfile}`);
+  console.log(localBaselineAfter
+    ? `  baseline ${localBaselineAfter.san ?? "?"} (${localBaselineAfter.bestUci}): ${evaluationText(localBaselineAfter)}${localBaselineBefore ? " [CACHE HIT]" : " [CALCULATED THIS CALL]"}`
+    : "  No local baseline was needed.");
+  for (const candidate of localCandidatesAfter) {
+    const wasCached = localCandidatesBefore.some(before => before.candidateUci === candidate.candidateUci);
+    console.log(`  exact candidate ${candidate.san ?? "?"} (${candidate.candidateUci}): ${evaluationText(candidate)}${wasCached ? " [CACHE HIT]" : " [CALCULATED THIS CALL]"}`);
+  }
+
+  const tolerance = getCpTolerance(moveNumber, false);
+  console.log(`\n[WATERFALL EXPLANATION] API tolerance=${tolerance}cp`);
+  const hardcoded = moveNumber === 1 && previousMovesSan.length === 1 && (previousMovesSan[0] === "e4" || previousMovesSan[0] === "d4");
+  if (hardcoded) {
+    console.log(`  Opening rule fixes Black's response as ${result.selectedMoveSan}. Engines provide evidence but do not choose a competing move.`);
+  } else {
+    for (const candidate of candidates) {
+      console.log(`  Candidate ${candidate.san} (${candidate.uci}):`);
+      let lichessDecision: "ACCEPT" | "REJECT" | "INCONCLUSIVE" = "INCONCLUSIVE";
+      if (lichessAfter.status === "success") {
+        const mateContext = analyseLichessMateSnapshot(lichessAfter.evaluations);
+        if (mateContext.kind === "FORCED_MATE") {
+          lichessDecision = verifyCandidateAgainstLichessMate(candidate.uci, mateContext);
+          console.log(`    Lichess mate line => ${lichessDecision}. A mate rejection is final for this candidate.`);
+        } else {
+          lichessDecision = explainOrdinaryCandidate("Lichess", candidate.uci, lichessAfter.evaluations, tolerance);
+        }
+      } else console.log("    Lichess unavailable/empty => fall through to ChessDB.");
+      if (lichessDecision === "REJECT") continue;
+      if (lichessDecision === "ACCEPT") break;
+
+      let chessDecision: "ACCEPT" | "REJECT" | "INCONCLUSIVE" = "INCONCLUSIVE";
+      if (chessDbAfter.status === "success") chessDecision = explainOrdinaryCandidate("ChessDB", candidate.uci, chessDbAfter.evaluations, tolerance);
+      else console.log("    ChessDB unavailable/empty => fall through to Local Deep Stockfish.");
+      if (chessDecision === "REJECT") continue;
+      if (chessDecision === "ACCEPT") break;
+      console.log(`    Local Deep Stockfish is required; local tolerance=${getCpTolerance(moveNumber, true)}cp, depth=${defaultConfig.engine.deepVerification.depth}, MultiPV=${defaultConfig.engine.deepVerification.multiPv}.`);
+      if (candidate.uci === result.selectedUci) break;
+    }
+  }
+  console.log(`\n[FINAL BLACK DECISION] ${result.selectedMoveSan} (${result.selectedUci})`);
+  console.log(`  source=${result.source}; evaluation=${evaluationText(result)}; selection method=${result.selectionMethod}; origin=${result.moveOrigin}; deep verified=${result.deepVerified}`);
+  console.log(`  human statistics=${result.selectedStats ? pretty(result.selectedStats) : "none (engine-origin fallback)"}`);
+  console.log(`[BLACK RESPONSE COMPLETE] ${elapsed(started)}`);
+  return result;
+}
+
+async function diagnosticWikibooks(nodeId: string) {
+  const before = await prisma.repertoireNode.findUniqueOrThrow({
+    where: { id: nodeId },
+    select: { history: true, wikibooksChecked: true, wikiText: true, eco: true, openingName: true }
+  });
+  console.log(`\n[WIKIBOOKS] history=${before.history || "(root)"}; ${before.wikibooksChecked ? `CACHE HIT (${before.wikiText === null ? "valid absence" : `${before.wikiText.length} characters`})` : "CACHE MISS — lookup required"}`);
+  console.log(`[OPENING METADATA FOR HISTORY] ECO=${before.eco ?? "unavailable"}; name=${before.openingName ?? "unavailable"}`);
+  const started = Date.now();
+  const result = await ensureRepertoireNodeWikibooks(nodeId);
+  console.log(`[WIKIBOOKS RESULT] ${result.status} in ${elapsed(started)}`);
+  return result;
+}
+
+function installBlockFormatter(write: (...args: unknown[]) => void): () => void {
+  const diagnosticLog = (...args: unknown[]) => {
+    const text = format(...args);
+    const normalized = text.trim();
+    const queue = normalized.match(/^--- Queue Size: (\d+) \| Maximum: (\d+) \| Move: (\d+) ---$/);
+    if (queue) {
+      currentChessFullMove = Number(queue[3]);
+      candidateBranch = 0;
+      pendingCandidate = false;
+      liveCounters.positions++;
+      write(`\n${line()}\nMOVE ${queue[3]}\nPositions still waiting after this one was dequeued: ${queue[1]}\nMaximum work items observed at once, including the position being processed: ${queue[2]}\n${line()}`);
+      write(`[LIVE COUNTER] Positions looked at: ${liveCounters.positions} (the root counts as position 1).`);
+      return;
+    }
+    if (normalized.includes("--- [CHECKPOINT] Node Finished ---")) {
+      if (pendingCandidate) {
+        liveCounters.skipped++;
+        pendingCandidate = false;
+        write(`[LIVE COUNTER] Skipped: +1 => ${liveCounters.skipped} total. Reason: this transposition's canonical Black response was already processed.`);
+      }
+      write(`\n${line("-")}\nMOVE ${currentChessFullMove} POSITION COMPLETE`);
+      return;
+    }
+    if (normalized === "--------------------------------------------") return;
+    const found = normalized.match(/^Found (\d+) White moves to process\.$/);
+    if (found) {
+      liveCounters.whiteMoves += Number(found[1]);
+      write(...args);
+      write(`[LIVE COUNTER] White moves found: +${found[1]} => ${liveCounters.whiteMoves} total.`);
+      return;
+    }
+    const evaluating = normalized.match(/^Evaluating White Move: (.+?) \(Reason:/);
+    if (evaluating) {
+      if (pendingCandidate) {
+        liveCounters.skipped++;
+        write(`[LIVE COUNTER] Skipped: +1 => ${liveCounters.skipped} total. Reason: this transposition's canonical Black response was already processed.`);
+      }
+      candidateBranch++;
+      movePairNumber++;
+      currentMovePairNumber = movePairNumber;
+      pendingCandidate = true;
+      write(`\n${line("=")}\nMOVE PAIR ${currentMovePairNumber} — MOVE ${currentChessFullMove} — BRANCH ${candidateBranch}\nWhite half-move: ${evaluating[1]}\n${line("=")}`);
+      write(normalized);
+      return;
+    }
+    if (normalized.startsWith("Black responds with:")) {
+      liveCounters.blackResponses++;
+      if (normalized.includes("Eval: M")) liveCounters.nullCp++;
+      pendingCandidate = false;
+      write(normalized);
+      write(`[LIVE COUNTER] Black responses evaluated: +1 => ${liveCounters.blackResponses} total.`);
+      write(`[MOVE PAIR ${currentMovePairNumber} COMPLETE] White and Black half-moves are now selected for MOVE ${currentChessFullMove}, BRANCH ${candidateBranch}.\n${line("=")}`);
+      return;
+    }
+    if (normalized.startsWith("[STOPPED]")) {
+      liveCounters.skipped++;
+      pendingCandidate = false;
+      write(normalized);
+      write(`[LIVE COUNTER] Skipped: +1 => ${liveCounters.skipped} total. Reason: repetition.`);
+      return;
+    }
+    if (normalized.startsWith("[ABORTED]")) {
+      liveCounters.branchesAborted++;
+      write(normalized);
+      write(`[LIVE COUNTER] Branches aborted: +1 => ${liveCounters.branchesAborted} total.`);
+      return;
+    }
+    if (normalized.startsWith("[ALERT - ERROR] No White candidates")) {
+      liveCounters.missingWhite++;
+      write(normalized);
+      write(`[LIVE COUNTER] Missing White moves: +1 => ${liveCounters.missingWhite} total.`);
+      return;
+    }
+    if (normalized.startsWith("[Run totals] Elapsed:")) {
+      write(`${normalized}\n  “Positions Looked At” includes the starting/root position before any move has been played.`);
+      return;
+    }
+    const missingMoves = normalized.match(/^Missing White Moves: (\d+) \| Missing Black Moves: \d+$/);
+    if (missingMoves) {
+      write(`Missing White Moves: ${missingMoves[1]}`);
+      return;
+    }
+    if (normalized.startsWith("Missing Black Moves:")) return;
+    write(...args);
+  };
+  console.log = diagnosticLog;
+  console.warn = (...args: unknown[]) => diagnosticLog("[WARNING]", ...args);
+  console.error = (...args: unknown[]) => diagnosticLog("[ERROR]", ...args);
+  return () => {
+    console.log = originalLog;
+    console.warn = originalWarn;
+    console.error = originalError;
+  };
+}
+
+async function main(): Promise<void> {
+  const startedAt = new Date();
+  const localOffsetMinutes = -startedAt.getTimezoneOffset();
+  const offsetSign = localOffsetMinutes >= 0 ? "+" : "-";
+  const offset = `${offsetSign}${String(Math.floor(Math.abs(localOffsetMinutes) / 60)).padStart(2, "0")}:${String(Math.abs(localOffsetMinutes) % 60).padStart(2, "0")}`;
+  const localStarted = `${startedAt.getFullYear()}-${String(startedAt.getMonth() + 1).padStart(2, "0")}-${String(startedAt.getDate()).padStart(2, "0")}T${String(startedAt.getHours()).padStart(2, "0")}:${String(startedAt.getMinutes()).padStart(2, "0")}:${String(startedAt.getSeconds()).padStart(2, "0")}.${String(startedAt.getMilliseconds()).padStart(3, "0")}${offset}`;
+  const stamp = localStarted.replace(/:/g, "").replace(/\.\d{3}/, "").replace("+", "plus");
+  const logPath = path.join(PROJECT_ROOT, "docs", "logs", `treegen-diagnostic-${stamp}.md`);
+  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  fs.writeFileSync(logPath, `# Detailed Tree Generator Diagnostic\n\nStarted (local): ${localStarted}\nStarted (UTC): ${startedAt.toISOString()}\n\n\`\`\`text\n`);
+  const write = (...args: unknown[]) => {
+    originalLog(...args);
+    fs.appendFileSync(logPath, `${format(...args)}\n`);
+  };
+  const restoreConsole = installBlockFormatter(write);
+  let lock: LockHandle | null = null;
+  let stopRequested = false;
+  const requestStop = () => {
+    stopRequested = true;
+    write("Stop requested; diagnostic generation will stop after the current position.");
+  };
+  let failure: unknown = null;
+
+  try {
+    process.on("SIGINT", requestStop);
+    lock = acquireLock("treegen-diagnostic");
+    installHttpObserver();
+    console.log("DETAILED DIAGNOSTIC MODE — the production generator and decision functions are unchanged.");
+    console.log(`Diagnostic log: ${logPath}`);
+    printConfiguration();
+    await generateRepertoire(START_FEN, 3, {
+      fetchDatabases: diagnosticFetchAllDatabases,
+      responseEvaluator: diagnosticEvaluateBlackMove,
+      ensureNodeWikibooks: diagnosticWikibooks,
+      shouldStop: () => stopRequested
+    });
+  } catch (error) {
+    failure = error;
+    console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.off("SIGINT", requestStop);
+    try { await prisma.$disconnect(); } catch (error) { if (!failure) failure = error; }
+    try { lock?.release(); } catch (error) { if (!failure) failure = error; }
+    const finished = new Date();
+    fs.appendFileSync(logPath, `\n${failure ? "[FAILED/STOPPED]" : "[FINISHED]"} ${failure instanceof Error ? failure.message : failure ?? "Detailed generation completed"}\nFinished: ${finished.toISOString()}\nElapsed: ${finished.getTime() - startedAt.getTime()}ms\n\`\`\`\n`);
+    restoreConsole();
+  }
+
+  if (failure) throw failure;
+}
+
+if (require.main === module) {
+  main().catch(error => {
+    if (error instanceof UserRequestedStopError) originalError(`Diagnostic generation stopped: ${error.message}`);
+    else originalError("Detailed diagnostic generation failed:", error);
+    process.exitCode = 1;
+  });
+}
