@@ -311,13 +311,13 @@ export async function reconcileOpponentBranches(input: {
     const branches: ReconciledOpponentBranch[] = [];
     const recomputeDestinationProbability = async (nodeId: string) => {
       const aggregate = await tx.repertoireMove.aggregate({
-        where: { toNodeId: nodeId, NOT: { stopReason: "Repetition" } },
+        where: { toNodeId: nodeId, OR: [{ stopReason: null }, { stopReason: { not: "Repetition" } }] },
         _sum: { routeProbability: true }
       });
       const cumulativeProb = aggregate._sum.routeProbability ?? 0;
       return tx.repertoireNode.update({
         where: { id: nodeId },
-        data: { cumulativeProb, isTransposition: await tx.repertoireMove.count({ where: { toNodeId: nodeId, NOT: { stopReason: "Repetition" } } }) > 1 }
+        data: { cumulativeProb, isTransposition: await tx.repertoireMove.count({ where: { toNodeId: nodeId, OR: [{ stopReason: null }, { stopReason: { not: "Repetition" } }] } }) > 1 }
       });
     };
     for (const candidate of [...input.recomputedCandidates].sort((a, b) => a.uci.localeCompare(b.uci))) {
@@ -364,8 +364,10 @@ export async function reconcileOpponentBranches(input: {
           data: {
             san: candidate.san,
             prob: candidate.prob,
-            routeProbability: isRepetition ? 0 : candidate.trueProbability,
-            trueProbability: isRepetition ? 0 : candidate.trueProbability,
+            // A repetition terminal still records the actual probability mass that reached it
+            // (DB.11): diagnostic evidence only, never zeroed and never propagated onward.
+            routeProbability: candidate.trueProbability,
+            trueProbability: candidate.trueProbability,
             routeHistory: isRepetition || isTransposition ? candidate.destinationHistory : null,
             stopReason: isRepetition ? "Repetition" : isTransposition ? "Transposition" : null
           }
@@ -465,8 +467,10 @@ export async function reconcileOpponentBranches(input: {
           san: candidate.san,
           playerTurn: "OPPONENT",
           prob: candidate.prob,
-          routeProbability: isRepetition ? 0 : candidate.trueProbability,
-          trueProbability: isRepetition ? 0 : candidate.trueProbability,
+          // A repetition terminal still records the actual probability mass that reached it
+          // (DB.11): diagnostic evidence only, never zeroed and never propagated onward.
+          routeProbability: candidate.trueProbability,
+          trueProbability: candidate.trueProbability,
           routeHistory: isTransposition || isRepetition ? candidate.destinationHistory : null,
           stopReason: isRepetition ? "Repetition" : isTransposition ? "Transposition" : null,
           humanDataSnapshotId: source.humanDataSnapshotId,

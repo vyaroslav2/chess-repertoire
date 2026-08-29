@@ -98,7 +98,7 @@ export function buildBlackHumanShortlist(
   const minGames = config.humanMoves.minimumWeightedGames;
   const weight = config.humanMoves.mastersWeight;
   const anchorGames = config.smoothing.anchorGames;
-  const blackPrior = config.smoothing.blackPrior;
+  const repertoireSidePrior = config.smoothing.repertoireSidePrior;
 
   for (const candidate of Array.from(candidatesByUci.values())) {
     candidate.weightedGames = (candidate.mastersGames * weight) + candidate.eliteGames;
@@ -109,7 +109,7 @@ export function buildBlackHumanShortlist(
       continue;
     }
 
-    const priorBlackPoints = anchorGames * blackPrior;
+    const priorBlackPoints = anchorGames * repertoireSidePrior;
     candidate.blackScore = (candidate.weightedBlackWins + (0.5 * candidate.weightedDraws) + priorBlackPoints) / (candidate.weightedGames + anchorGames);
     
     // Validate final score is a real number

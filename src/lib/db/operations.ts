@@ -681,11 +681,11 @@ export async function createOpponentMove(data: {
 export async function propagateRepertoireProbabilities(repertoireId: string, startNodeId: string) {
   return prisma.$transaction(async tx => {
     const incomingToStart = await tx.repertoireMove.aggregate({
-      where: { toNodeId: startNodeId, NOT: { stopReason: "Repetition" } },
+      where: { toNodeId: startNodeId, OR: [{ stopReason: null }, { stopReason: { not: "Repetition" } }] },
       _sum: { routeProbability: true }
     });
     const incomingCountToStart = await tx.repertoireMove.count({
-      where: { toNodeId: startNodeId, NOT: { stopReason: "Repetition" } }
+      where: { toNodeId: startNodeId, OR: [{ stopReason: null }, { stopReason: { not: "Repetition" } }] }
     });
     if (incomingCountToStart > 0) {
       await tx.repertoireNode.updateMany({
@@ -717,12 +717,12 @@ export async function propagateRepertoireProbabilities(repertoireId: string, sta
           data: { routeProbability, trueProbability: routeProbability }
         });
         const incoming = await tx.repertoireMove.aggregate({
-          where: { toNodeId: edge.toNodeId, NOT: { stopReason: "Repetition" } },
+          where: { toNodeId: edge.toNodeId, OR: [{ stopReason: null }, { stopReason: { not: "Repetition" } }] },
           _sum: { routeProbability: true }
         });
         const cumulativeProb = incoming._sum.routeProbability ?? 0;
         const incomingCount = await tx.repertoireMove.count({
-          where: { toNodeId: edge.toNodeId, NOT: { stopReason: "Repetition" } }
+          where: { toNodeId: edge.toNodeId, OR: [{ stopReason: null }, { stopReason: { not: "Repetition" } }] }
         });
         const destination = await tx.repertoireNode.findUnique({ where: { id: edge.toNodeId } });
         if (destination && (destination.cumulativeProb !== cumulativeProb || destination.isTransposition !== (incomingCount > 1))) {

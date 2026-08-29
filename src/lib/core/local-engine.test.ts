@@ -77,6 +77,11 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
     const zero = collectLocalSearchUpdates(blackFen, [{ depth: 24, score: { unit: 'cp', value: 0 }, pv: 'e7e5' }]);
     assert.equal(zero[0].cp, 0);
     assert.equal(zero[0].mate, null);
+    // DB.12: mate = 0 is invalid, unlike cp = 0 — reject it rather than silently accepting it.
+    assert.throws(
+      () => collectLocalSearchUpdates(blackFen, [{ depth: 24, score: { unit: 'mate', value: 0 }, pv: 'e7e5' }]),
+      /Invalid Local Engine mate evaluation/
+    );
   });
 
   await t.test('malformed evaluation shapes and roots hard-error', () => {
@@ -85,6 +90,7 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
       [{ pv: 'e7e5', score: { unit: 'cp', value: Number.NaN } }],
       [{ pv: 'e7e5', score: { unit: 'cp', value: Number.POSITIVE_INFINITY } }],
       [{ pv: 'e7e5', score: { unit: 'mate', value: 1.5 } }],
+      [{ pv: 'e7e5', score: { unit: 'mate', value: 0 } }],
       [{ pv: 'bad', score: { unit: 'cp', value: 0 } }],
       [{ pv: 'e7e5' }],
       [{ score: { unit: 'cp', value: 0 } }]

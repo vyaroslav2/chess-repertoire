@@ -48,6 +48,8 @@ Repetition Stops: +1 => N total
 
 Every transposition event must print the incoming route, the canonical route it merged into, and that the canonical Black response/continuation was reused rather than evaluated twice.
 
+The diagnostic must also say that stored canonical probabilities are reconciled from all incoming route probabilities. A queued canonical continuation may retain the highest currently known probability only to ensure its dynamic-depth budget is not reduced before it is expanded; it is not a second duplicate continuation.
+
 Every repetition event must print the complete terminal route, the earlier route position that it repeated, the terminal move, the actual terminal route probability, and that the move was retained while no destination or continuation was created.
 
 A RESPONSE move that completes a repetition remains the target of the flashcard attached to its source position. Playing that answer completes the card and ends the route. An OPPONENT move that completes a repetition is retained as structural route evidence but does not create a new RESPONSE card.

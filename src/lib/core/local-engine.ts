@@ -102,10 +102,11 @@ export function collectLocalSearchUpdates(
     let cp: number | null = null;
     let mate: number | null = null;
     if (info.score.unit === 'mate') {
-      if (typeof value !== 'number' || !Number.isInteger(value)) {
+      // DB.12: mate = 0 is invalid — there is always at least one ply to the mate itself.
+      if (typeof value !== 'number' || !Number.isInteger(value) || value === 0) {
         throw new Error(`Invalid Local Engine mate evaluation for ${uci}`);
       }
-      mate = value === 0 ? 0 : value * multiplier;
+      mate = value * multiplier;
     } else if (info.score.unit === 'cp') {
       if (typeof value !== 'number' || !Number.isFinite(value)) {
         throw new Error(`Invalid Local Engine cp evaluation for ${uci}`);

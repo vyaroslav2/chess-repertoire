@@ -458,9 +458,9 @@ real score
 
   
 
-current prior
+confirmed cautious repertoire-side prior for a White repertoire
 
-= 50 imaginary games at 52% White score
+= 50 imaginary games at 48% White score
 
 ```
 
@@ -472,7 +472,7 @@ The helper calculates:
 
 ```text
 
-(real score + 50 × 0.52)
+(real score + 50 × 0.48)
 
 ÷
 
@@ -482,29 +482,16 @@ The helper calculates:
 
   
 
-#deferred White smoothing is not currently confirmed as intended policy. Its formula and numbers need revisiting if White filtering needs smoothing again.
-
-  
-
-Do not refactor White and Black smoothing into one shared formula merely because their current maths looks similar.
-
-  
-
-For now:
-
-  
+`Known:` the cautious prior is defined from the repertoire side's perspective, not permanently from Black's perspective.
 
 ```text
-
-White smoothing
-
-→ legacy/current-code behaviour
-
-→ kept isolated in math.ts
-
-→ final design unresolved
-
+repertoire-side prior score = 48%
+opponent prior score = 52%
 ```
+
+Therefore the current Black repertoire uses a 48% Black prior. A future White repertoire uses a 48% White prior. This is deliberately conservative about low-volume moves recommended for the repertoire side; it is not a claim that White's empirical overall score is 48%.
+
+The color-specific evidence calculations may remain separate even though they share the same cautious prior policy. Do not apply both 48% and 52% as separate adjustments: they are complementary descriptions of one zero-sum prior.
 
   
 

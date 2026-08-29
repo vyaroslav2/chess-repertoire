@@ -93,8 +93,8 @@ describe('B1 Black Human Shortlist Construction', () => {
     const wDraws = 2 * 5 + 1; // 11
     
     const anchorGames = 50;
-    const blackPrior = 0.48;
-    const expectedScore = (wBlackWins + 0.5 * wDraws + anchorGames * blackPrior) / (wGames + anchorGames);
+    const repertoireSidePrior = 0.48;
+    const expectedScore = (wBlackWins + 0.5 * wDraws + anchorGames * repertoireSidePrior) / (wGames + anchorGames);
     assert.strictEqual(list[0].blackScore, expectedScore);
   });
 
@@ -175,8 +175,8 @@ describe('B1 Black Human Shortlist Construction', () => {
     const masters = [{ uci: 'e2e4', san: 'e4', white: 1, draws: 2, black: 3, games: 6 }];
     const c1 = JSON.parse(JSON.stringify(defaultConfig));
     const c2 = JSON.parse(JSON.stringify(defaultConfig));
-    c1.smoothing.blackPrior = 1.0;
-    c2.smoothing.blackPrior = 0.0;
+    c1.smoothing.repertoireSidePrior = 1.0;
+    c2.smoothing.repertoireSidePrior = 0.0;
     
     const l1 = buildBlackHumanShortlist(masters, [], c1);
     const l2 = buildBlackHumanShortlist(masters, [], c2);

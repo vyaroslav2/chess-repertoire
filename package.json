@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "generate": "tsx scripts/start_tree_generator.ts"
+    "generate": "tsx scripts/start_tree_generator.ts",
+    "scenario": "node scripts/generator_scenario_runner.cjs"
   },
   "dependencies": {
     "@react-chess/chessground": "^1.3.4",

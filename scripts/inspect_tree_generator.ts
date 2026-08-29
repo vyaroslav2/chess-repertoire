@@ -44,8 +44,9 @@ let currentMovePairNumber = 0;
 let pendingCandidate = false;
 let currentHistorySan = "";
 const liveCounters = {
-  positions: 0,
-  branchesAborted: 0,
+  workItemsExamined: 0,
+  positionsExpanded: 0,
+  depthLimitedStops: 0,
   whiteMoves: 0,
   blackResponses: 0,
   transpositions: 0,
@@ -82,35 +83,40 @@ function printConfiguration(): void {
   console.log(`\n${line()}\nDIAGNOSTIC RUN CONFIGURATION\n${line()}`);
   console.log("Generation depth cap: 3 full moves (testing run).");
   console.log(`Dynamic depth budgets: common=${defaultConfig.generation.commonDepthBudget}, uncommon=${defaultConfig.generation.uncommonDepthBudget}, rare=${defaultConfig.generation.rareDepthBudget} full moves.`);
-  console.log(`Dynamic probability bands: common >= ${(defaultConfig.generation.commonProbability * 100).toFixed(2)}%; uncommon >= ${(defaultConfig.generation.uncommonProbability * 100).toFixed(2)}%.`);
+  console.log(`Dynamic probability bands: common >= ${(defaultConfig.generation.commonProbability * 100).toFixed(2)}%; uncommon >= ${(defaultConfig.generation.uncommonProbability * 100).toFixed(2)}% and < ${(defaultConfig.generation.commonProbability * 100).toFixed(2)}%; rare < ${(defaultConfig.generation.uncommonProbability * 100).toFixed(2)}%.`);
   console.log(`Move-number bands: early through ${defaultConfig.moveBands.earlyThrough}; middle through ${defaultConfig.moveBands.middleThrough}; later moves use the late band.`);
   console.log(`White Amateur popularity thresholds: early=${(defaultConfig.whiteMoveFiltering.mainlinePopularity.early * 100).toFixed(2)}%, middle=${(defaultConfig.whiteMoveFiltering.mainlinePopularity.middle * 100).toFixed(2)}%, late=${(defaultConfig.whiteMoveFiltering.mainlinePopularity.late * 100).toFixed(2)}%.`);
   console.log(`API CP tolerances: early=${defaultConfig.engineVerification.apiToleranceCp.early}, middle=${defaultConfig.engineVerification.apiToleranceCp.middle}, late=${defaultConfig.engineVerification.apiToleranceCp.late}.`);
   console.log(`Local CP tolerances: early=${defaultConfig.engineVerification.localToleranceCp.early}, middle=${defaultConfig.engineVerification.localToleranceCp.middle}, late=${defaultConfig.engineVerification.localToleranceCp.late}.`);
   console.log(`Black minimum weighted games: ${defaultConfig.humanMoves.minimumWeightedGames}; Masters weight: ${defaultConfig.humanMoves.mastersWeight}.`);
-  console.log(`Black smoothing: anchor games=${defaultConfig.smoothing.anchorGames}; prior Black score=${(defaultConfig.smoothing.blackPrior * 100).toFixed(2)}%.`);
+  console.log(`Repertoire-side smoothing: anchor games=${defaultConfig.smoothing.anchorGames}; cautious prior score=${(defaultConfig.smoothing.repertoireSidePrior * 100).toFixed(2)}%. In this Black repertoire, that is a ${(defaultConfig.smoothing.repertoireSidePrior * 100).toFixed(2)}% Black score (equivalently ${(100 - defaultConfig.smoothing.repertoireSidePrior * 100).toFixed(2)}% White score).`);
   console.log(`Lichess Cloud: MultiPV=${defaultConfig.api.lichessCloudEval.multiPv}; retries=${defaultConfig.api.lichessCloudEval.retryAttempts}. ChessDB retries=${defaultConfig.api.chessDb.retryAttempts}.`);
+  console.log(`Lichess request gate: one in-flight request at a time; minimum ${defaultConfig.api.betweenRequestDelayMs}ms between request starts; any HTTP 429 pauses all Lichess requests for at least ${defaultConfig.api.rateLimitRetryDelayMs}ms.`);
   console.log(`Local Deep Stockfish: depth=${defaultConfig.engine.deepVerification.depth}; MultiPV=${defaultConfig.engine.deepVerification.multiPv}.`);
   console.log(`Explorer filters (fixed for this run): Elite speeds=${defaultConfig.humanExplorerRequest.elite.speeds.join(",")}, ratings=${defaultConfig.humanExplorerRequest.elite.ratings.join(",")}; Amateur speeds=${defaultConfig.humanExplorerRequest.amateur.speeds.join(",")}, ratings=${defaultConfig.humanExplorerRequest.amateur.ratings.join(",")}.`);
-  console.log("Move-number band endpoints are inclusive: full move 4 is early and full move 8 is middle.");
+  console.log("Masters, Elite, and Amateur are separate cached source buckets and may require separate HTTP requests. White selection uses only Amateur; Masters supplies opening metadata; Masters plus Elite supply Black-response statistics.");
+  console.log(`Move-number band endpoints are inclusive: full move ${defaultConfig.moveBands.earlyThrough} is early and full move ${defaultConfig.moveBands.middleThrough} is middle.`);
   console.log("All engine evaluations use White's point of view: positive is better for White, negative is better for Black. Example: +0.32 means +32 cp for White.");
   console.log("A remote-engine cache stores the complete move/evaluation snapshot returned by one source for one exact Full FEN and request profile.");
-  console.log(`The local-engine profile is a SHA-256 cache identity for role=deep-local, depth=${defaultConfig.engine.deepVerification.depth}, and MultiPV=${defaultConfig.engine.deepVerification.multiPv}; it does not currently include the Stockfish binary/version or other engine options.`);
+  console.log(`Our application—not Stockfish—hashes role=deep-local, depth=${defaultConfig.engine.deepVerification.depth}, and MultiPV=${defaultConfig.engine.deepVerification.multiPv} with SHA-256 to produce the local-engine profile ID.`);
+  console.log("The profile hash is a non-reversible fingerprint of those settings only. Full FEN and candidate UCI are separate database-key fields; they are not inside the profile hash.");
+  console.log("Baseline cache identity = exact Full FEN + profile ID. Exact-candidate cache identity = exact Full FEN + candidate UCI + profile ID.");
+  console.log("The profile does not currently distinguish Stockfish version/binary build, Threads (parallel CPU workers), Hash (transposition-table memory), neural-network file, or other engine options.");
   console.log("A baseline is Stockfish's unrestricted top move; an exact candidate entry is a search restricted to one human candidate.");
-  console.log("Local verification first finds or reuses one unrestricted Stockfish baseline/top move for the exact Full FEN and profile.");
-  console.log("Each human candidate that still requires local verification is then found or reused through a separate single-PV search restricted with searchmoves, and is compared with that same baseline using the local CP tolerance.");
-  console.log("The searches run sequentially. The baseline is not recalculated for every candidate, and a candidate identical to the baseline move needs no restricted search.");
+  console.log("Local verification finds or reuses one baseline, then sequentially finds or reuses a separate single-PV searchmoves evaluation for each human candidate that still needs verification. Every candidate is compared with the same baseline; if the candidate is the baseline move, no restricted search is needed.");
   console.log("Local verification example: baseline d5=+0.20; restricted candidate g6=+1.30, loss=110cp => REJECT; restricted candidate Nf6=+0.65, loss=45cp => ACCEPT.");
   console.log("\nFORMULAS USED THROUGHOUT THE RUN");
-  console.log("White popularity = Amateur games for the move / total Amateur games.");
+  console.log("White conditional popularity = Amateur games for the move / total Amateur games.");
+  console.log("Resulting route probability = route probability before White move × White move share at this position. Black's deterministic response does not multiply it again.");
   console.log(`Black weighted games = Masters games × ${defaultConfig.humanMoves.mastersWeight} + Elite games.`);
-  console.log(`Black score = (weighted Black wins + 0.5 × weighted draws + ${defaultConfig.smoothing.anchorGames} × ${defaultConfig.smoothing.blackPrior}) / (weighted games + ${defaultConfig.smoothing.anchorGames}).`);
-  console.log("CP loss = candidate evaluation − best evaluation. Black prefers the lowest White-point-of-view CP value.");
-  console.log("CP-loss example: if Black's best move is g6=-10cp and candidate d5=+20cp, loss=20-(-10)=30cp; d5 passes an 80cp tolerance and fails a 20cp tolerance.");
+  console.log(`Black score = (weighted Black wins + 0.5 × weighted draws + ${defaultConfig.smoothing.anchorGames} × ${defaultConfig.smoothing.repertoireSidePrior}) / (weighted games + ${defaultConfig.smoothing.anchorGames}).`);
+  console.log(`Smoothing adds ${(defaultConfig.smoothing.anchorGames * defaultConfig.smoothing.repertoireSidePrior).toFixed(0)} result points—not wins—from ${defaultConfig.smoothing.anchorGames} imaginary games. A win is 1 point, a draw is 0.5, and a loss is 0; small samples stay near ${(defaultConfig.smoothing.repertoireSidePrior * 100).toFixed(2)}%, while large samples dominate the prior.`);
+  console.log("Evaluations use White's perspective, so Black prefers the lowest number: negative favors Black and positive favors White.");
+  console.log("CP loss = candidate evaluation − best evaluation. Example: g6=-10cp is better for Black than d5=+20cp because -10 is lower; d5's loss is 20-(-10)=30cp, so it passes an 80cp tolerance and fails a 20cp tolerance.");
   console.log("\nCOUNTER DEFINITIONS");
-  console.log("Missing White Moves: a non-terminal position for which Explorer produced zero candidate moves before filtering.");
-  console.log("N/A Evals (Null): selected Black responses whose CP is null, normally because the result is represented as mate rather than CP.");
-  console.log("Transpositions: a different route reached a canonical response position already processed in this run; its response is reused.");
+  console.log("Missing White Moves: a non-terminal position for which the required Amateur Explorer request succeeded but returned zero moves: no games match the configured speed/rating filters. API failure is a hard error; existing Amateur moves all below threshold are PRUNED instead.");
+  console.log("Black Responses Without CP: selected Black responses with no centipawn value because a valid mate value is stored instead. The evaluation is available as mate distance; this can come from a Lichess mate candidate/fallback, a supported ChessDB mate result, a local Stockfish mate fallback, or an engine-evaluated hardcoded response.");
+  console.log("Transpositions: a different route reached a canonical response position already processed in this run. Its incoming route probability is reconciled into the canonical position, while the canonical Black response and continuation are reused.");
   console.log("Repetition Stops: the current route returned to one of its own ancestor positions; the terminal move is retained and expansion stops.");
   console.log(`${line()}\n`);
 }
@@ -163,7 +169,8 @@ async function diagnosticFetchAllDatabases(fen: string, snapshotId: string) {
   console.log(`[HUMAN EXPLORER CACHE KEY] snapshot=${snapshotId}; position=${positionKey}`);
   for (const databaseType of ["MASTERS", "ELITE", "AMATEUR"] as HumanDatabaseType[]) {
     const cached = await readHumanExplorerBucket(snapshotId, positionKey, databaseType);
-    console.log(`[CACHE ${databaseType}] ${cached.status === "missing" ? "MISS — an API request is required" : `${cached.status.toUpperCase()} HIT — no API request is required`} `);
+    const status = cached.status === "empty" ? "VALID_ABSENCE" : cached.status === "success" ? "PRESENT" : "UNCHECKED";
+    console.log(`[CACHE ${databaseType}] retrieval=${cached.status === "missing" ? "MISS" : "HIT"}; status=${status}; API request required=${cached.status === "missing" ? "yes" : "no"}`);
   }
 
   const result = await fetchAllDatabases(fullFen, snapshotId) as ExplorerResultSet;
@@ -176,25 +183,25 @@ async function diagnosticFetchAllDatabases(fen: string, snapshotId: string) {
   const fetchedOpening = result[0].opening;
   const retrieval = fetchedOpening ? "fresh Masters response" : storedOpening?.openingMetadataStatus ? "exact-history stored metadata" : "not yet available";
   const source = fetchedOpening ? "Lichess Opening Explorer — Masters metadata" : storedOpening?.openingMetadataSource === "LICHESS_MASTERS" ? "Lichess Opening Explorer — Masters metadata" : "unavailable";
-  console.log(`\n[OPENING METADATA] retrieval=${retrieval}; source=${source}; status=${fetchedOpening || storedOpening?.openingMetadataStatus === "PRESENT" ? "PRESENT" : storedOpening?.openingMetadataStatus ?? "unchecked"}; ECO=${fetchedOpening?.eco ?? storedOpening?.eco ?? "unavailable"}; name=${fetchedOpening?.name ?? storedOpening?.openingName ?? "unavailable"}`);
-  if (!fetchedOpening?.name && !storedOpening?.openingName) {
-    console.warn("[OPENING METADATA WARNING] No ECO/opening name is available from this cached Explorer result or the rebuilt canonical node.");
-  }
+  console.log(`\n[OPENING METADATA] history=${currentHistorySan || "(root)"}; retrieval=${retrieval}; source=${source}; status=${fetchedOpening || storedOpening?.openingMetadataStatus === "PRESENT" ? "PRESENT" : storedOpening?.openingMetadataStatus ?? "UNCHECKED"}; ECO=${fetchedOpening?.eco ?? storedOpening?.eco ?? "unavailable"}; name=${fetchedOpening?.name ?? storedOpening?.openingName ?? "unavailable"}`);
 
   const moveNumber = fullmoveNumber(fullFen);
   const band = getMoveBand(moveNumber, defaultConfig);
   const threshold = defaultConfig.whiteMoveFiltering.mainlinePopularity[band];
-  const allSan = new Set(result.flatMap(bucket => bucket.moves.map(move => move.san)));
-  const whiteDecisions = [...allSan].map(san => ({
+  const amateurSan = new Set(result[2].moves.map(move => move.san));
+  const whiteDecisions = [...amateurSan].map(san => ({
     san,
     decision: shouldIncludeWhiteMove(san, moveNumber, result[2].moves, result[2].totalGames)
   })).sort((a, b) => b.decision.amateurGames - a.decision.amateurGames || a.san.localeCompare(b.san));
   console.log(`\n[WHITE FILTER] full move=${moveNumber}; band=${band}; minimum Amateur share=${(threshold * 100).toFixed(2)}%`);
+  if (result[2].moves.length === 0) {
+    console.log("  Result: MISSING WHITE MOVES — the required Amateur request succeeded with zero moves, so Amateur-only White selection cannot continue this non-terminal branch.");
+  }
   for (const { san, decision } of whiteDecisions) {
     console.log(`  ${san}: Amateur games=${decision.amateurGames}/${result[2].totalGames}; share=${(decision.probability * 100).toFixed(3)}%; ${decision.include ? "KEEP" : "ABORT"}`);
     console.log(decision.include
       ? `    Reason: share meets the ${(threshold * 100).toFixed(2)}% threshold.`
-      : `    Reason: share is below the ${(threshold * 100).toFixed(2)}% threshold, or the Amateur bucket has no games.`);
+      : `    Reason: share is below the ${(threshold * 100).toFixed(2)}% threshold.`);
   }
   console.log(`[HUMAN EXPLORER COMPLETE] ${elapsed(started)}`);
   return result;
@@ -294,7 +301,7 @@ async function diagnosticEvaluateBlackMove(
   logExplorerRows("BLACK MASTERS RAW DATA — LICHESS OPENING EXPLORER", masters);
   logExplorerRows("BLACK ELITE RAW DATA — LICHESS OPENING EXPLORER", elite);
   console.log(`[REMOTE CACHE BEFORE] Lichess=${lichessBefore.status}; ChessDB=${chessDbBefore.status}`);
-  console.log(`[LOCAL CACHE BEFORE] baseline=${localBaselineBefore ? "hit" : "miss"}; exact candidates=${localCandidatesBefore.length}`);
+  console.log(`[LOCAL CACHE BEFORE] baseline=${localBaselineBefore ? "hit" : "miss"}; exact candidates=${localCandidatesBefore.length}; role=available only if local fallback or verification is needed.`);
   console.log(`[MINIMUM WEIGHTED GAMES] ${defaultConfig.humanMoves.minimumWeightedGames}`);
   const survivingUci = new Set(candidates.map(candidate => candidate.uci));
   const rawByUci = new Map<string, { san: string; masters: number; elite: number }>();
@@ -311,7 +318,7 @@ async function diagnosticEvaluateBlackMove(
     console.log(`    Reason: ${weighted} weighted games is below the required ${defaultConfig.humanMoves.minimumWeightedGames}.`);
   }
   for (const candidate of candidates) {
-    console.log(`  ${candidate.san} (${candidate.uci}): Masters=${candidate.mastersGames}, Elite=${candidate.eliteGames}, weighted=${candidate.weightedGames}, weighted Black wins=${candidate.weightedBlackWins}, weighted draws=${candidate.weightedDraws}, Black score=${(candidate.blackScore * 100).toFixed(3)}%`);
+    console.log(`  ${candidate.san} (${candidate.uci}): Black score=${(candidate.blackScore * 100).toFixed(3)}%; Masters=${candidate.mastersGames}, Elite=${candidate.eliteGames}, weighted=${candidate.weightedGames}, weighted Black wins=${candidate.weightedBlackWins}, weighted draws=${candidate.weightedDraws}`);
   }
   if (candidates.length === 0) console.log("  No human response survived the weighted-games threshold; local fallback will be required.");
 
@@ -332,6 +339,8 @@ async function diagnosticEvaluateBlackMove(
     const wasCached = localCandidatesBefore.some(before => before.candidateUci === candidate.candidateUci);
     console.log(`  exact candidate ${candidate.san ?? "?"} (${candidate.candidateUci}): ${evaluationText(candidate)}${wasCached ? " [CACHE HIT]" : " [CALCULATED THIS CALL]"}`);
   }
+  const localWasUsed = result.source === "Local Deep Stockfish" || result.deepVerified;
+  console.log(`[LOCAL ENGINE USAGE] used=${localWasUsed ? "yes" : "no"}; ${localWasUsed ? "local fallback or verification contributed to this decision." : "cached local entries were not used because remote evidence or an opening rule decided this response."}`);
 
   const tolerance = getCpTolerance(moveNumber, false);
   console.log(`\n[WATERFALL EXPLANATION] API tolerance=${tolerance}cp`);
@@ -375,11 +384,14 @@ async function diagnosticWikibooks(nodeId: string) {
     where: { id: nodeId },
     select: { history: true, wikibooksChecked: true, wikiText: true, eco: true, openingName: true, openingMetadataStatus: true, openingMetadataSource: true }
   });
-  console.log(`\n[WIKIBOOKS] history=${before.history || "(root)"}; ${before.wikibooksChecked ? `CACHE HIT (${before.wikiText === null ? "valid absence" : `${before.wikiText.length} characters`})` : "CACHE MISS — lookup required"}`);
-  console.log(`[OPENING METADATA FOR HISTORY] retrieval=stored exact-history node; source=${before.openingMetadataSource === "LICHESS_MASTERS" ? "Lichess Opening Explorer — Masters metadata" : "unavailable"}; status=${before.openingMetadataStatus ?? "unchecked"}; ECO=${before.eco ?? "unavailable"}; name=${before.openingName ?? "unavailable"}`);
   const started = Date.now();
   const result = await ensureRepertoireNodeWikibooks(nodeId);
-  console.log(`[WIKIBOOKS RESULT] ${result.status} in ${elapsed(started)}`);
+  const after = await prisma.repertoireNode.findUniqueOrThrow({
+    where: { id: nodeId },
+    select: { wikibooksChecked: true, wikiText: true }
+  });
+  console.log(`\n[OPENING METADATA] history=${before.history || "(root)"}; retrieval=stored node metadata; source=${before.openingMetadataSource === "LICHESS_MASTERS" ? "Lichess Opening Explorer — Masters metadata" : "unavailable"}; status=${before.openingMetadataStatus ?? "UNCHECKED"}; ECO=${before.eco ?? "unavailable"}; name=${before.openingName ?? "unavailable"}`);
+  console.log(`[WIKIBOOKS] history=${before.history || "(root)"}; retrieval=${before.wikibooksChecked ? "CACHE" : "FRESH"}; status=${after.wikiText === null ? "VALID_ABSENCE" : "PRESENT"}; source=Wikibooks; lookup performed=${before.wikibooksChecked ? "no" : "yes"}; characters=${after.wikiText?.length ?? 0}; elapsed=${elapsed(started)}`);
   return result;
 }
 
@@ -392,9 +404,9 @@ function installBlockFormatter(write: (...args: unknown[]) => void): () => void 
       currentChessFullMove = Number(queue[3]);
       candidateBranch = 0;
       pendingCandidate = false;
-      liveCounters.positions++;
+      liveCounters.workItemsExamined++;
       write(`\n${line()}\nMOVE ${queue[3]}\nPositions still waiting after this one was dequeued: ${queue[1]}\nMaximum work items observed at once, including the position being processed: ${queue[2]}\n${line()}`);
-      write(`[LIVE COUNTER] Positions looked at: ${liveCounters.positions} (the root counts as position 1).`);
+      write(`[LIVE COUNTER] Work items examined: ${liveCounters.workItemsExamined} (the root is work item 1).`);
       return;
     }
     if (normalized.includes("--- [CHECKPOINT] Node Finished ---")) {
@@ -403,11 +415,17 @@ function installBlockFormatter(write: (...args: unknown[]) => void): () => void 
         pendingCandidate = false;
         write(`[LIVE COUNTER] Transpositions: +1 => ${liveCounters.transpositions} total.`);
       }
-      write(`\n${line("-")}\nMOVE ${currentChessFullMove} POSITION COMPLETE`);
+      write(`\n${line("-")}\nMOVE ${currentChessFullMove} NODE EXPANSION COMPLETE`);
       return;
     }
     if (normalized.startsWith("History:")) {
       currentHistorySan = normalized.slice("History:".length).trim();
+      write(...args);
+      return;
+    }
+    if (normalized.startsWith("[HUMAN EXPLORER INPUT]")) {
+      liveCounters.positionsExpanded++;
+      write(`[LIVE COUNTER] Positions expanded: ${liveCounters.positionsExpanded}.`);
       write(...args);
       return;
     }
@@ -456,20 +474,20 @@ function installBlockFormatter(write: (...args: unknown[]) => void): () => void 
       write(`[LIVE COUNTER] Repetition Stops: +1 => ${liveCounters.repetitions} total.`);
       return;
     }
-    if (normalized.startsWith("[ABORTED]")) {
-      liveCounters.branchesAborted++;
+    if (normalized.startsWith("[DEPTH-LIMIT STOP]")) {
+      liveCounters.depthLimitedStops++;
       write(normalized);
-      write(`[LIVE COUNTER] Branches aborted: +1 => ${liveCounters.branchesAborted} total.`);
+      write(`[LIVE COUNTER] Depth-limited stops: +1 => ${liveCounters.depthLimitedStops} total.`);
       return;
     }
-    if (normalized.startsWith("[ALERT - ERROR] No White candidates")) {
+    if (normalized.startsWith("[MISSING WHITE MOVES]")) {
       liveCounters.missingWhite++;
       write(normalized);
       write(`[LIVE COUNTER] Missing White moves: +1 => ${liveCounters.missingWhite} total.`);
       return;
     }
     if (normalized.startsWith("[Run totals] Elapsed:")) {
-      write(`${normalized}\n  “Positions Looked At” includes the starting/root position before any move has been played.`);
+      write(`${normalized}\n  “Work Items Examined” includes the starting/root position before any move has been played.`);
       return;
     }
     write(...args);

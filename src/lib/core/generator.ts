@@ -39,12 +39,13 @@ export async function attemptCanonicalNodeWikibooks(
 }
 
 export type RebuildWikibooksCache = Map<string, string | null>;
-export type RebuildOpeningMetadataCache = Map<string, {
+type RebuildOpeningMetadataState = {
   status: "PRESENT" | "VALID_ABSENCE";
   source: "LICHESS_MASTERS";
   eco: string | null;
   openingName: string | null;
-}>;
+};
+export type RebuildOpeningMetadataCache = Map<string, RebuildOpeningMetadataState>;
 
 export async function captureRebuildOpeningMetadataCache(repertoireId: string): Promise<RebuildOpeningMetadataCache> {
   const nodes = await prisma.repertoireNode.findMany({
@@ -71,7 +72,7 @@ export async function captureRebuildOpeningMetadataCache(repertoireId: string): 
     if (entry.status !== "PRESENT" && entry.status !== "VALID_ABSENCE") throw new Error("Cached opening metadata has an invalid status");
     const parentHistory = historyFromCanonicalPgn(entry.history).slice(0, -1).join(" ");
     const parent = cache.get(parentHistory);
-    const restored = entry.status === "VALID_ABSENCE" && parent?.status === "PRESENT"
+    const restored: RebuildOpeningMetadataState = entry.status === "VALID_ABSENCE" && parent?.status === "PRESENT"
       ? { ...parent }
       : { status: entry.status, source: "LICHESS_MASTERS" as const, eco: entry.eco, openingName: entry.openingName };
     cache.set(entry.history, restored);
@@ -343,6 +344,7 @@ export async function generateRepertoire(
   
   const startTime = Date.now();
   let totalPositionsProcessed = 0;
+  let totalPositionsExpanded = 0;
   let totalWhiteMovesFound = 0;
   let totalMissingWhiteMoves = 0;
   let totalBlackMovesEvaluated = 0;
@@ -432,21 +434,32 @@ export async function generateRepertoire(
     maximumQueueSize = Math.max(maximumQueueSize, queue.length + 1);
     console.log(`\n--- Queue Size: ${queue.length} | Maximum: ${maximumQueueSize} | Move: ${node.currentMoveNumber} ---`);
     console.log(`History: ${pgnString}`);
-    console.log(`[Run totals] Elapsed: ${currentElapsed}s | Positions Looked At: ${totalPositionsProcessed}`);
+    console.log(`[Run totals] Elapsed: ${currentElapsed}s | Work Items Examined: ${totalPositionsProcessed}`);
+
+    if (new Chess(node.fen).isGameOver()) {
+      console.log(`[TERMINAL] Game-over position reached. No continuation is generated.`);
+      continue;
+    }
 
     let dynamicMaxDepth = runtime.config.generation.rareDepthBudget;
-    if (node.cumulativeProb > runtime.config.generation.commonProbability) {
+    let dynamicProbabilityBand = "rare";
+    if (node.cumulativeProb >= runtime.config.generation.commonProbability) {
         dynamicMaxDepth = runtime.config.generation.commonDepthBudget;
-    } else if (node.cumulativeProb > runtime.config.generation.uncommonProbability) {
+        dynamicProbabilityBand = "common";
+    } else if (node.cumulativeProb >= runtime.config.generation.uncommonProbability) {
         dynamicMaxDepth = runtime.config.generation.uncommonDepthBudget;
+        dynamicProbabilityBand = "uncommon";
     }
-    dynamicMaxDepth = Math.min(dynamicMaxDepth, maxDepth);
+    const uncappedDynamicMaxDepth = dynamicMaxDepth;
+    dynamicMaxDepth = Math.min(uncappedDynamicMaxDepth, maxDepth);
+    console.log(`[DYNAMIC DEPTH] cumulative probability=${(node.cumulativeProb * 100).toFixed(3)}%; band=${dynamicProbabilityBand}; dynamic budget=${uncappedDynamicMaxDepth} full moves; generation cap=${maxDepth} full moves; effective depth limit=${dynamicMaxDepth} full moves.`);
 
     if (node.currentMoveNumber > dynamicMaxDepth) {
-      console.log(`[ABORTED] Hit dynamic depth limit (${dynamicMaxDepth} moves) for prob ${(node.cumulativeProb*100).toFixed(2)}%. Stopping branch (0 White moves processed for this node).`);
+      console.log(`[DEPTH-LIMIT STOP] Hit dynamic depth limit (${dynamicMaxDepth} moves) for prob ${(node.cumulativeProb*100).toFixed(2)}%. No White moves were processed for this work item.`);
       totalBranchesAborted++;
       continue;
     }
+    totalPositionsExpanded++;
     const canonicalSourceNode = await prisma.repertoireNode.findUnique({ where: { id: node.nodeId } });
     if (!canonicalSourceNode || canonicalSourceNode.repertoireId !== repertoire.id) {
       throw new Error("Queued canonical source node disappeared or changed repertoire");
@@ -457,7 +470,7 @@ export async function generateRepertoire(
     await restoreRebuildOpeningMetadataState(canonicalSourceNode.id, rebuildOpeningMetadataCache);
     await attemptCanonicalNodeWikibooks(canonicalSourceNode.id, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
 
-    const [masters, elite, amateur] = await fetchDatabases(canonicalSourceNode.fullFen, snapshotId);
+    const [masters, , amateur] = await fetchDatabases(canonicalSourceNode.fullFen, snapshotId);
     await ensurePositionCache(canonicalSourceNode.fullFen);
     const existingMetadata = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: canonicalSourceNode.id }, select: { openingMetadataStatus: true } });
     if (!existingMetadata.openingMetadataStatus) {
@@ -469,15 +482,10 @@ export async function generateRepertoire(
     
     const whiteCandidates = selectWhiteCandidates(
       node.currentMoveNumber,
-      masters.moves || [],
-      elite.moves || [],
       amateur.moves || [],
       amateur.totalGames || 0
     );
-    const rawWhiteMoveCount = new Set(
-      [...(masters.moves || []), ...(elite.moves || []), ...(amateur.moves || [])]
-        .map(move => move.uci || move.san)
-    ).size;
+    const rawAmateurMoveCount = new Set((amateur.moves || []).map(move => move.uci || move.san)).size;
 
     const canonicalOpponentCandidates = canonicalizeOpponentCandidates({
       sourceFullFen: canonicalSourceNode.fullFen,
@@ -535,11 +543,11 @@ export async function generateRepertoire(
 
     if (whiteCandidates.length === 0) {
         const tempChess = new Chess(node.fen);
-        if (!tempChess.isGameOver() && rawWhiteMoveCount === 0) {
-            console.log(`[ALERT - ERROR] No White candidates found after ${pgnString}. Stopping branch.`);
+        if (!tempChess.isGameOver() && rawAmateurMoveCount === 0) {
+            console.log(`[MISSING WHITE MOVES] Amateur Explorer successfully returned zero moves for ${pgnString || "(root)"}. Stopping branch because White selection is Amateur-only.`);
             totalMissingWhiteMoves++;
         } else if (!tempChess.isGameOver()) {
-            console.log(`[PRUNED] ${rawWhiteMoveCount} available White move(s) were below the Amateur popularity threshold.`);
+            console.log(`[PRUNED — BELOW AMATEUR THRESHOLD] Amateur Explorer returned ${rawAmateurMoveCount} move(s), but none met the configured popularity threshold.`);
         }
     } else {
         console.log(`Found ${whiteCandidates.length} White moves to process.`);
@@ -552,6 +560,14 @@ export async function generateRepertoire(
       const reconciledOpponent = reconciledOpponentByUci.get(canonicalWhiteMove.uci);
       if (!reconciledOpponent) throw new Error(`Reconciled OPPONENT branch ${canonicalWhiteMove.uci} is missing`);
       console.log(`\nEvaluating White Move: ${whiteMove.san} (Reason: ${whiteMove.reason}, Prob: ${whiteMove.probability ? (whiteMove.probability*100).toFixed(1) : 0}%)`);
+      const resultingProbability = canonicalWhiteMove.trueProbability;
+      const resultingBand = resultingProbability >= runtime.config.generation.commonProbability
+        ? "common"
+        : resultingProbability >= runtime.config.generation.uncommonProbability ? "uncommon" : "rare";
+      const resultingBudget = resultingBand === "common"
+        ? runtime.config.generation.commonDepthBudget
+        : resultingBand === "uncommon" ? runtime.config.generation.uncommonDepthBudget : runtime.config.generation.rareDepthBudget;
+      console.log(`[BRANCH PROBABILITY] route probability before White move=${(canonicalSourceNode.cumulativeProb * 100).toFixed(3)}%; White move share at this position=${(whiteMove.probability * 100).toFixed(3)}%; resulting route probability=${(resultingProbability * 100).toFixed(3)}%; band=${resultingBand}; dynamic budget=${resultingBudget} full moves; generation cap=${maxDepth}; effective depth limit=${Math.min(resultingBudget, maxDepth)}.`);
       const newPgn = canonicalWhiteMove.destinationPgn;
       const reconciledEdge = await prisma.repertoireMove.findUnique({ where: { id: reconciledOpponent.edgeId } });
       if (reconciledEdge?.stopReason === "Repetition") {
@@ -587,7 +603,7 @@ export async function generateRepertoire(
               effectiveCumulativeProb: effectiveCanonicalProb
           });
           totalTranspositions++;
-          console.log(`[TRANSPOSITION] route=${newPgn}; canonicalRoute=${posAfterWhiteNode.pgn}; result=reused the canonical Black response without duplicate evaluation.`);
+          console.log(`[TRANSPOSITION] route=${newPgn}; canonicalRoute=${posAfterWhiteNode.pgn}; canonical cumulative probability=${(effectiveCanonicalProb * 100).toFixed(3)}% from all incoming routes; result=reused the canonical Black response without duplicate evaluation.`);
           continue;
       }
 
@@ -833,7 +849,7 @@ export async function generateRepertoire(
     // --- TEMPORARY DETAILED SUMMARY PER NODE ---
     const runningElapsed = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(`\n--- [CHECKPOINT] Node Finished ---`);
-    console.log(`Time: ${runningElapsed}s | Positions Looked At: ${totalPositionsProcessed} (Aborted: ${totalBranchesAborted})`);
+    console.log(`Time: ${runningElapsed}s | Work Items Examined: ${totalPositionsProcessed} | Positions Expanded: ${totalPositionsExpanded} | Depth-Limited Stops: ${totalBranchesAborted}`);
     console.log(`White Moves Found: ${totalWhiteMovesFound}`);
     console.log(`Transpositions: ${totalTranspositions} | Repetition Stops: ${totalRepetitionStops}`);
     console.log(`Missing White Moves: ${totalMissingWhiteMoves}`);
@@ -858,14 +874,15 @@ export async function generateRepertoire(
   console.log("\n========================================================");
   console.log("=== TREE GENERATION SUMMARY ===");
   console.log(`Time Elapsed:             ${timeElapsed} seconds`);
-  console.log(`Positions Looked At:      ${totalPositionsProcessed}`);
-  console.log(`  - Branches Aborted:     ${totalBranchesAborted}`);
+  console.log(`Work Items Examined:      ${totalPositionsProcessed}`);
+  console.log(`Positions Expanded:       ${totalPositionsExpanded}`);
+  console.log(`Depth-Limited Stops:      ${totalBranchesAborted}`);
   console.log(`White Moves Found:        ${totalWhiteMovesFound}`);
   console.log(`Total Black Responses:    ${totalBlackMovesEvaluated}`);
   console.log(`Transpositions:           ${totalTranspositions}`);
   console.log(`Repetition Stops:         ${totalRepetitionStops}`);
   console.log(`Missing White Moves:      ${totalMissingWhiteMoves}`);
-  console.log(`Total N/A Evals (Null):   ${totalNaEvals}`);
+  console.log(`Black Responses Without CP: ${totalNaEvals}`);
   console.log(`Duplicate Histories:      ${totalDuplicateHistories}`);
   console.log("========================================================\n");
   await prisma.$transaction([
@@ -875,6 +892,7 @@ export async function generateRepertoire(
   console.log("Generation Complete!");
   return {
     totalPositionsProcessed,
+    totalPositionsExpanded,
     totalWhiteMovesFound,
     totalBlackMovesEvaluated,
     totalSkippedMoves: totalTranspositions + totalRepetitionStops,

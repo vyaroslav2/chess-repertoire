@@ -33,7 +33,7 @@ export interface Config {
     };
     smoothing: {
         anchorGames: number;
-        blackPrior: number;
+        repertoireSidePrior: number;
     };
     engineVerification: {
         apiToleranceCp: {
@@ -152,12 +152,13 @@ export const defaultConfig: Config = {
     },
 
     // ---------------------------------------------------------
-    // BLACK SMOOTHING
-    // Anchor games and prior probability for smoothing low-volume moves.
+    // REPERTOIRE-SIDE SMOOTHING
+    // Anchor games and a deliberately cautious prior score for the side
+    // whose repertoire is being built. The current generator uses it for Black.
     // ---------------------------------------------------------
     smoothing: {
         anchorGames: 50,
-        blackPrior: 0.48
+        repertoireSidePrior: 0.48
     },
 
     // ---------------------------------------------------------
@@ -233,7 +234,8 @@ export const defaultConfig: Config = {
 
         // Delay durations (in milliseconds)
         networkRetryDelayMs: 1000,
-        rateLimitRetryDelayMs: 2000,
+        // Lichess asks API clients to wait a full minute after any HTTP 429.
+        rateLimitRetryDelayMs: 60_000,
         betweenRequestDelayMs: 1000,
         requestTimeoutMs: 15000,
         retryBackoffMultiplier: 2,
@@ -260,7 +262,7 @@ export function validateConfig(config: Config) {
         const val = config.whiteMoveFiltering?.mainlinePopularity?.[key];
         if (typeof val !== 'number' || val < 0 || val > 1 || !Number.isFinite(val)) throw new Error(`Invalid probability for mainlinePopularity.${key}`);
     }
-    if (typeof config.smoothing?.blackPrior !== 'number' || config.smoothing.blackPrior < 0 || config.smoothing.blackPrior > 1 || !Number.isFinite(config.smoothing.blackPrior)) throw new Error("Invalid probability for smoothing.blackPrior");
+    if (typeof config.smoothing?.repertoireSidePrior !== 'number' || config.smoothing.repertoireSidePrior < 0 || config.smoothing.repertoireSidePrior > 1 || !Number.isFinite(config.smoothing.repertoireSidePrior)) throw new Error("Invalid probability for smoothing.repertoireSidePrior");
 
     // Validate counts and depths
     if (!Number.isInteger(config.humanMoves?.mastersWeight) || config.humanMoves.mastersWeight < 1) throw new Error("Invalid humanMoves.mastersWeight");

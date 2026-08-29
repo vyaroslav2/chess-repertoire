@@ -71,16 +71,11 @@ export function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: numbe
     };
 }
 
-export function selectWhiteCandidates(currentMoveNumber: number, mastersList: any[], eliteList: any[], amateurList: any[], totalAmateurGames: number) {
-  const allWhiteSan = new Set<string>();
-  for (const move of [...mastersList, ...eliteList, ...amateurList]) {
-    allWhiteSan.add(move.san);
-  }
-
-  return Array.from(allWhiteSan)
-    .map(san => ({
-      san,
-      ...shouldIncludeWhiteMove(san, currentMoveNumber, amateurList, totalAmateurGames)
+export function selectWhiteCandidates(currentMoveNumber: number, amateurList: any[], totalAmateurGames: number) {
+  return amateurList
+    .map(move => ({
+      san: move.san,
+      ...shouldIncludeWhiteMove(move.san, currentMoveNumber, amateurList, totalAmateurGames)
     }))
     .filter(move => move.include);
 }
@@ -129,7 +124,7 @@ export async function evaluateBlackMove(
   let evalSource: ResponseEvaluationSource = 'Lichess Cloud Evaluation';
 
   // 1. Check Explorer Cache via lichess.ts
-  const [mastersData, eliteData, amateurData] = await fetchAllDatabases(fen, snapshotId);
+  const [mastersData, eliteData] = await fetchAllDatabases(fen, snapshotId);
   
   // 2. Compute Black human candidate shortlist (B1)
   const candidateMoves = buildBlackHumanShortlist(mastersData.moves || [], eliteData.moves || [], defaultConfig);

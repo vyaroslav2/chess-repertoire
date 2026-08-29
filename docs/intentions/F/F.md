@@ -240,6 +240,26 @@ for different purposes.
 
 Masters and Elite must not affect which White opponent moves are included.
 
+The candidate universe itself is the raw Amateur move list. Masters/Elite-only moves must not be manufactured as zero-Amateur candidates merely to be rejected later.
+
+Masters, Elite and Amateur are separate source buckets and may require separate HTTP requests. At a White-to-move generation position, Amateur drives coverage and Masters may supply exact-history opening metadata; Elite has no current White-selection role. Masters plus Elite remain required after a White move for RESPONSE candidate construction. Retaining a uniformly fetched/cached Elite bucket is allowed, but it must not affect White selection or the reason reported for stopping the branch.
+
+White branch termination must distinguish these cases explicitly:
+
+```text
+required Amateur request failed
+→ hard generation error; do not cache or report an empty result
+
+required Amateur request succeeded with zero moves
+→ Missing White Moves; stop the non-terminal branch because Amateur-only selection has no input
+
+Amateur returned moves but all are below the configured popularity threshold
+→ PRUNED — BELOW AMATEUR THRESHOLD
+
+position is game-over
+→ terminal position, not missing and not pruned
+```
+
   
 
 ### RESPONSE candidate construction
@@ -503,6 +523,12 @@ F should not depend on ad-hoc sleeps between high-level source groups.
   
 
 The central API configuration owns the intended rate-limit/retry values.
+
+All Lichess requests in one generator process must pass through one shared request gate. The gate permits only one in-flight Lichess request at a time and applies the configured minimum interval between request starts.
+
+An HTTP 429 is not an ordinary short retry. In accordance with Lichess API guidance, it imposes a shared 60-second cooldown on all Lichess Explorer and Cloud Evaluation requests before any request resumes. The diagnostic must say that the global Lichess request stream is paused; it must not imply that only the failed call sleeps for a few seconds.
+
+Cache hits bypass the network and therefore do not consume a request slot.
 
   
 

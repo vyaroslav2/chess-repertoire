@@ -25,7 +25,7 @@ function automaticRetryDelay(baseMs: number, attemptIndex: number): number {
 let lichessRequestQueue = Promise.resolve();
 let nextLichessRequestAt = 0;
 
-async function waitForLichessRequestSlot(): Promise<void> {
+async function runInLichessRequestSlot<T>(request: () => Promise<T>): Promise<T> {
   const previousRequest = lichessRequestQueue;
   let releaseRequest!: () => void;
   lichessRequestQueue = new Promise<void>(resolve => {
@@ -38,10 +38,20 @@ async function waitForLichessRequestSlot(): Promise<void> {
     if (waitMs > 0) {
       await delay(waitMs);
     }
-    nextLichessRequestAt = Date.now() + defaultConfig.api.betweenRequestDelayMs;
+    const startedAt = Date.now();
+    const result = await request();
+    nextLichessRequestAt = Math.max(
+      nextLichessRequestAt,
+      startedAt + defaultConfig.api.betweenRequestDelayMs
+    );
+    return result;
   } finally {
     releaseRequest();
   }
+}
+
+function imposeLichessCooldown(delayMs: number): void {
+  nextLichessRequestAt = Math.max(nextLichessRequestAt, Date.now() + delayMs);
 }
 
 export async function promptUser(query: string): Promise<string> {
@@ -82,14 +92,21 @@ export async function fetchWithRetry(url: string, retryAttempts: number, useToke
 
   for (let i = 0; i < retryAttempts; i++) {
     try {
-      if (apiType === 'explorer' || apiType === 'eval') {
-        await waitForLichessRequestSlot();
-      }
-      const response = await fetch(url, { headers, signal: AbortSignal.timeout(defaultConfig.api.requestTimeoutMs) });
+      const isLichessRequest = apiType === 'explorer' || apiType === 'eval';
+      // Lichess requires a full cooldown after every 429; do not shorten it via
+      // the ordinary retry-backoff cap used for transient network/server errors.
+      const retryDelayMs = defaultConfig.api.rateLimitRetryDelayMs;
+      const request = async () => {
+        const result = await fetch(url, { headers, signal: AbortSignal.timeout(defaultConfig.api.requestTimeoutMs) });
+        if (isLichessRequest && result.status === 429) imposeLichessCooldown(retryDelayMs);
+        return result;
+      };
+      const response = isLichessRequest
+        ? await runInLichessRequestSlot(request)
+        : await request();
       if (response.status === 429) {
         if (i < retryAttempts - 1) {
-            console.log(`[WARNING] Rate limit (429) on ${url}. Auto-retrying in ${defaultConfig.api.rateLimitRetryDelayMs}ms (Attempt ${i+1}/${retryAttempts})...`);
-            await delay(automaticRetryDelay(defaultConfig.api.rateLimitRetryDelayMs, i));
+            console.log(`[WARNING] Rate limit (429) on ${url}. Pausing all Lichess requests for ${retryDelayMs}ms before retrying (Attempt ${i+1}/${retryAttempts})...`);
             continue;
         }
 

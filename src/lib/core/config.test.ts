@@ -46,8 +46,8 @@ test('3. invalid probabilities rejected', () => {
     assert.throws(() => validateConfig(cfg2), /Invalid probability for mainlinePopularity.middle/);
 
     const cfg3 = JSON.parse(JSON.stringify(defaultConfig));
-    cfg3.smoothing.blackPrior = 2;
-    assert.throws(() => validateConfig(cfg3), /Invalid probability for smoothing.blackPrior/);
+    cfg3.smoothing.repertoireSidePrior = 2;
+    assert.throws(() => validateConfig(cfg3), /Invalid probability for smoothing.repertoireSidePrior/);
 });
 
 test('4. invalid counts rejected', () => {

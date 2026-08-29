@@ -25,29 +25,17 @@ test('Slice 6 White opponent coverage uses only Amateur popularity', async (t) =
   });
 
   await t.test('zero total Amateur games includes no move', () => {
-    assert.deepStrictEqual(selectWhiteCandidates(1, [], [], [amateurMove('e4', 20)], 0), []);
+    assert.deepStrictEqual(selectWhiteCandidates(1, [amateurMove('e4', 20)], 0), []);
   });
 
-  await t.test('Masters evidence cannot rescue a move below the Amateur threshold', () => {
-    const selected = selectWhiteCandidates(
-      1,
-      [amateurMove('e4', 10_000, 10_000)],
-      [],
-      [amateurMove('e4', 4, 4)],
-      100
-    );
+  await t.test('an Amateur move below threshold is excluded without consulting Masters', () => {
+    const selected = selectWhiteCandidates(1, [amateurMove('e4', 4, 4)], 100);
     assert.deepStrictEqual(selected, []);
   });
 
-  await t.test('Elite evidence cannot rescue a move below the Amateur threshold', () => {
-    const selected = selectWhiteCandidates(
-      1,
-      [],
-      [amateurMove('e4', 10_000, 10_000)],
-      [amateurMove('e4', 4, 4)],
-      100
-    );
-    assert.deepStrictEqual(selected, []);
+  await t.test('White candidate enumeration is the Amateur move list itself', () => {
+    const selected = selectWhiteCandidates(1, [amateurMove('e4', 5, 4), amateurMove('d4', 4, 4)], 100);
+    assert.deepStrictEqual(selected.map(move => move.san), ['e4']);
   });
 
   await t.test('strong Amateur White win rate cannot rescue low popularity', () => {
@@ -55,7 +43,7 @@ test('Slice 6 White opponent coverage uses only Amateur popularity', async (t) =
   });
 
   await t.test('sufficient Amateur popularity needs no Masters or Elite evidence', () => {
-    const selected = selectWhiteCandidates(1, [], [], [amateurMove('e4', 5, 2, 1)], 100);
+    const selected = selectWhiteCandidates(1, [amateurMove('e4', 5, 2, 1)], 100);
     assert.strictEqual(selected.length, 1);
     assert.strictEqual(selected[0].san, 'e4');
     assert.strictEqual(selected[0].probability, 0.05);
