@@ -92,11 +92,15 @@ A successfully verified "no description" result is a real cached result.
 
 A technical failure is not.
 
-#bug The current code stores `wikiText` on `PositionCache`, which is keyed by normalised FEN. This can incorrectly make different histories that transpose into the same position share one Wikibooks result.
+#resolved Wikibooks cache identity is no longer stored on normalised-FEN `PositionCache`; it is keyed by repertoire and exact history.
 
 Wikibooks text should instead belong to the surviving repertoire progression/node, or another history-specific record if the data model later separates shared positions from progression records.
 
-#bug Rebuild-from-root must not erase successful history-specific Wikibooks cache state merely because it replaces the repertoire nodes. Before deleting the old tree, preserve checked descriptions and checked valid absences by exact history; restore them only when the same exact canonical history survives in the rebuilt tree. Do not preserve an unchecked technical failure as a successful result.
+#resolved Rebuild-from-root must not erase successful history-specific Wikibooks cache state merely because it replaces the repertoire nodes. Checked descriptions and checked valid absences are preserved by exact history and restored only when the same exact canonical history survives in the rebuilt tree. An unchecked technical failure is not preserved as a successful result.
+
+`Known:` The authoritative checked-result cache must be a durable record keyed by repertoire and exact canonical history, independent of disposable `RepertoireNode` rows. The node's `wikibooksChecked` and `wikiText` fields are a materialised projection used by that rebuilt tree, not the only copy of the cache.
+
+An interrupted or failed rebuild must not reduce durable Wikibooks coverage. In particular, the partially rebuilt node set must never become the next run's sole preservation source. Successful descriptions and valid absences remain in the durable history cache until the repertoire itself is deleted; a later rebuild materialises them again for every exact history that survives.
 
 ## Fetch behaviour
 
@@ -174,6 +178,8 @@ technical failure
 
 For non-interactive generation, use Wikimedia's `maxlag` mechanism where appropriate and identify the application with a descriptive User-Agent.
 
+`Known:` All Wikibooks attempts share one serial request scheduler. Use a contact-bearing User-Agent, leave at least one second between requests, and do not create parallel requests. For HTTP 429 or 503, honour `Retry-After`; when it is absent, wait at least five seconds or longer when the progressive backoff requires it.
+
 After the final failed attempt:
 
 ```text
@@ -229,9 +235,9 @@ Do not:
 - impose a minimum description length
     
 
-`#bug` Current code strips one leading Wikibooks heading.
+`#resolved` Preserve a leading Wikibooks heading.
 
-#bug Current code discards descriptions that are 50 characters or shorter. Any non-empty trimmed extract should be accepted.
+#resolved Accept any non-empty trimmed extract, including descriptions of 50 characters or fewer.
 
 ## Result
 

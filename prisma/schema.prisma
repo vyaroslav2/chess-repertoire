@@ -17,17 +17,19 @@ model User {
 }
 
 model Repertoire {
-  id                  String                   @id @default(uuid())
-  title               String
-  color               String // "white" or "black"
-  userId              String
-  user                User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  generationStatus    String                   @default("IDLE")
-  completedConfigHash String?
-  stats               RepertoirePositionStat[]
-  nodes               RepertoireNode[]
-  moves               RepertoireMove[]
-  humanSnapshots      HumanDataSnapshot[]
+  id                   String                        @id @default(uuid())
+  title                String
+  color                String // "white" or "black"
+  userId               String
+  user                 User                          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  generationStatus     String                        @default("IDLE")
+  completedConfigHash  String?
+  stats                RepertoirePositionStat[]
+  nodes                RepertoireNode[]
+  moves                RepertoireMove[]
+  humanSnapshots       HumanDataSnapshot[]
+  wikibooksCache       WikibooksHistoryCache[]
+  openingMetadataCache OpeningMetadataHistoryCache[]
 }
 
 // --- PERMANENT CHESS IDENTITY ---
@@ -139,6 +141,35 @@ model LocalEngineCandidate {
   analysedAt        DateTime @default(now())
 
   @@unique([fullFen, candidateUci, evaluationProfile])
+}
+
+model WikibooksHistoryCache {
+  id           String   @id @default(uuid())
+  repertoireId String
+  history      String
+  wikiText     String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  repertoire Repertoire @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
+
+  @@unique([repertoireId, history])
+}
+
+model OpeningMetadataHistoryCache {
+  id           String   @id @default(uuid())
+  repertoireId String
+  history      String
+  status       String // "PRESENT" or "VALID_ABSENCE"
+  source       String // "LICHESS_MASTERS"
+  eco          String?
+  openingName  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  repertoire Repertoire @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
+
+  @@unique([repertoireId, history])
 }
 
 // --- THE ALGORITHM LAYER ---

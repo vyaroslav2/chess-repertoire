@@ -374,7 +374,9 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
         <p style={{ color: "var(--lichess-text-muted)", minHeight: "1.5em" }}>
           {currentOpening?.openingMetadataStatus === "PRESENT"
             ? `${currentOpening.eco} · ${currentOpening.openingName}`
-            : "Opening classification unavailable"}
+            : currentOpening?.openingMetadataStatus === "VALID_ABSENCE"
+              ? "No opening classification (Lichess Masters)"
+              : "Opening metadata unavailable"}
         </p>
       </div>
 

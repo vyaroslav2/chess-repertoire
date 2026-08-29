@@ -163,4 +163,38 @@ test("history-specific RepertoireNode Wikibooks cache", async t => {
     assert.equal(savedFailure.wikiText, null);
   });
 
+  await t.test("an interrupted rebuild cannot erase cache entries for histories not yet recreated", async () => {
+    const early = await createNode("a3");
+    const late = await createNode("a3 a6 h3");
+    await ensureRepertoireNodeWikibooks(early.id, async () => ({ status: "VALID_ABSENCE" }));
+    await ensureRepertoireNodeWikibooks(late.id, async () => ({
+      status: "DESCRIPTION",
+      text: "Description reached late in the full tree"
+    }));
+
+    const firstPassCache = await captureRebuildWikibooksCache(repertoire.id);
+    await prisma.repertoireNode.deleteMany({ where: { repertoireId: repertoire.id } });
+
+    const partiallyRebuiltEarly = await createNode("a3");
+    await restoreRebuildWikibooksState(partiallyRebuiltEarly.id, firstPassCache);
+    // The run stops here, before the later history is recreated.
+
+    const nextPassCache = await captureRebuildWikibooksCache(repertoire.id);
+    assert.equal(nextPassCache.get("a3 a6 h3"), "Description reached late in the full tree");
+
+    await prisma.repertoireNode.deleteMany({ where: { repertoireId: repertoire.id } });
+    const rebuiltLate = await createNode("a3 a6 h3");
+    await restoreRebuildWikibooksState(rebuiltLate.id, nextPassCache);
+    let fetches = 0;
+    await ensureRepertoireNodeWikibooks(rebuiltLate.id, async () => {
+      fetches++;
+      return { status: "TECHNICAL_FAILURE", reason: "must not fetch" };
+    });
+
+    const savedLate = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: rebuiltLate.id } });
+    assert.equal(fetches, 0);
+    assert.equal(savedLate.wikibooksChecked, true);
+    assert.equal(savedLate.wikiText, "Description reached late in the full tree");
+  });
+
 });

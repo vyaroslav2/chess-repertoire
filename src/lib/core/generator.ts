@@ -56,12 +56,31 @@ export async function captureRebuildOpeningMetadataCache(repertoireId: string): 
     if (node.openingMetadataSource !== "LICHESS_MASTERS") throw new Error("Stored opening metadata has an invalid or missing source");
     if (node.openingMetadataStatus === "PRESENT" && (!node.eco || !node.openingName)) throw new Error("Stored PRESENT opening metadata is incomplete");
     if (node.openingMetadataStatus === "VALID_ABSENCE" && (node.eco !== null || node.openingName !== null)) throw new Error("Stored VALID_ABSENCE opening metadata contains values");
-    cache.set(node.history, {
-      status: node.openingMetadataStatus as "PRESENT" | "VALID_ABSENCE",
-      source: "LICHESS_MASTERS",
-      eco: node.eco,
-      openingName: node.openingName
+    await prisma.openingMetadataHistoryCache.upsert({
+      where: { repertoireId_history: { repertoireId, history: node.history } },
+      update: { status: node.openingMetadataStatus!, source: "LICHESS_MASTERS", eco: node.eco, openingName: node.openingName },
+      create: { repertoireId, history: node.history, status: node.openingMetadataStatus!, source: "LICHESS_MASTERS", eco: node.eco, openingName: node.openingName }
     });
+  }
+  const durable = await prisma.openingMetadataHistoryCache.findMany({ where: { repertoireId } });
+  durable.sort((a, b) => historyFromCanonicalPgn(a.history).length - historyFromCanonicalPgn(b.history).length);
+  for (const entry of durable) {
+    if (entry.source !== "LICHESS_MASTERS") throw new Error("Cached opening metadata has an invalid source");
+    if (entry.status === "PRESENT" && (!entry.eco || !entry.openingName)) throw new Error("Cached PRESENT opening metadata is incomplete");
+    if (entry.status === "VALID_ABSENCE" && (entry.eco !== null || entry.openingName !== null)) throw new Error("Cached VALID_ABSENCE opening metadata contains values");
+    if (entry.status !== "PRESENT" && entry.status !== "VALID_ABSENCE") throw new Error("Cached opening metadata has an invalid status");
+    const parentHistory = historyFromCanonicalPgn(entry.history).slice(0, -1).join(" ");
+    const parent = cache.get(parentHistory);
+    const restored = entry.status === "VALID_ABSENCE" && parent?.status === "PRESENT"
+      ? { ...parent }
+      : { status: entry.status, source: "LICHESS_MASTERS" as const, eco: entry.eco, openingName: entry.openingName };
+    cache.set(entry.history, restored);
+    if (restored.status !== entry.status || restored.eco !== entry.eco || restored.openingName !== entry.openingName) {
+      await prisma.openingMetadataHistoryCache.update({
+        where: { id: entry.id },
+        data: { status: restored.status, source: restored.source, eco: restored.eco, openingName: restored.openingName }
+      });
+    }
   }
   return cache;
 }
@@ -77,15 +96,64 @@ export async function restoreRebuildOpeningMetadataState(nodeId: string, cache: 
   return true;
 }
 
-async function persistOpeningMetadata(nodeId: string, opening: { eco?: string | null; name?: string | null } | null) {
+function normalizeOpeningMetadata(opening: { eco?: string | null; name?: string | null } | null) {
   const present = typeof opening?.eco === "string" && opening.eco.trim() !== "" &&
     typeof opening?.name === "string" && opening.name.trim() !== "";
   if (opening && !present) throw new Error("Lichess Masters opening metadata must contain both ECO and opening name");
-  await prisma.repertoireNode.update({ where: { id: nodeId }, data: present ? {
-    eco: opening!.eco!, openingName: opening!.name!, openingMetadataStatus: "PRESENT", openingMetadataSource: "LICHESS_MASTERS"
+  return present ? {
+    eco: opening!.eco!, openingName: opening!.name!, status: "PRESENT" as const
   } : {
-    eco: null, openingName: null, openingMetadataStatus: "VALID_ABSENCE", openingMetadataSource: "LICHESS_MASTERS"
-  }});
+    eco: null, openingName: null, status: "VALID_ABSENCE" as const
+  };
+}
+
+async function resolveOpeningMetadata(
+  repertoireId: string,
+  history: string,
+  opening: { eco?: string | null; name?: string | null } | null
+) {
+  if (opening) return normalizeOpeningMetadata(opening);
+  const moves = historyFromCanonicalPgn(history);
+  if (moves.length > 0) {
+    const parentHistory = moves.slice(0, -1).join(" ");
+    const parent = await prisma.openingMetadataHistoryCache.findUnique({
+      where: { repertoireId_history: { repertoireId, history: parentHistory } }
+    });
+    if (parent?.status === "PRESENT" && parent.source === "LICHESS_MASTERS" && parent.eco && parent.openingName) {
+      return { eco: parent.eco, openingName: parent.openingName, status: "PRESENT" as const };
+    }
+  }
+  return normalizeOpeningMetadata(null);
+}
+
+async function persistOpeningMetadataForHistory(
+  repertoireId: string,
+  history: string,
+  opening: { eco?: string | null; name?: string | null } | null
+) {
+  const state = await resolveOpeningMetadata(repertoireId, history, opening);
+  await prisma.openingMetadataHistoryCache.upsert({
+    where: { repertoireId_history: { repertoireId, history } },
+    update: { ...state, source: "LICHESS_MASTERS" },
+    create: { repertoireId, history, ...state, source: "LICHESS_MASTERS" }
+  });
+  return state;
+}
+
+async function persistOpeningMetadata(nodeId: string, opening: { eco?: string | null; name?: string | null } | null) {
+  const node = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: nodeId }, select: { repertoireId: true, history: true } });
+  const state = await resolveOpeningMetadata(node.repertoireId, node.history, opening);
+  await prisma.$transaction([
+    prisma.openingMetadataHistoryCache.upsert({
+      where: { repertoireId_history: { repertoireId: node.repertoireId, history: node.history } },
+      update: { ...state, source: "LICHESS_MASTERS" },
+      create: { repertoireId: node.repertoireId, history: node.history, ...state, source: "LICHESS_MASTERS" }
+    }),
+    prisma.repertoireNode.update({ where: { id: nodeId }, data: {
+      eco: state.eco, openingName: state.openingName,
+      openingMetadataStatus: state.status, openingMetadataSource: "LICHESS_MASTERS"
+    }})
+  ]);
 }
 
 export async function captureRebuildWikibooksCache(repertoireId: string): Promise<RebuildWikibooksCache> {
@@ -93,7 +161,16 @@ export async function captureRebuildWikibooksCache(repertoireId: string): Promis
     where: { repertoireId, wikibooksChecked: true },
     select: { history: true, wikiText: true }
   });
-  return new Map(checkedNodes.map(node => [node.history, node.wikiText]));
+  await prisma.$transaction(checkedNodes.map(node => prisma.wikibooksHistoryCache.upsert({
+    where: { repertoireId_history: { repertoireId, history: node.history } },
+    update: { wikiText: node.wikiText },
+    create: { repertoireId, history: node.history, wikiText: node.wikiText }
+  })));
+  const durable = await prisma.wikibooksHistoryCache.findMany({
+    where: { repertoireId },
+    select: { history: true, wikiText: true }
+  });
+  return new Map(durable.map(entry => [entry.history, entry.wikiText]));
 }
 
 export async function restoreRebuildWikibooksState(
@@ -478,6 +555,11 @@ export async function generateRepertoire(
       const newPgn = canonicalWhiteMove.destinationPgn;
       const reconciledEdge = await prisma.repertoireMove.findUnique({ where: { id: reconciledOpponent.edgeId } });
       if (reconciledEdge?.stopReason === "Repetition") {
+        await persistOpeningMetadataForHistory(
+          repertoire.id,
+          canonicalWhiteMove.destinationHistory,
+          await fetchOpeningMetadata(canonicalWhiteMove.destinationFullFen)
+        );
         console.log(`[REPETITION STOP] route=${canonicalWhiteMove.destinationHistory}; repeated=${reconciledOpponent.destinationCanonicalPgn || "(root)"}; repeatingMove=${canonicalWhiteMove.san}; terminalProbability=${reconciledOpponent.effectiveCumulativeProb}; result=move retained and route terminated without a destination edge.`);
         totalRepetitionStops++;
         continue;
@@ -494,7 +576,6 @@ export async function generateRepertoire(
       await ensurePositionCache(posAfterWhiteNode.fullFen);
       await restoreRebuildOpeningMetadataState(posAfterWhiteNode.id, rebuildOpeningMetadataCache);
       await restoreRebuildWikibooksState(posAfterWhiteNode.id, rebuildWikibooksCache);
-      await attemptCanonicalNodeWikibooks(posAfterWhiteNode.id, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
       const effectiveCanonicalProb = reconciledOpponent.effectiveCumulativeProb;
 
       // A canonical transposition RESPONSE is reconciled once per generator pass.
@@ -542,6 +623,7 @@ export async function generateRepertoire(
           : algoResult.openingMetadata ?? null;
         await persistOpeningMetadata(posAfterWhiteNode.id, opening);
       }
+      await attemptCanonicalNodeWikibooks(posAfterWhiteNode.id, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
       const selectedWeightedCount = algoResult.moveOrigin === "Human Move"
         ? algoResult.selectedStats?.weightedGames ?? null
         : null;
@@ -701,6 +783,11 @@ export async function generateRepertoire(
         where: { fromNodeId: posAfterWhiteNode.id, playerTurn: "RESPONSE" }
       });
       if (resultingResponse?.stopReason === "Repetition") {
+        await persistOpeningMetadataForHistory(
+          repertoire.id,
+          blackHistory,
+          await fetchOpeningMetadata(selectedDestinationFen)
+        );
         console.log(`[REPETITION STOP] route=${blackHistory}; repeated=${resultingDestinationHistory || "(root)"}; repeatingMove=${algoResult.selectedMoveSan}; terminalProbability=${effectiveCanonicalProb}; result=target move retained and route terminated without a destination edge.`);
         reconciledResponseNodeIds.add(posAfterWhiteNode.id);
         totalRepetitionStops++;
@@ -712,6 +799,14 @@ export async function generateRepertoire(
       }
       await ensurePositionCache(resultingDestinationFen);
       await propagateRepertoireProbabilities(repertoire.id, resultingDestinationId);
+      await restoreRebuildOpeningMetadataState(resultingDestinationId, rebuildOpeningMetadataCache);
+      const destinationMetadata = await prisma.repertoireNode.findUniqueOrThrow({
+        where: { id: resultingDestinationId },
+        select: { openingMetadataStatus: true }
+      });
+      if (!destinationMetadata.openingMetadataStatus) {
+        await persistOpeningMetadata(resultingDestinationId, await fetchOpeningMetadata(resultingDestinationFen));
+      }
       await restoreRebuildWikibooksState(resultingDestinationId, rebuildWikibooksCache);
       await attemptCanonicalNodeWikibooks(resultingDestinationId, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
 
@@ -747,6 +842,18 @@ export async function generateRepertoire(
   
   const endTime = Date.now();
   const timeElapsed = ((endTime - startTime) / 1000).toFixed(2);
+  const openingStates = await prisma.repertoireNode.findMany({
+    where: { repertoireId: repertoire.id },
+    select: { history: true, openingMetadataStatus: true, openingMetadataSource: true, eco: true, openingName: true }
+  });
+  for (const state of openingStates) {
+    if (state.openingMetadataSource !== "LICHESS_MASTERS" ||
+        (state.openingMetadataStatus !== "PRESENT" && state.openingMetadataStatus !== "VALID_ABSENCE") ||
+        (state.openingMetadataStatus === "PRESENT" && (!state.eco || !state.openingName)) ||
+        (state.openingMetadataStatus === "VALID_ABSENCE" && (state.eco !== null || state.openingName !== null))) {
+      throw new Error(`Generated history ${state.history || "(root)"} has incomplete opening metadata state`);
+    }
+  }
   
   console.log("\n========================================================");
   console.log("=== TREE GENERATION SUMMARY ===");

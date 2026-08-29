@@ -69,6 +69,18 @@ export async function fetchDuePositions(repertoireId: string) {
         select: { history: true, eco: true, openingName: true, openingMetadataStatus: true, openingMetadataSource: true }
       });
       openingByPly.push(destination);
+    } else if (stat.targetMove.stopReason === "Repetition" && stat.targetMove.routeHistory) {
+      const terminal = await prisma.openingMetadataHistoryCache.findUnique({
+        where: { repertoireId_history: { repertoireId, history: stat.targetMove.routeHistory } },
+        select: { eco: true, openingName: true, status: true, source: true }
+      });
+      openingByPly.push(terminal ? {
+        history: stat.targetMove.routeHistory,
+        eco: terminal.eco,
+        openingName: terminal.openingName,
+        openingMetadataStatus: terminal.status,
+        openingMetadataSource: terminal.source
+      } : null);
     }
     return { ...stat, lineMoves, openingByPly };
   }));

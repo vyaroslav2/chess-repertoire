@@ -526,6 +526,10 @@ A fresh Masters response may supply useful opening information, but storing it g
 
 Opening metadata is cached and restored by exact canonical UCI/LAN history, not by `PositionKey`. Before a from-root rebuild replaces nodes, preserve the opening metadata state of each exact history; restore it only when that same history survives. A transposing history must not inherit or overwrite classification merely because it reaches the same board position.
 
+Every generated ply must have a completed opening-metadata state, including the position after Black's response and every leaf at the generation depth boundary. Node creation alone must not leave `openingMetadataStatus` unchecked. Before generation completes, each surviving exact-history node must contain either `PRESENT` metadata or source-attributed `VALID_ABSENCE`.
+
+The authoritative opening-metadata cache is durable and independent of disposable repertoire nodes. It is keyed by repertoire plus exact canonical history; node fields are the materialised UI projection. Interrupted rebuilds must not erase metadata for histories that have not yet been recreated.
+
 The stored state is one of:
 
 ```text
@@ -534,9 +538,11 @@ PRESENT
 → source = LICHESS_MASTERS
 
 VALID_ABSENCE
-→ the Masters request succeeded but supplied no opening classification
+→ the Masters request succeeded, supplied no opening classification, and no earlier named history prefix exists
 → source = LICHESS_MASTERS
 ```
+
+The Masters response's optional `opening` field may be absent on a following move even though the latest named opening still applies. When it is absent, inherit the nearest earlier `PRESENT` classification on the same exact route. This follows Lichess's opening-data convention of walking backward to the latest named position. Do not convert that case into `VALID_ABSENCE`.
 
 Technical Masters failure is neither state. Masters is required human data, so failure after its retry policy is a hard generation error.
 

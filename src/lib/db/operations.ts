@@ -47,10 +47,26 @@ export async function ensureRepertoireNodeWikibooks(
   if (!node) throw new Error(`Cannot enrich missing RepertoireNode ${nodeId}`);
   validateRepertoireNodeWikibooksState(node);
   if (node.wikibooksChecked) {
+    await prisma.wikibooksHistoryCache.upsert({
+      where: { repertoireId_history: { repertoireId: node.repertoireId, history: node.history } },
+      update: { wikiText: node.wikiText },
+      create: { repertoireId: node.repertoireId, history: node.history, wikiText: node.wikiText }
+    });
     return { status: "CACHED" as const, text: node.wikiText };
   }
   if (node.displayPgn.trim() !== node.displayPgn) {
     throw new Error("Cannot enrich RepertoireNode with non-canonical PGN history");
+  }
+
+  const durable = await prisma.wikibooksHistoryCache.findUnique({
+    where: { repertoireId_history: { repertoireId: node.repertoireId, history: node.history } }
+  });
+  if (durable) {
+    await prisma.repertoireNode.update({
+      where: { id: node.id },
+      data: { wikibooksChecked: true, wikiText: durable.wikiText }
+    });
+    return { status: "CACHED" as const, text: durable.wikiText };
   }
 
   const result = await fetcher(node.displayPgn === "" ? [] : node.displayPgn.split(/\s+/));
@@ -60,9 +76,16 @@ export async function ensureRepertoireNodeWikibooks(
   if (wikiText !== null && (wikiText.trim() !== wikiText || wikiText.length === 0)) {
     throw new Error("Invalid Wikibooks description persistence result");
   }
-  const update = await prisma.repertoireNode.updateMany({
-    where: { id: node.id, wikibooksChecked: false, wikiText: null },
-    data: { wikibooksChecked: true, wikiText }
+  const update = await prisma.$transaction(async tx => {
+    await tx.wikibooksHistoryCache.upsert({
+      where: { repertoireId_history: { repertoireId: node.repertoireId, history: node.history } },
+      update: { wikiText },
+      create: { repertoireId: node.repertoireId, history: node.history, wikiText }
+    });
+    return tx.repertoireNode.updateMany({
+      where: { id: node.id, wikibooksChecked: false, wikiText: null },
+      data: { wikibooksChecked: true, wikiText }
+    });
   });
   if (update.count !== 1) {
     const current = await prisma.repertoireNode.findUnique({ where: { id: node.id } });

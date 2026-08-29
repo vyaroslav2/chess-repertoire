@@ -66,6 +66,7 @@ export interface Config {
             retryAttempts: number;
             initialRetryDelayMs: number;
             retryBackoffMultiplier: number;
+            minimumRequestIntervalMs: number;
             maxLagSeconds: number;
             requestTimeoutMs: number;
             userAgent: string;
@@ -204,9 +205,10 @@ export const defaultConfig: Config = {
             retryAttempts: 3,
             initialRetryDelayMs: 1000,
             retryBackoffMultiplier: 2,
+            minimumRequestIntervalMs: 1000,
             maxLagSeconds: 5,
             requestTimeoutMs: 15000,
-            userAgent: "chess-repertoire/0.1 Wikibooks opening enrichment"
+            userAgent: "chess-repertoire/0.1 (https://github.com/vyaroslav2/chess-repertoire) Wikibooks-opening-enrichment"
         },
         // Lichess Cloud Evaluation API
         // Guidance: https://lichess.org/api#tag/Chess-bot/operation/apiCloudEval
@@ -313,6 +315,7 @@ export function validateConfig(config: Config) {
     if (!Number.isInteger(wikibooks?.retryAttempts) || wikibooks.retryAttempts < 1) throw new Error("Invalid api.wikibooks.retryAttempts");
     if (!Number.isInteger(wikibooks?.initialRetryDelayMs) || wikibooks.initialRetryDelayMs < 0) throw new Error("Invalid api.wikibooks.initialRetryDelayMs");
     if (typeof wikibooks?.retryBackoffMultiplier !== 'number' || wikibooks.retryBackoffMultiplier < 1 || !Number.isFinite(wikibooks.retryBackoffMultiplier)) throw new Error("Invalid api.wikibooks.retryBackoffMultiplier");
+    if (!Number.isInteger(wikibooks?.minimumRequestIntervalMs) || wikibooks.minimumRequestIntervalMs < 0) throw new Error("Invalid api.wikibooks.minimumRequestIntervalMs");
     if (!Number.isInteger(wikibooks?.maxLagSeconds) || wikibooks.maxLagSeconds < 1) throw new Error("Invalid api.wikibooks.maxLagSeconds");
     if (!Number.isInteger(wikibooks?.requestTimeoutMs) || wikibooks.requestTimeoutMs < 1) throw new Error("Invalid api.wikibooks.requestTimeoutMs");
     if (typeof wikibooks?.userAgent !== "string" || wikibooks.userAgent.trim() === "") throw new Error("Invalid api.wikibooks.userAgent");

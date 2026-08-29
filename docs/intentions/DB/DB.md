@@ -2352,6 +2352,10 @@ Different move sequences may transpose into the same `PositionKey` while having 
 
 The canonical node therefore keeps the ECO/opening classification appropriate to its surviving canonical history.
 
+Every surviving generated history node, including post-response leaf nodes, has a checked opening-metadata state: either `PRESENT` or `VALID_ABSENCE`, always with source `LICHESS_MASTERS`. A durable repertoire-and-history cache survives from-root node replacement and materialises that state onto rebuilt nodes.
+
+When a successful Masters response omits its optional opening object, the exact history inherits the nearest earlier `PRESENT` classification on its own route. `VALID_ABSENCE` is stored only when neither the current response nor any earlier history prefix supplies a classification.
+
   
 
   

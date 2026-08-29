@@ -416,7 +416,9 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
         enginePvs: [],
         evalSource: "ChessDB" as const,
         selectedEngineCp: cp,
-        selectedMate: null
+        selectedMate: null,
+        openingMetadata: fen === e4.destination.fullFen ? { eco: "B00", name: "King's Pawn Game" } : null,
+        openingMetadataRetrieval: "FRESH" as const
       };
     };
     const humanRows = [
@@ -432,11 +434,20 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
         { moves: [], totalGames: 0 },
         { moves: humanRows, totalGames: 100 }
       ]) as any,
+      fetchOpeningMetadata: async () => null,
       responseEvaluator: responseEvaluator as any,
       ensurePositionCache: (async () => ({})) as any,
       ensureNodeWikibooks: (async () => ({ status: "CACHED", text: null })) as any,
       wait: async () => undefined
     });
+
+    const generatedNodes = await prisma.repertoireNode.findMany({ where: { repertoireId } });
+    assert.ok(generatedNodes.length > 0);
+    assert.ok(generatedNodes.every(node => node.openingMetadataStatus === "PRESENT" || node.openingMetadataStatus === "VALID_ABSENCE"));
+    assert.ok(generatedNodes.every(node => node.openingMetadataSource === "LICHESS_MASTERS"));
+    const e4Leaf = generatedNodes.find(node => node.history === "e2e4 c7c5");
+    assert.equal(e4Leaf?.eco, "B00");
+    assert.equal(e4Leaf?.openingName, "King's Pawn Game");
 
     const rebuiltRoot = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, history: "" } });
     const rootEdges = await prisma.repertoireMove.findMany({
@@ -530,6 +541,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     await generateRepertoire(root.fullFen, 3, {
       repertoireId,
       fetchDatabases: mockDatabases,
+      fetchOpeningMetadata: async () => null,
       responseEvaluator: mockEvaluator as any,
       ensurePositionCache: (async () => ({})) as any,
       ensureNodeWikibooks: (async () => ({ status: "CACHED", text: null })) as any,
@@ -605,6 +617,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     await generateRepertoire(root.fullFen, 3, {
       repertoireId,
       fetchDatabases: mockDatabases,
+      fetchOpeningMetadata: async () => null,
       responseEvaluator: mockEvaluator as any,
       ensurePositionCache: (async () => ({})) as any,
       ensureNodeWikibooks: (async () => ({ status: "CACHED", text: null })) as any,

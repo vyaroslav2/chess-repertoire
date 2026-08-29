@@ -9,6 +9,25 @@ type WikibooksDependencies = {
 };
 
 const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+let requestQueue: Promise<void> = Promise.resolve();
+let nextRequestAt = 0;
+
+async function runPacedRequest<T>(request: () => Promise<T>, sleep: (ms: number) => Promise<void>): Promise<T> {
+  const previous = requestQueue;
+  let release!: () => void;
+  requestQueue = new Promise<void>(resolve => { release = resolve; });
+  await previous;
+  try {
+    const delay = Math.max(0, nextRequestAt - Date.now());
+    if (delay > 0) await sleep(delay);
+    const result = await request();
+    nextRequestAt = Date.now() + defaultConfig.api.wikibooks.minimumRequestIntervalMs;
+    return result;
+  } finally {
+    nextRequestAt = Math.max(nextRequestAt, Date.now() + defaultConfig.api.wikibooks.minimumRequestIntervalMs);
+    release();
+  }
+}
 
 function retryDelayMs(response: Response | null, attempt: number): number {
   const retryAfter = response?.headers.get("Retry-After");
@@ -19,7 +38,10 @@ function retryDelayMs(response: Response | null, attempt: number): number {
     if (Number.isFinite(dateMs)) return Math.max(0, dateMs - Date.now());
   }
   const config = defaultConfig.api.wikibooks;
-  return config.initialRetryDelayMs * Math.pow(config.retryBackoffMultiplier, attempt - 1);
+  const progressiveDelay = config.initialRetryDelayMs * Math.pow(config.retryBackoffMultiplier, attempt - 1);
+  return response && (response.status === 429 || response.status === 503)
+    ? Math.max(5000, progressiveDelay)
+    : progressiveDelay;
 }
 
 function parseResult(data: unknown): WikibooksResult {
@@ -57,10 +79,10 @@ export async function fetchWikibooksSnippet(history: string[], dependencies: Wik
   for (let attempt = 1; attempt <= config.retryAttempts; attempt++) {
     let response: Response | null = null;
     try {
-      response = await request(url, {
-        headers: { "User-Agent": config.userAgent },
-        signal: AbortSignal.timeout(config.requestTimeoutMs)
-      });
+      response = await runPacedRequest(() => request(url, {
+          headers: { "User-Agent": config.userAgent },
+          signal: AbortSignal.timeout(config.requestTimeoutMs)
+        }), sleep);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return parseResult(await response.json());
     } catch (error) {
