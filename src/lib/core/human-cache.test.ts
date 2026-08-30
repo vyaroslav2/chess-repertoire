@@ -223,6 +223,15 @@ test('Slice 5 Human Cache Rewrite Tests', async (t) => {
     assert.deepStrictEqual(mResCached.moves, mResFresh.moves, "fresh and cached buckets have the same public shape");
     assert.strictEqual(shapeFetchCalls, 3, "cached groups cause no HTTP requests or request-layer spacing");
 
+    // White expansion needs Masters metadata and Amateur moves only; it must not create
+    // an Elite bucket merely because the shared Explorer helper is used.
+    const whiteOnlySnapshot = await getOrCreateHumanDataSnapshot(rep.id, "masters-amateur-only");
+    shapeFetchCalls = 0;
+    const whiteOnlyResults = await fetchAllDatabases(fenShape, whiteOnlySnapshot.id, ["MASTERS", "AMATEUR"]);
+    assert.strictEqual(shapeFetchCalls, 2, "White-only retrieval requests Masters and Amateur, not Elite");
+    assert.strictEqual(whiteOnlyResults[1].retrieval, "SKIPPED");
+    assert.strictEqual((await readHumanExplorerBucket(whiteOnlySnapshot.id, posKey, "ELITE")).status, "missing");
+
     // Only an explicit moves: [] is a successful empty source result.
     const emptySnapshot = await getOrCreateHumanDataSnapshot(rep.id, "explicit-empty");
     global.fetch = async () => new Response(JSON.stringify({ moves: [] }));

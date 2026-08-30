@@ -28,7 +28,11 @@ function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) && value >= 0;
 }
 
-export async function fetchAllDatabases(fen: string, snapshotId: string) {
+export async function fetchAllDatabases(
+  fen: string,
+  snapshotId: string,
+  requestedBuckets: readonly HumanDatabaseType[] = ["MASTERS", "ELITE", "AMATEUR"]
+) {
   const fullFen = parseFullFen(fen);
   const posKey = positionKeyFromFen(fullFen);
 
@@ -108,17 +112,24 @@ export async function fetchAllDatabases(fen: string, snapshotId: string) {
   }
 
   const mastersUrl = `https://explorer.lichess.ovh/masters?fen=${encodeURIComponent(fullFen)}`;
-  const mRes = await processBucket("MASTERS", mastersUrl, defaultConfig.api.lichessExplorer.retryAttempts);
+  const skippedBucket = () => ({ moves: [], totalGames: 0, opening: null, retrieval: "SKIPPED" as const });
+  const mRes = requestedBuckets.includes("MASTERS")
+    ? await processBucket("MASTERS", mastersUrl, defaultConfig.api.lichessExplorer.retryAttempts)
+    : skippedBucket();
 
   const eliteSpeeds = defaultConfig.humanExplorerRequest.elite.speeds.join(',');
   const eliteRatings = defaultConfig.humanExplorerRequest.elite.ratings.join(',');
   const eliteUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(fullFen)}&speeds=${eliteSpeeds}&ratings=${eliteRatings}`;
-  const eRes = await processBucket("ELITE", eliteUrl, defaultConfig.api.lichessExplorer.retryAttempts);
+  const eRes = requestedBuckets.includes("ELITE")
+    ? await processBucket("ELITE", eliteUrl, defaultConfig.api.lichessExplorer.retryAttempts)
+    : skippedBucket();
 
   const amateurSpeeds = defaultConfig.humanExplorerRequest.amateur.speeds.join(',');
   const amateurRatings = defaultConfig.humanExplorerRequest.amateur.ratings.join(',');
   const amateurUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(fullFen)}&speeds=${amateurSpeeds}&ratings=${amateurRatings}`;
-  const aRes = await processBucket("AMATEUR", amateurUrl, defaultConfig.api.lichessExplorer.retryAttempts);
+  const aRes = requestedBuckets.includes("AMATEUR")
+    ? await processBucket("AMATEUR", amateurUrl, defaultConfig.api.lichessExplorer.retryAttempts)
+    : skippedBucket();
 
   return [mRes, eRes, aRes];
 }

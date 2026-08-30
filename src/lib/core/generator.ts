@@ -410,12 +410,27 @@ export async function generateRepertoire(
   const wikibooksAttemptedNodeIds = new Set<string>();
   const pendingCanonicalContinuations: PendingCanonicalContinuations = new Map();
 
+  const logQueueContents = () => {
+    if (queue.length === 0) {
+      console.log("[QUEUE ITEM] (empty)");
+      return;
+    }
+    queue.forEach((item, index) => {
+      console.log(`[QUEUE ITEM] ${index + 1}. ${item.history.join(" ") || "(root)"}`);
+    });
+  };
+
   await attemptCanonicalNodeWikibooks(rootNode.id, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
   
   while (queue.length > 0) {
     if (dependencies.shouldStop?.()) {
       throw new UserRequestedStopError("Generation was stopped at the user's request between positions");
     }
+    const nextNode = queue[0];
+    console.log(`\n--- Queue Before Dequeue: ${queue.length} | Move: ${nextNode.currentMoveNumber} ---`);
+    console.log(`[QUEUE] Before dequeue: ${queue.length}`);
+    console.log("[QUEUE CONTENTS]");
+    logQueueContents();
     const node = dequeueGeneratorQueueItem(queue, pendingCanonicalContinuations);
     if (!node) continue;
     
@@ -432,12 +447,17 @@ export async function generateRepertoire(
     const currentElapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     
     maximumQueueSize = Math.max(maximumQueueSize, queue.length + 1);
-    console.log(`\n--- Queue Size: ${queue.length} | Maximum: ${maximumQueueSize} | Move: ${node.currentMoveNumber} ---`);
+    console.log(`[QUEUE] Dequeued: ${pgnString || "(root)"}`);
+    console.log(`[QUEUE] Waiting after dequeue: ${queue.length}`);
+    console.log("[QUEUE CONTENTS]");
+    logQueueContents();
+    console.log(`[QUEUE] Maximum work items observed at once, including the dequeued item: ${maximumQueueSize}`);
     console.log(`History: ${pgnString}`);
     console.log(`[Run totals] Elapsed: ${currentElapsed}s | Work Items Examined: ${totalPositionsProcessed}`);
 
     if (new Chess(node.fen).isGameOver()) {
       console.log(`[TERMINAL] Game-over position reached. No continuation is generated.`);
+      console.log(`[QUEUE] Nothing enqueued: game-over position; waiting=${queue.length}`);
       continue;
     }
 
@@ -457,6 +477,7 @@ export async function generateRepertoire(
     if (node.currentMoveNumber > dynamicMaxDepth) {
       console.log(`[DEPTH-LIMIT STOP] Hit dynamic depth limit (${dynamicMaxDepth} moves) for prob ${(node.cumulativeProb*100).toFixed(2)}%. No White moves were processed for this work item.`);
       totalBranchesAborted++;
+      console.log(`[QUEUE] Nothing enqueued: depth limit reached; waiting=${queue.length}`);
       continue;
     }
     totalPositionsExpanded++;
@@ -470,7 +491,7 @@ export async function generateRepertoire(
     await restoreRebuildOpeningMetadataState(canonicalSourceNode.id, rebuildOpeningMetadataCache);
     await attemptCanonicalNodeWikibooks(canonicalSourceNode.id, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
 
-    const [masters, , amateur] = await fetchDatabases(canonicalSourceNode.fullFen, snapshotId);
+    const [masters, , amateur] = await fetchDatabases(canonicalSourceNode.fullFen, snapshotId, ["MASTERS", "AMATEUR"]);
     await ensurePositionCache(canonicalSourceNode.fullFen);
     const existingMetadata = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: canonicalSourceNode.id }, select: { openingMetadataStatus: true } });
     if (!existingMetadata.openingMetadataStatus) {
@@ -553,6 +574,9 @@ export async function generateRepertoire(
         console.log(`Found ${whiteCandidates.length} White moves to process.`);
     }
     totalWhiteMovesFound += whiteCandidates.length;
+    if (whiteCandidates.length === 0) {
+      console.log(`[QUEUE] Nothing enqueued: no retained White moves; waiting=${queue.length}`);
+    }
 
     for (let candidateIndex = 0; candidateIndex < whiteCandidates.length; candidateIndex++) {
       const whiteMove = whiteCandidates[candidateIndex];
@@ -578,6 +602,7 @@ export async function generateRepertoire(
         );
         console.log(`[REPETITION STOP] route=${canonicalWhiteMove.destinationHistory}; repeated=${reconciledOpponent.destinationCanonicalPgn || "(root)"}; repeatingMove=${canonicalWhiteMove.san}; terminalProbability=${reconciledOpponent.effectiveCumulativeProb}; result=move retained and route terminated without a destination edge.`);
         totalRepetitionStops++;
+        console.log(`[QUEUE] Not enqueued: ${newPgn}; reason=repetition stop; waiting=${queue.length}`);
         continue;
       }
       if (reconciledOpponent.destinationNodeId === null) {
@@ -604,6 +629,7 @@ export async function generateRepertoire(
           });
           totalTranspositions++;
           console.log(`[TRANSPOSITION] route=${newPgn}; canonicalRoute=${posAfterWhiteNode.pgn}; canonical cumulative probability=${(effectiveCanonicalProb * 100).toFixed(3)}% from all incoming routes; result=reused the canonical Black response without duplicate evaluation.`);
+          console.log(`[QUEUE] Not enqueued: ${newPgn}; reason=canonical position already owns its continuation; waiting=${queue.length}`);
           continue;
       }
 
@@ -807,6 +833,7 @@ export async function generateRepertoire(
         console.log(`[REPETITION STOP] route=${blackHistory}; repeated=${resultingDestinationHistory || "(root)"}; repeatingMove=${algoResult.selectedMoveSan}; terminalProbability=${effectiveCanonicalProb}; result=target move retained and route terminated without a destination edge.`);
         reconciledResponseNodeIds.add(posAfterWhiteNode.id);
         totalRepetitionStops++;
+        console.log(`[QUEUE] Not enqueued: ${blackHistory}; reason=repetition stop; waiting=${queue.length}`);
         continue;
       }
 
@@ -842,6 +869,9 @@ export async function generateRepertoire(
           responseSourceNodeId: posAfterWhiteNode.id,
           item: continuationItem
       });
+      console.log(`[QUEUE] Enqueued: ${continuationItem.history.join(" ") || "(root)"}; waiting=${queue.length}`);
+      console.log("[QUEUE CONTENTS]");
+      logQueueContents();
 
       await wait(100); // Shorter delay since we hit cache!
     }

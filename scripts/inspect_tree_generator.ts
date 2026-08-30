@@ -94,7 +94,7 @@ function printConfiguration(): void {
   console.log(`Lichess request gate: one in-flight request at a time; minimum ${defaultConfig.api.betweenRequestDelayMs}ms between request starts; any HTTP 429 pauses all Lichess requests for at least ${defaultConfig.api.rateLimitRetryDelayMs}ms.`);
   console.log(`Local Deep Stockfish: depth=${defaultConfig.engine.deepVerification.depth}; MultiPV=${defaultConfig.engine.deepVerification.multiPv}.`);
   console.log(`Explorer filters (fixed for this run): Elite speeds=${defaultConfig.humanExplorerRequest.elite.speeds.join(",")}, ratings=${defaultConfig.humanExplorerRequest.elite.ratings.join(",")}; Amateur speeds=${defaultConfig.humanExplorerRequest.amateur.speeds.join(",")}, ratings=${defaultConfig.humanExplorerRequest.amateur.ratings.join(",")}.`);
-  console.log("Masters, Elite, and Amateur are separate cached source buckets and may require separate HTTP requests. White selection uses only Amateur; Masters supplies opening metadata; Masters plus Elite supply Black-response statistics.");
+  console.log("White expansion requests only Masters metadata and Amateur moves; it never fetches or caches Elite. Black-response selection requests Masters plus Elite statistics.");
   console.log(`Move-number band endpoints are inclusive: full move ${defaultConfig.moveBands.earlyThrough} is early and full move ${defaultConfig.moveBands.middleThrough} is middle.`);
   console.log("All engine evaluations use White's point of view: positive is better for White, negative is better for Black. Example: +0.32 means +32 cp for White.");
   console.log("A remote-engine cache stores the complete move/evaluation snapshot returned by one source for one exact Full FEN and request profile.");
@@ -118,6 +118,17 @@ function printConfiguration(): void {
   console.log("Black Responses Without CP: selected Black responses with no centipawn value because a valid mate value is stored instead. The evaluation is available as mate distance; this can come from a Lichess mate candidate/fallback, a supported ChessDB mate result, a local Stockfish mate fallback, or an engine-evaluated hardcoded response.");
   console.log("Transpositions: a different route reached a canonical response position already processed in this run. Its incoming route probability is reconciled into the canonical position, while the canonical Black response and continuation are reused.");
   console.log("Repetition Stops: the current route returned to one of its own ancestor positions; the terminal move is retained and expansion stops.");
+  console.log("\nCOUNTER EXAMPLES");
+  console.log("Work Items Examined: dequeue (root) => 1; then dequeue e4 c6 => 2.");
+  console.log("Positions Expanded: (root) reaches the Amateur Explorer and White filter => +1.");
+  console.log("Depth-Limited Stops: e4 c6 d4 d5 e5 a6 arrives at move 4 with a cap of 3 => +1.");
+  console.log("White Moves Found: at (root), e4 and d4 pass the filter => +2.");
+  console.log("Total Black Responses: 1. e4 c6 stores one selected Black reply => +1.");
+  console.log("Transpositions: 1. Nf3 Nf6 2. d4 and 1. d4 Nf6 2. Nf3 reach the same Black-to-move position => +1.");
+  console.log("Repetition Stops: 1. Nf3 Nf6 2. Ng1 Ng8 returns to the root position => +1.");
+  console.log("Missing White Moves: if Amateur has no matching game after 1. a3 a6 => +1.");
+  console.log("Black Responses Without CP: 1. f3 e5 2. g4 Qh4# => +1.");
+  console.log("Duplicate Histories: if e4 c5 is queued twice, the second dequeued copy is skipped => +1.");
   console.log(`${line()}\n`);
 }
 
@@ -161,29 +172,24 @@ function logExplorerRows(label: string, data: ExplorerBucket): void {
   if (data.moves.length === 0) console.log("  Successful empty bucket: no moves returned.");
 }
 
-async function diagnosticFetchAllDatabases(fen: string, snapshotId: string) {
+async function diagnosticFetchAllDatabases(
+  fen: string,
+  snapshotId: string,
+  requestedBuckets: readonly HumanDatabaseType[] = ["MASTERS", "ELITE", "AMATEUR"]
+) {
   const started = Date.now();
   const fullFen = parseFullFen(fen);
   const positionKey = positionKeyFromFen(fullFen);
   console.log(`\n[HUMAN EXPLORER INPUT] Full FEN: ${fullFen}`);
   console.log(`[HUMAN EXPLORER CACHE KEY] snapshot=${snapshotId}; position=${positionKey}`);
-  for (const databaseType of ["MASTERS", "ELITE", "AMATEUR"] as HumanDatabaseType[]) {
+  for (const databaseType of requestedBuckets) {
     const cached = await readHumanExplorerBucket(snapshotId, positionKey, databaseType);
     const status = cached.status === "empty" ? "VALID_ABSENCE" : cached.status === "success" ? "PRESENT" : "UNCHECKED";
-    console.log(`[CACHE ${databaseType}] retrieval=${cached.status === "missing" ? "MISS" : "HIT"}; status=${status}; API request required=${cached.status === "missing" ? "yes" : "no"}`);
+    console.log(`[CACHE ${databaseType}] retrieval=${cached.status === "missing" ? "MISS" : "HIT"}; status=${status}`);
   }
 
-  const result = await fetchAllDatabases(fullFen, snapshotId) as ExplorerResultSet;
+  const result = await fetchAllDatabases(fullFen, snapshotId, requestedBuckets) as ExplorerResultSet;
   logExplorerRows("AMATEUR RAW DATA — LICHESS OPENING EXPLORER", result[2]);
-
-  const storedOpening = await prisma.repertoireNode.findFirst({
-    where: { fullFen, pgn: currentHistorySan },
-    select: { eco: true, openingName: true, openingMetadataStatus: true, openingMetadataSource: true }
-  });
-  const fetchedOpening = result[0].opening;
-  const retrieval = fetchedOpening ? "fresh Masters response" : storedOpening?.openingMetadataStatus ? "exact-history stored metadata" : "not yet available";
-  const source = fetchedOpening ? "Lichess Opening Explorer — Masters metadata" : storedOpening?.openingMetadataSource === "LICHESS_MASTERS" ? "Lichess Opening Explorer — Masters metadata" : "unavailable";
-  console.log(`\n[OPENING METADATA] history=${currentHistorySan || "(root)"}; retrieval=${retrieval}; source=${source}; status=${fetchedOpening || storedOpening?.openingMetadataStatus === "PRESENT" ? "PRESENT" : storedOpening?.openingMetadataStatus ?? "UNCHECKED"}; ECO=${fetchedOpening?.eco ?? storedOpening?.eco ?? "unavailable"}; name=${fetchedOpening?.name ?? storedOpening?.openingName ?? "unavailable"}`);
 
   const moveNumber = fullmoveNumber(fullFen);
   const band = getMoveBand(moveNumber, defaultConfig);
@@ -390,8 +396,8 @@ async function diagnosticWikibooks(nodeId: string) {
     where: { id: nodeId },
     select: { wikibooksChecked: true, wikiText: true }
   });
-  console.log(`\n[OPENING METADATA] history=${before.history || "(root)"}; retrieval=stored node metadata; source=${before.openingMetadataSource === "LICHESS_MASTERS" ? "Lichess Opening Explorer — Masters metadata" : "unavailable"}; status=${before.openingMetadataStatus ?? "UNCHECKED"}; ECO=${before.eco ?? "unavailable"}; name=${before.openingName ?? "unavailable"}`);
-  console.log(`[WIKIBOOKS] history=${before.history || "(root)"}; retrieval=${before.wikibooksChecked ? "CACHE" : "FRESH"}; status=${after.wikiText === null ? "VALID_ABSENCE" : "PRESENT"}; source=Wikibooks; lookup performed=${before.wikibooksChecked ? "no" : "yes"}; characters=${after.wikiText?.length ?? 0}; elapsed=${elapsed(started)}`);
+  console.log(`\n[OPENING METADATA] history=${before.history || "(root)"}; retrieval=CACHE; cache=exact-history node; source=${before.openingMetadataSource === "LICHESS_MASTERS" ? "Lichess Opening Explorer — Masters metadata" : "unavailable"}; status=${before.openingMetadataStatus ?? "UNCHECKED"}; ECO=${before.eco ?? "unavailable"}; name=${before.openingName ?? "unavailable"}`);
+  console.log(`[WIKIBOOKS] history=${before.history || "(root)"}; retrieval=${before.wikibooksChecked ? "CACHE" : "FRESH"}; cache=exact-history node; status=${after.wikiText === null ? "VALID_ABSENCE" : "PRESENT"}; source=Wikibooks; characters=${after.wikiText?.length ?? "unavailable"}; elapsed=${elapsed(started)}`);
   return result;
 }
 
@@ -399,14 +405,57 @@ function installBlockFormatter(write: (...args: unknown[]) => void): () => void 
   const diagnosticLog = (...args: unknown[]) => {
     const text = format(...args);
     const normalized = text.trim();
-    const queue = normalized.match(/^--- Queue Size: (\d+) \| Maximum: (\d+) \| Move: (\d+) ---$/);
-    if (queue) {
-      currentChessFullMove = Number(queue[3]);
+    const queueBeforeDequeue = normalized.match(/^--- Queue Before Dequeue: (\d+) \| Move: (\d+) ---$/);
+    if (queueBeforeDequeue) {
+      currentChessFullMove = Number(queueBeforeDequeue[2]);
       candidateBranch = 0;
       pendingCandidate = false;
+      write(`\n${line()}\nMOVE ${queueBeforeDequeue[2]}\n${line()}`);
+      return;
+    }
+    if (normalized.startsWith("[QUEUE] Dequeued:")) {
       liveCounters.workItemsExamined++;
-      write(`\n${line()}\nMOVE ${queue[3]}\nPositions still waiting after this one was dequeued: ${queue[1]}\nMaximum work items observed at once, including the position being processed: ${queue[2]}\n${line()}`);
+      write(normalized.replace("[QUEUE]", "[LIVE QUEUE]"));
       write(`[LIVE COUNTER] Work items examined: ${liveCounters.workItemsExamined} (the root is work item 1).`);
+      return;
+    }
+    const queueEnqueued = normalized.match(/^\[QUEUE\] Enqueued: (.+); waiting=(\d+)$/);
+    if (queueEnqueued) {
+      write(`[LIVE QUEUE] Enqueued: ${queueEnqueued[1]}`);
+      write(`[LIVE COUNTER] Queue waiting: ${queueEnqueued[2]}`);
+      return;
+    }
+    const queueNotEnqueued = normalized.match(/^\[QUEUE\] (Not enqueued|Nothing enqueued): (.+); waiting=(\d+)$/);
+    if (queueNotEnqueued) {
+      write(`[LIVE QUEUE] ${queueNotEnqueued[1]}: ${queueNotEnqueued[2]}`);
+      write(`[LIVE COUNTER] Queue waiting: ${queueNotEnqueued[3]}`);
+      return;
+    }
+    const queueBeforeDequeueCount = normalized.match(/^\[QUEUE\] Before dequeue: (\d+)$/);
+    if (queueBeforeDequeueCount) {
+      write(`[LIVE COUNTER] Queue before dequeue: ${queueBeforeDequeueCount[1]}`);
+      return;
+    }
+    const queueAfterDequeueCount = normalized.match(/^\[QUEUE\] Waiting after dequeue: (\d+)$/);
+    if (queueAfterDequeueCount) {
+      write(`[LIVE COUNTER] Queue waiting after dequeue: ${queueAfterDequeueCount[1]}`);
+      return;
+    }
+    const maximumQueueSize = normalized.match(/^\[QUEUE\] Maximum work items observed at once, including the dequeued item: (\d+)$/);
+    if (maximumQueueSize) {
+      write(`[LIVE COUNTER] Maximum queue size: ${maximumQueueSize[1]}`);
+      return;
+    }
+    if (normalized === "[QUEUE CONTENTS]") {
+      write("[LIVE QUEUE CONTENTS]");
+      return;
+    }
+    if (normalized.startsWith("[QUEUE ITEM]")) {
+      write(`  ${normalized.slice("[QUEUE ITEM]".length).trim()}`);
+      return;
+    }
+    if (normalized.startsWith("[QUEUE]")) {
+      write(normalized.replace("[QUEUE]", "[LIVE QUEUE]"));
       return;
     }
     if (normalized.includes("--- [CHECKPOINT] Node Finished ---")) {
@@ -447,7 +496,7 @@ function installBlockFormatter(write: (...args: unknown[]) => void): () => void 
       movePairNumber++;
       currentMovePairNumber = movePairNumber;
       pendingCandidate = true;
-      write(`\n${line("=")}\nMOVE PAIR ${currentMovePairNumber} — MOVE ${currentChessFullMove} — BRANCH ${candidateBranch}\nWhite half-move: ${evaluating[1]}\n${line("=")}`);
+      write(`\n${line("=")}\nMOVE PAIR ${currentMovePairNumber} — MOVE ${currentChessFullMove}\n${currentChessFullMove}. ${evaluating[1]}\n${line("=")}`);
       write(normalized);
       return;
     }
@@ -487,7 +536,8 @@ function installBlockFormatter(write: (...args: unknown[]) => void): () => void 
       return;
     }
     if (normalized.startsWith("[Run totals] Elapsed:")) {
-      write(`${normalized}\n  “Work Items Examined” includes the starting/root position before any move has been played.`);
+      const elapsedOnly = normalized.match(/^\[Run totals\] Elapsed: (.+?) \| Work Items Examined: \d+$/);
+      write(elapsedOnly ? `[RUN TIME] Elapsed: ${elapsedOnly[1]}` : normalized);
       return;
     }
     write(...args);

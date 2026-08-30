@@ -242,7 +242,7 @@ Masters and Elite must not affect which White opponent moves are included.
 
 The candidate universe itself is the raw Amateur move list. Masters/Elite-only moves must not be manufactured as zero-Amateur candidates merely to be rejected later.
 
-Masters, Elite and Amateur are separate source buckets and may require separate HTTP requests. At a White-to-move generation position, Amateur drives coverage and Masters may supply exact-history opening metadata; Elite has no current White-selection role. Masters plus Elite remain required after a White move for RESPONSE candidate construction. Retaining a uniformly fetched/cached Elite bucket is allowed, but it must not affect White selection or the reason reported for stopping the branch.
+Masters, Elite and Amateur are separate source buckets and may require separate HTTP requests. At a White-to-move generation position, request and cache only Amateur coverage plus Masters metadata; do not request or create an Elite bucket. Masters plus Elite remain required after a White move for RESPONSE candidate construction.
 
 White branch termination must distinguish these cases explicitly:
 
