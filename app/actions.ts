@@ -91,6 +91,79 @@ export async function fetchDuePositions(repertoireId: string) {
   return enrichedStats.slice(0, 20);
 }
 
+export async function fetchDemoPositions(repertoireId: string) {
+  const branches = await prisma.repertoireMove.findMany({
+    where: {
+      repertoireId,
+      playerTurn: "OPPONENT",
+      toNodeId: { not: null },
+    },
+    include: {
+      fromNode: true,
+      toNode: {
+        include: {
+          stats: {
+            where: { repertoireId, targetMoveId: { not: null } },
+            include: { targetMove: true, repertoire: true },
+            take: 1,
+          },
+        },
+      },
+    },
+  });
+
+  const cards = (await Promise.all(branches.map(async (branch) => {
+    const stat = branch.toNode?.stats[0];
+    if (!stat?.targetMove || !stat.repertoire || !branch.toNode) return null;
+
+    const priorMoves = branch.fromNode.displayPgn
+      ? branch.fromNode.displayPgn.split(/\s+/)
+      : [];
+    const lineMoves = [...priorMoves, branch.san];
+
+    // Attach per-ply opening metadata for live move-list browsing, same as fetchDuePositions.
+    const historyUcis = branch.toNode.history === "" ? [] : branch.toNode.history.split(/\s+/);
+    const histories = ["", ...historyUcis.map((_, index) => historyUcis.slice(0, index + 1).join(" "))];
+    const historyNodes = await prisma.repertoireNode.findMany({
+      where: { repertoireId, history: { in: histories } },
+      select: { history: true, eco: true, openingName: true, openingMetadataStatus: true, openingMetadataSource: true }
+    });
+    const metadataByHistory = new Map(historyNodes.map(node => [node.history, node]));
+    const openingByPly = histories.map(history => metadataByHistory.get(history) ?? null);
+    if (stat.targetMove.toNodeId) {
+      const destination = await prisma.repertoireNode.findUnique({
+        where: { id: stat.targetMove.toNodeId },
+        select: { history: true, eco: true, openingName: true, openingMetadataStatus: true, openingMetadataSource: true }
+      });
+      openingByPly.push(destination);
+    } else if (stat.targetMove.stopReason === "Repetition" && stat.targetMove.routeHistory) {
+      const terminal = await prisma.openingMetadataHistoryCache.findUnique({
+        where: { repertoireId_history: { repertoireId, history: stat.targetMove.routeHistory } },
+        select: { eco: true, openingName: true, status: true, source: true }
+      });
+      openingByPly.push(terminal ? {
+        history: stat.targetMove.routeHistory,
+        eco: terminal.eco,
+        openingName: terminal.openingName,
+        openingMetadataStatus: terminal.status,
+        openingMetadataSource: terminal.source
+      } : null);
+    }
+
+    return {
+      ...stat,
+      demoId: branch.id,
+      node: branch.toNode,
+      lineMoves,
+      openingByPly,
+      routeLabel: lineMoves.join(" "),
+    };
+  }))).filter((card): card is NonNullable<typeof card> => card !== null);
+
+  cards.sort((a, b) => a.lineMoves.length - b.lineMoves.length || a.routeLabel.localeCompare(b.routeLabel));
+  return cards.slice(0, 42);
+}
+
 export async function updateSrsStats(statId: string, quality: number) {
   // quality: 0 (Again), 1 (Hard), 2 (Good), 3 (Easy)
   // FSRS expects Rating enums: 1=Again, 2=Hard, 3=Good, 4=Easy
