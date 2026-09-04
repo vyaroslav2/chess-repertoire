@@ -1,6 +1,6 @@
 ---
 tags:
-  - in-progress
+  - processed
 aliases:
   - forced terminations
   - forced termination

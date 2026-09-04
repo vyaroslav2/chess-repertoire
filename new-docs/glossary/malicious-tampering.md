@@ -1,6 +1,6 @@
 ---
 tags:
-  - in-progress
+  - processed
 aliases:
   - malicious tampering
 ---
