@@ -327,6 +327,14 @@ for parent, kids in children.items():
     for k in kids:
         normalized_prob[k] = by_history[k][1] / total_raw * 100.0
 
+def routeprob(history):
+    tokens = history.split()
+    r = 1.0
+    for end in range(1, len(tokens) + 1, 2):
+        ancestor = " ".join(tokens[:end])
+        r *= normalized_prob[ancestor] / 100.0
+    return r * 100.0
+
 # ---- check-and-point walk (same registry logic as the real version) ----
 registry = {}        # mock key -> owner history (the canonical node)
 result = {}          # history -> (kind, owner_or_None, key)
@@ -366,7 +374,13 @@ for r in root_level:
 all_histories = sorted(result.keys(), key=lambda h: order_index[h])
 for h in all_histories:
     kind, owner, key = result[h]
-    line = h + " FEN=" + key
+    mp = normalized_prob[h]
+    rp = routeprob(h)
+    cp = rp
+    line = (h + " FEN=" + key +
+            " moveProb=" + format(mp, ".3f") + "%" +
+            " routeProb=" + format(rp, ".3f") + "%" +
+            " cumProb=" + format(cp, ".3f") + "%")
     if kind == "transposition":
         line += "  [TRANSPOSITION -> " + owner + "]"
     elif kind == "repetition":
