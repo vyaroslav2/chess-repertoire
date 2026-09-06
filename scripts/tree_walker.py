@@ -1,12 +1,9 @@
-# Tree-walker - real transposition/repetition detection via actual positionKey checks.
-# No hardcoded transposition flags: every node's position is computed by playing the
-# real moves on a chess board, and checked against a live Position registry - exactly
-# the check-and-point flow in the diagram (compute key -> exists? -> same line or not).
-#
-# moveProb (probabilities) are currently commented out per request; FEN shown is the
-# real 4-field positionKey (piece placement, side, castling, effective en passant).
-
-import chess
+# Tree-walker - MOCK MODE: FENs are random 3-letter placeholders, not real chess.
+# The 7 transpositions below are hardcoded to fire (their pair shares a key);
+# every other node gets a unique random key, so no other collisions occur.
+# Detection logic itself is UNCHANGED - same registry check as the real version -
+# only the source of the key (mock vs. chess.Board) is swapped.
+# Later: replace MOCK_KEYS with real positionKey computation again.
 
 RAW_NODES = [
     # (move_number, history, raw_moveProb)
@@ -160,6 +157,157 @@ RAW_NODES = [
     (4, "e4 c6 d4 d5 exd5 Qxd5 c4", 24.285),
 ]
 
+MOCK_KEYS = {
+    "d4": "uda",
+    "d4 d5 Bf4": "xih",
+    "d4 d5 Bf4 h5 Nc3": "hex",
+    "d4 d5 Bf4 h5 Nc3 Bf5 Nb5": "dvx",
+    "d4 d5 Bf4 h5 Nc3 Bf5 Nf3": "rcs",
+    "d4 d5 Bf4 h5 Nc3 Bf5 e3": "nba",
+    "d4 d5 Bf4 h5 Nc3 Bf5 f3": "cgh",
+    "d4 d5 Bf4 h5 Nc3 Bf5 h3": "qta",
+    "d4 d5 Bf4 h5 Nf3": "rgw",
+    "d4 d5 Bf4 h5 Nf3 Nf6 Nbd2": "uwr",
+    "d4 d5 Bf4 h5 Nf3 Nf6 e3": "nho",
+    "d4 d5 Bf4 h5 Nf3 Nf6 h3": "siz",
+    "d4 d5 Bf4 h5 e3": "ayz",
+    "d4 d5 Bf4 h5 e3 e5 Bxe5": "fwn",
+    "d4 d5 Bf4 h5 e3 e5 dxe5": "kie",
+    "d4 d5 Bf4 h5 h3": "gyk",
+    "d4 d5 Bf4 h5 h3 c5 Nf3": "dcm",
+    "d4 d5 Bf4 h5 h3 c5 c3": "dll",
+    "d4 d5 Bf4 h5 h3 c5 dxc5": "tiz",
+    "d4 d5 Bf4 h5 h3 c5 e3": "bxo",
+    "d4 d5 Bf4 h5 h4": "rdm",
+    "d4 d5 Bf4 h5 h4 c5 Nf3": "crj",
+    "d4 d5 Bf4 h5 h4 c5 c3": "utl",
+    "d4 d5 Bf4 h5 h4 c5 dxc5": "sgw",
+    "d4 d5 Bf4 h5 h4 c5 e3": "cbv",
+    "d4 d5 Nc3": "hyj",
+    "d4 d5 Nc3 c6 Bf4": "chd",
+    "d4 d5 Nc3 c6 Bf4 Qb6 Na4": "mio",
+    "d4 d5 Nc3 c6 Bf4 Qb6 Rb1": "ulf",
+    "d4 d5 Nc3 c6 Bf4 Qb6 a3": "llg",
+    "d4 d5 Nc3 c6 Bf4 Qb6 b3": "viw",
+    "d4 d5 Nc3 c6 Bf4 Qb6 e3": "vuc",
+    "d4 d5 Nc3 c6 Nf3": "bhb",
+    "d4 d5 Nc3 c6 e4": "qfb",
+    "d4 d5 Nf3": "tuf",
+    "d4 d5 Nf3 c6 Bf4": "rxh",
+    "d4 d5 Nf3 c6 Bf4 Bg4 Nbd2": "fom",
+    "d4 d5 Nf3 c6 Bf4 Bg4 Ne5": "iuw",
+    "d4 d5 Nf3 c6 Bf4 Bg4 e3": "rhv",
+    "d4 d5 Nf3 c6 Bf4 Bg4 h3": "kyy",
+    "d4 d5 Nf3 c6 Nc3": "bhb",
+    "d4 d5 Nf3 c6 Nc3 Bf5 Bf4": "zkm",
+    "d4 d5 Nf3 c6 Nc3 Bf5 e3": "icg",
+    "d4 d5 Nf3 c6 Nc3 Bf5 h3": "swk",
+    "d4 d5 Nf3 c6 c4": "gup",
+    "d4 d5 Nf3 c6 c4 a6 Bf4": "muo",
+    "d4 d5 Nf3 c6 c4 a6 Nc3": "eie",
+    "d4 d5 Nf3 c6 c4 a6 a4": "hxr",
+    "d4 d5 Nf3 c6 c4 a6 cxd5": "rix",
+    "d4 d5 Nf3 c6 c4 a6 e3": "sns",
+    "d4 d5 Nf3 c6 c4 a6 g3": "mlh",
+    "d4 d5 Nf3 c6 e3": "eqp",
+    "d4 d5 Nf3 c6 e3 Bg4 Bd3": "cyb",
+    "d4 d5 Nf3 c6 e3 Bg4 Be2": "deu",
+    "d4 d5 Nf3 c6 e3 Bg4 Nbd2": "fzv",
+    "d4 d5 Nf3 c6 e3 Bg4 c4": "ntc",
+    "d4 d5 Nf3 c6 e3 Bg4 h3": "mmt",
+    "d4 d5 Nf3 c6 g3": "oqi",
+    "d4 d5 Nf3 c6 g3 Bf5 Bg2": "rav",
+    "d4 d5 c4": "xdv",
+    "d4 d5 c4 dxc4 Nc3": "ryi",
+    "d4 d5 c4 dxc4 Nc3 a6 Nf3": "yuk",
+    "d4 d5 c4 dxc4 Nc3 a6 a4": "djn",
+    "d4 d5 c4 dxc4 Nc3 a6 e3": "foa",
+    "d4 d5 c4 dxc4 Nc3 a6 e4": "xxi",
+    "d4 d5 c4 dxc4 Nf3": "qyf",
+    "d4 d5 c4 dxc4 Nf3 Bf5 Nc3": "qdu",
+    "d4 d5 c4 dxc4 Nf3 Bf5 Qa4+": "juq",
+    "d4 d5 c4 dxc4 Nf3 Bf5 e3": "tge",
+    "d4 d5 c4 dxc4 Nf3 Bf5 g3": "lyf",
+    "d4 d5 c4 dxc4 e3": "ryq",
+    "d4 d5 c4 dxc4 e3 Nc6 Bxc4": "atk",
+    "d4 d5 c4 dxc4 e4": "pad",
+    "d4 d5 c4 dxc4 e4 b5 Nc3": "lzj",
+    "d4 d5 c4 dxc4 e4 b5 Nf3": "hbh",
+    "d4 d5 c4 dxc4 e4 b5 a4": "scc",
+    "d4 d5 e3": "xpc",
+    "d4 d5 e3 Bf5 Bd3": "yry",
+    "d4 d5 e3 Bf5 Bd3 e6 Bxf5": "eev",
+    "d4 d5 e3 Bf5 Bd3 e6 Nf3": "prf",
+    "d4 d5 e3 Bf5 Bd3 e6 f4": "iqt",
+    "d4 d5 e3 Bf5 Nf3": "ngr",
+    "d4 d5 e3 Bf5 Nf3 e6 Bd3": "prf",
+    "d4 d5 e3 Bf5 Nf3 e6 Be2": "yxw",
+    "d4 d5 e3 Bf5 Nf3 e6 Nbd2": "gwj",
+    "d4 d5 e3 Bf5 Nf3 e6 a3": "mvu",
+    "d4 d5 e3 Bf5 Nf3 e6 c4": "hck",
+    "d4 d5 e3 Bf5 c4": "loq",
+    "d4 d5 e3 Bf5 c4 e6 Nc3": "odh",
+    "d4 d5 e3 Bf5 c4 e6 Nf3": "hck",
+    "d4 d5 e3 Bf5 c4 e6 Qb3": "asr",
+    "d4 d5 e3 Bf5 c4 e6 a3": "hsh",
+    "d4 d5 e3 Bf5 c4 e6 c5": "acw",
+    "d4 d5 e3 Bf5 c4 e6 cxd5": "ubh",
+    "d4 d5 e3 Bf5 f4": "cbk",
+    "d4 d5 e3 Bf5 f4 e6 Bd3": "iqt",
+    "d4 d5 e3 Bf5 f4 e6 Nf3": "cqh",
+    "d4 d5 e3 Bf5 f4 e6 c3": "ivp",
+    "e4": "gre",
+    "e4 c6 Bc4": "xss",
+    "e4 c6 Bc4 d5 exd5": "phz",
+    "e4 c6 Bc4 d5 exd5 cxd5 Bb3": "pzn",
+    "e4 c6 Bc4 d5 exd5 cxd5 Bb5+": "gdd",
+    "e4 c6 Nc3": "vnl",
+    "e4 c6 Nc3 d5 Nf3": "nno",
+    "e4 c6 Nc3 d5 Nf3 h6 d3": "xbv",
+    "e4 c6 Nc3 d5 Nf3 h6 d4": "uud",
+    "e4 c6 Nc3 d5 Nf3 h6 exd5": "bmx",
+    "e4 c6 Nc3 d5 Nf3 h6 h3": "kzd",
+    "e4 c6 Nc3 d5 d4": "qfb",
+    "e4 c6 Nc3 d5 exd5": "hgg",
+    "e4 c6 Nc3 d5 exd5 cxd5 Bb5+": "roe",
+    "e4 c6 Nc3 d5 exd5 cxd5 Nf3": "nfi",
+    "e4 c6 Nc3 d5 exd5 cxd5 d4": "ohc",
+    "e4 c6 Nf3": "ozr",
+    "e4 c6 Nf3 g6 Bc4": "dbu",
+    "e4 c6 Nf3 g6 Bc4 d5 exd5": "rac",
+    "e4 c6 Nf3 g6 Nc3": "yhf",
+    "e4 c6 Nf3 g6 Nc3 d5 d3": "npp",
+    "e4 c6 Nf3 g6 Nc3 d5 d4": "gmb",
+    "e4 c6 Nf3 g6 Nc3 d5 e5": "fma",
+    "e4 c6 Nf3 g6 Nc3 d5 exd5": "miz",
+    "e4 c6 Nf3 g6 d4": "zoj",
+    "e4 c6 Nf3 g6 d4 d6 Bc4": "nwx",
+    "e4 c6 Nf3 g6 d4 d6 Bd3": "zrv",
+    "e4 c6 Nf3 g6 d4 d6 Be2": "wpe",
+    "e4 c6 Nf3 g6 d4 d6 Be3": "gjg",
+    "e4 c6 Nf3 g6 d4 d6 Nc3": "bsx",
+    "e4 c6 Nf3 g6 d4 d6 c3": "rbx",
+    "e4 c6 Nf3 g6 d4 d6 c4": "kbb",
+    "e4 c6 d4": "spq",
+    "e4 c6 d4 d5 Nc3": "qfb",
+    "e4 c6 d4 d5 Nc3 a6 Bd3": "qcf",
+    "e4 c6 d4 d5 Nc3 a6 Bf4": "ctc",
+    "e4 c6 d4 d5 Nc3 a6 Nf3": "vhm",
+    "e4 c6 d4 d5 Nc3 a6 e5": "vss",
+    "e4 c6 d4 d5 Nc3 a6 exd5": "dsh",
+    "e4 c6 d4 d5 e5": "stb",
+    "e4 c6 d4 d5 e5 a6 Bd3": "tcn",
+    "e4 c6 d4 d5 e5 a6 Nc3": "vss",
+    "e4 c6 d4 d5 e5 a6 Nf3": "qki",
+    "e4 c6 d4 d5 e5 a6 c3": "gvw",
+    "e4 c6 d4 d5 e5 a6 c4": "khi",
+    "e4 c6 d4 d5 e5 a6 f4": "mev",
+    "e4 c6 d4 d5 exd5": "ujo",
+    "e4 c6 d4 d5 exd5 Qxd5 Nc3": "kyc",
+    "e4 c6 d4 d5 exd5 Qxd5 Nf3": "aot",
+    "e4 c6 d4 d5 exd5 Qxd5 c4": "sdc",
+}
+
 by_history = {h: (mv, raw) for (mv, h, raw) in RAW_NODES}
 
 def parent_white_node(history):
@@ -179,41 +327,18 @@ for parent, kids in children.items():
     for k in kids:
         normalized_prob[k] = by_history[k][1] / total_raw * 100.0
 
-def canonical_castling(c):
-    order = "KQkq"
-    return "".join(x for x in order if x in c) or "-"
-
-def position_key(board):
-    fen = board.fen()
-    pieces, side, castling, ep = fen.split(" ")[:4]
-    castling = canonical_castling(castling)
-    effective_ep = "-"
-    if ep != "-" and any(board.is_en_passant(m) for m in board.legal_moves):
-        effective_ep = ep
-    return pieces + " " + side + " " + castling + " " + effective_ep
-
-# ---- real check-and-point walk (mirrors the diagram) ----
-registry = {}        # positionKey -> owner history (the canonical node)
-boards = {None: chess.Board()}
-result = {}          # history -> (kind, owner_or_None, positionKey)
+# ---- check-and-point walk (same registry logic as the real version) ----
+registry = {}        # mock key -> owner history (the canonical node)
+result = {}          # history -> (kind, owner_or_None, key)
 order_index = {}
 _next = [0]
 
 REPETITIONS = 0
 TRANSPOSITIONS = 0
 
-def log(msg):
-    print(msg)   # same message goes to console and (in the real app) the log file
-
 def visit(history):
     global REPETITIONS, TRANSPOSITIONS
-    parent = parent_white_node(history)
-    board = boards[parent].copy()
-    parent_tokens = parent.split() if parent else []
-    for san in history.split()[len(parent_tokens):]:
-        board.push_san(san)
-
-    key = position_key(board)
+    key = MOCK_KEYS[history]
     order_index[history] = _next[0]; _next[0] += 1
 
     if key in registry:
@@ -228,7 +353,6 @@ def visit(history):
         return   # branch stops either way - no children visited
     else:
         registry[key] = history
-        boards[history] = board
         result[history] = ("canonical", None, key)
         kids = sorted(children.get(history, []), key=lambda k: -by_history[k][1])
         for k in kids:
@@ -242,7 +366,6 @@ for r in root_level:
 all_histories = sorted(result.keys(), key=lambda h: order_index[h])
 for h in all_histories:
     kind, owner, key = result[h]
-    # mp = normalized_prob[h]
     line = h + " FEN=" + key
     if kind == "transposition":
         line += "  [TRANSPOSITION -> " + owner + "]"
