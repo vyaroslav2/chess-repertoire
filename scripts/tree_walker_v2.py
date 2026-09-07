@@ -344,18 +344,67 @@ class Node:
 nodes    = []    # every node, in creation order
 registry = {}    # key -> owner Node (canonical nodes only)
 
-log_lines        = []
+log_lines        = []    # the roll-up of warnings, printed at the very end
 repetition_stops = []
 transpositions   = []
 cascade_reports  = []
+
+# ---------------------------------------------------------------- log layout
+# Every cascade is written as one fixed-shape block:
+#   header (TRANSPOSITION / FROM / TO / CASCADE)
+#   numbered steps, one action each
+#   UPDATED NODES
+#   CASCADE END
+# The vocabulary is fixed: APPLY, FORWARD, ENQUEUE, SKIP, STOP, ERROR.
+# Warnings appear inline, on the step they belong to, prefixed "!!".
+
+RULE_HEAVY = "=" * 80
+RULE_LIGHT = "-" * 80
+
+cascade_log = []          # formatted lines; printed after the tree dump
+
+def out(line=""):
+    cascade_log.append(line)
+
+def pct(x):
+    """A percentage, padded to a fixed width - for the UPDATED NODES table."""
+    return "%9.3f%%" % x
+
+def num(x):
+    """A percentage, compact - for values and sums inside a step block."""
+    return "%.3f%%" % x
+
+def field(label, value):
+    return "  %-11s %s" % (label + ":", value)
+
+def step(state, action, item_id, note, fields, warnings=None):
+    """One numbered action block. Returns its step number."""
+    state["step"] += 1
+    tag = "" if item_id is None else "  #%d" % item_id
+    out("[%02d] %-8s%s%s" % (state["step"], action, tag, note))
+    for label, value in fields:
+        out(field(label, value))
+    for w in (warnings or []):
+        out("  !! " + w)
+    out()
+    return state["step"]
+
+def hard_error(msg):
+    # Flush whatever has been written so far - otherwise the cascade that
+    # caused the error would be lost, which is exactly what you need to read.
+    for l in cascade_log:
+        print(l)
+    if log_lines:
+        print()
+        print("Warnings so far")
+        for l in log_lines:
+            print("  " + l)
+    raise SystemExit("HARD ERROR: " + msg)
 
 def ending_total():
     """TR: the sum of every cumProb ending in the tree, where an ending is a
     node nothing grows out of. Add up every one of them - no skipping."""
     return sum(n.cumProb for n in nodes if not n.children)
-
-def hard_error(msg):
-    raise SystemExit("HARD ERROR: " + msg)
 
 # ---------------------------------------------------------------- cascade
 def cascade(from_node, to_node, event_no):
@@ -363,63 +412,145 @@ def cascade(from_node, to_node, event_no):
 
     # TR.09 - one hash for this whole transposition event
     event_hash = "EV%02d:%s->%s" % (event_no, from_node.history, to_node.history)
+    event_id   = "EV%02d" % event_no
 
     # TR.23 - record the ending total; reset the per-cascade counters
-    ending_before = ending_total()
-    tiny_counter  = 0
-    touch_counts  = {}
-    applied       = set()   # (event_hash, node) already handled - TR.13
-    visited_list  = []      # (sender, receiver, gain, targetFEN) - TR.31
-    visited_keys  = set()   # (sender, receiver, gain) - what TR.26 actually compares
-    duplicates    = 0
-    repeat_touches = 0   # TR.38 - every time a hash comes back to a node, dup or not
-    deliveries    = 0
+    ending_before  = ending_total()
+    tiny_counter   = 0
+    touch_counts   = {}
+    applied        = set()   # (event_hash, node) already handled - TR.13
+    visited_list   = []      # (sender, receiver, gain, targetFEN) - TR.31
+    visited_keys   = set()   # (sender, receiver, gain) - what TR.26 actually compares
+    duplicates     = 0
+    repeat_touches = 0       # TR.38 - every time a hash comes back to a node, dup or not
+    deliveries     = 0
+
+    # log bookkeeping
+    state         = {"step": 0}
+    item_counter  = {"n": 0}
+    applies = forwards = enqueues = stops = 0
+    before_values = {}       # node -> its cumProb before this cascade touched it
+
+    def remember(node):
+        if node not in before_values:
+            before_values[node] = node.cumProb
+
+    def new_item(node, gain, sender, queued_at):
+        item_counter["n"] += 1
+        return {"node": node, "gain": gain, "sender": sender, "hash": event_hash,
+                "id": item_counter["n"], "queued_at": queued_at}
 
     # TR.10 - seed the worklist, then empty fromNode
     gain_for_to_node = from_node.cumProb
-    worklist = [{"node": to_node, "gain": gain_for_to_node,
-                 "sender": from_node, "hash": event_hash}]
+
+    # ---- header -----------------------------------------------------------
+    out(RULE_HEAVY)
+    out("TRANSPOSITION %02d   event=%s" % (event_no, event_id))
+    out(RULE_LIGHT)
+    out("FROM")
+    out(field("path", from_node.history))
+    out(field("fen", from_node.key))
+    out(field("moveProb", num(from_node.moveProb)))
+    out(field("routeProb", num(from_node.routeProb)))
+    out(field("cumProb", "%s -> %s   (emptied; node is now a pointer)"
+              % (num(gain_for_to_node), num(0.0))))
+    out()
+    out("TO")
+    out(field("path", to_node.history))
+    out(field("fen", to_node.key))
+    out(field("cumProb", "%s   (before this cascade)" % num(to_node.cumProb)))
+    out()
+    out("CASCADE  carrying=%s   endingTotal=%.4f%%"
+        % (num(gain_for_to_node), ending_before))
+    out(RULE_LIGHT)
+    out()
+
+    remember(from_node)
+    worklist = [new_item(to_node, gain_for_to_node, from_node, None)]
     from_node.cumProb = 0.0
 
     while worklist:                                    # TR.18 (loop back TR.20)
         item = worklist.pop(0)                         # TR.11
         node, gain, sender = item["node"], item["gain"], item["sender"]
+        origin = "" if item["queued_at"] is None else "  (queued at [%02d])" % item["queued_at"]
 
         # TR.24 - too small to matter; drop it
         if gain < TINY_THRESHOLD:
             tiny_counter += 1                          # TR.37
+            step(state, "SKIP", item["id"], origin, [
+                ("node", node.history),
+                ("from", sender.history),
+                ("carrying", num(gain)),
+                ("reason", "below the tiny threshold (%.5f%%)" % TINY_THRESHOLD),
+                ("queue", "%d waiting" % len(worklist)),
+            ])
             continue
+
+        pending = []
 
         # TR.13 - has this event already touched this node?
         if (event_hash, node) in applied:
             # TR.38 - unconditional trace: this hash is back at this node again.
-            # Written every time, whether or not TR.26 below decides it's a true duplicate.
+            repeat_touches += 1
+            pending.append("revisit: this event has already reached this node (TR.38)")
             log_lines.append(
                 "[WARNING] eventHash already applied to this node: "
                 "fromNode=%s toNode=%s gainOnThisItem=%.9f%%"
                 % (sender.history, node.history, gain))
-            repeat_touches += 1
 
             # TR.26 - the identical delivery, same sender, same amount?
             if (sender.history, node.history, round(gain, 12)) in visited_keys:
                 # TR.35 - log it and drop it. Should never happen in a good run.
                 duplicates += 1
+                pending.append("duplicate: same sender, same node, same amount (TR.35)")
                 log_lines.append(
                     "[WARNING] duplicate propagation attempt: %s -> %s FEN=%s gain=%.9f%%"
                     % (sender.history, node.history, node.key, gain))
+                step(state, "SKIP", item["id"], origin, [
+                    ("node", node.history),
+                    ("from", sender.history),
+                    ("carrying", num(gain)),
+                    ("reason", "duplicate delivery - dropped"),
+                    ("queue", "%d waiting" % len(worklist)),
+                ], pending)
                 continue
 
         # TR.32 - is this node a pointer?
         if node.transposesTo is not None:
             # TR.15 - hand the gain straight on; this node stays empty
-            worklist.append({"node": node.transposesTo, "gain": gain,
-                             "sender": node, "hash": event_hash})
+            remember(node)
+            forwards += 1
+            s = step(state, "FORWARD", item["id"], origin, [
+                ("node", node.history),
+                ("from", sender.history),
+                ("carrying", num(gain)),
+                ("owner", node.transposesTo.history),
+                ("cumProb", "%s   (a pointer keeps nothing)" % num(0.0)),
+                ("queue", "%d waiting" % (len(worklist) + 1)),
+            ], pending)
+            worklist.append(new_item(node.transposesTo, gain, node, s))
             node.cumProb = 0.0
         else:
             # TR.16 - absorb the gain
+            remember(node)
+            before = node.cumProb
             node.cumProb += gain
+            applies += 1
+            step(state, "APPLY", item["id"], origin, [
+                ("node", node.history),
+                ("from", sender.history),
+                ("carrying", num(gain)),
+                ("cumProb", "%s + %s -> %s"
+                            % (num(before), num(gain), num(node.cumProb))),
+                ("queue", "%d waiting" % len(worklist)),
+            ], pending)
             # TR.33
             if node.cumProb > 100.0 + TOLERANCE:
+                reason = "cumProb above 100%% (%.6f%%)" % node.cumProb
+                step(state, "ERROR", item["id"], "", [
+                    ("node", node.history),
+                    ("reason", reason),
+                ])
                 hard_error("cumProb>100%% at %s (%.6f%%)" % (node.history, node.cumProb))
 
         # TR.31 - record the delivery
@@ -430,32 +561,91 @@ def cascade(from_node, to_node, event_no):
         # TR.17 - mark, count the touch, push the children
         applied.add((event_hash, node))
         touch_counts[node] = touch_counts.get(node, 0) + 1
-        for child in node.children:
-            worklist.append({"node": child,
-                             "gain": gain * child.moveProb / 100.0,
-                             "sender": node, "hash": event_hash})
+
+        if node.children:
+            for child in node.children:
+                child_gain = gain * child.moveProb / 100.0
+                child_item = new_item(child, child_gain, node, None)
+                enqueues += 1
+                s = step(state, "ENQUEUE", child_item["id"], "  (from #%d)" % item["id"], [
+                    ("child", child.history),
+                    ("moveProb", num(child.moveProb)),
+                    ("carrying", "%s x %s -> %s"
+                                 % (num(gain), num(child.moveProb), num(child_gain))),
+                    ("queue", "%d waiting" % (len(worklist) + 1)),
+                ])
+                child_item["queued_at"] = s
+                worklist.append(child_item)
+        elif node.transposesTo is None:
+            stops += 1
+            step(state, "STOP", item["id"], "", [
+                ("node", node.history),
+                ("reason", "no children - branch ends here"),
+            ])
 
         # TR.36
         if touch_counts[node] > TOUCH_CAP:
+            reason = "possible loop - touched %d times" % touch_counts[node]
+            step(state, "ERROR", item["id"], "", [
+                ("node", node.history),
+                ("reason", reason),
+            ])
             hard_error("possible loop: %s touched %d times"
                        % (node.history, touch_counts[node]))
 
     ending_after = ending_total()
 
+    # ---- the final list of updated nodes ----------------------------------
+    changes = []
+    for node, before in before_values.items():
+        delta = node.cumProb - before
+        if abs(delta) > 1e-12:
+            tag = "   (emptied, pointer)" if node.transposesTo is not None else ""
+            changes.append((delta, node.cumProb, node.history, tag))
+    changes.sort(key=lambda c: -abs(c[0]))
+
+    out(RULE_LIGHT)
+    out("UPDATED NODES  (%d)" % len(changes))
+    out("  %10s %10s   %s" % ("cumProb", "change", "path"))
+    for delta, after, hist, tag in changes:
+        out("  %9.3f%% %+9.3f%%   %s%s" % (after, delta, hist, tag))
+    out()
+
+    # ---- the closing counters ---------------------------------------------
+    out("CASCADE END  event=%s" % event_id)
+    out("  steps:       %3d     applies: %d   forwards: %d   enqueues: %d   stops: %d"
+        % (state["step"], applies, forwards, enqueues, stops))
+    out("  skipped:     %3d     (tiny %d, duplicate %d)"
+        % (tiny_counter + duplicates, tiny_counter, duplicates))
+    out("  revisits:    %3d     max touches on one node: %d"
+        % (repeat_touches, max(touch_counts.values()) if touch_counts else 0))
+    out("  endingTotal: %.4f%% -> %.4f%%   (change %+.4f%%)"
+        % (ending_before, ending_after, ending_after - ending_before))
+    out(RULE_HEAVY)
+    out()
+
     # TR.27
     if ending_after > ending_before + TOLERANCE:
+        step(state, "ERROR", None, "", [
+            ("reason", "ending total rose during this cascade: %.6f%% -> %.6f%%"
+                       % (ending_before, ending_after)),
+        ])
         hard_error("ending total rose during cascade %s: %.6f%% -> %.6f%%"
                    % (event_hash, ending_before, ending_after))
     # TR.30
     if ending_after > 100.0 + TOLERANCE:
+        step(state, "ERROR", None, "", [
+            ("reason", "ending total above 100%%: %.6f%%" % ending_after),
+        ])
         hard_error("ending total above 100%%: %.6f%%" % ending_after)
 
     # TR.19
     cascade_reports.append({
-        "event": event_hash, "from": from_node.history, "to": to_node.history,
+        "event": event_id, "from": from_node.history, "to": to_node.history,
         "gain": gain_for_to_node, "before": ending_before, "after": ending_after,
         "deliveries": deliveries, "tiny": tiny_counter, "duplicates": duplicates,
-        "repeat_touches": repeat_touches,
+        "repeat_touches": repeat_touches, "steps": state["step"],
+        "updated": len(changes),
         "max_touch": max(touch_counts.values()) if touch_counts else 0,
     })
 
@@ -555,14 +745,20 @@ for n in sorted(nodes, key=lambda x: x.order):
     print(line)
 
 print()
-print("Cascades")
+print(RULE_HEAVY)
+print("CASCADE LOG   %d transposition(s)" % len(cascade_reports))
+print(RULE_HEAVY)
+print()
+for l in cascade_log:
+    print(l)
+
+print("Cascade index")
+print("  %-6s %6s %8s %10s %6s %6s %6s   %s"
+      % ("event", "steps", "updated", "carried", "tiny", "dups", "revis", "from -> to"))
 for r in cascade_reports:
-    print("  %s" % r["event"])
-    print("     handed over: %.3f%%   deliveries: %d   tiny-drops: %d   "
-          "repeat touches: %d   duplicates: %d   max touches on one node: %d"
-          % (r["gain"], r["deliveries"], r["tiny"], r["repeat_touches"],
-             r["duplicates"], r["max_touch"]))
-    print("     ending total: %.4f%% -> %.4f%%" % (r["before"], r["after"]))
+    print("  %-6s %6d %8d %9.3f%% %6d %6d %6d   %s -> %s"
+          % (r["event"], r["steps"], r["updated"], r["gain"], r["tiny"],
+             r["duplicates"], r["repeat_touches"], r["from"], r["to"]))
 
 print()
 print("Summary")
@@ -582,7 +778,7 @@ print("  Duplicate deliveries (TR.35, dropped): %d" % sum(r["duplicates"] for r 
 
 if log_lines:
     print()
-    print("Log")
+    print("Warnings roll-up")
     for l in log_lines:
         print("  " + l)
 
