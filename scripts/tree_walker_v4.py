@@ -799,12 +799,14 @@ for l in cascade_log:
     print(l)
 
 print("Cascade index")
-print("  %-6s %6s %8s %10s %6s %6s %6s   %s"
-      % ("tr", "steps", "updated", "carried", "tiny", "dups", "revis", "from -> to"))
+print("  %-6s %6s %8s %10s %6s %6s %6s %6s   %s"
+      % ("tr", "steps", "updated", "carried",
+         "revis", "refis", "tiny", "dups", "from -> to"))
 for r in cascade_reports:
-    print("  %-6s %6d %8d %9.3f%% %6d %6d %6d   %s -> %s"
-          % (r["event"], r["steps"], r["updated"], r["gain"], r["tiny"],
-             r["duplicates"], r["repeat_touches"], r["from"], r["to"]))
+    print("  %-6s %6d %8d %9.3f%% %6d %6d %6d %6d   %s -> %s"
+          % (r["event"], r["steps"], r["updated"], r["gain"],
+             r["repeat_touches"], r["edge_repeats"], r["tiny"], r["duplicates"],
+             r["from"], r["to"]))
 
 print()
 print("Summary")
