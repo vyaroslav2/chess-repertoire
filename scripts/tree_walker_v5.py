@@ -310,10 +310,16 @@ MOCK_KEYS = {
 
 
 # Keys that would read as column headings in the spreadsheet are not allowed.
-BLOCKED_KEYS = {"fen", "pgn", "san", "uci", "row", "key"}
+# Keys that would read as column headings are not allowed. A key containing a
+# digit can never be a word, so this should never fire - it is kept as a cheap
+# assertion on whatever generated the keys.
+BLOCKED_KEYS = {"fen", "pgn", "san", "uci", "row", "key", "node", "step",
+                "tree", "end", "item", "from", "path", "nodes", "steps",
+                "queue", "index", "owner", "seed", "apply"}
 _bad = sorted(k for k in MOCK_KEYS.values() if k in BLOCKED_KEYS)
 if _bad:
     raise SystemExit("HARD ERROR: reserved position key(s) in MOCK_KEYS: %s" % ", ".join(_bad))
+KEY_W = max((len(k) for k in MOCK_KEYS.values()), default=5)
 
 import decimal
 
@@ -335,7 +341,7 @@ def warn(where, text):
 
 
 def ledger(event, step_no, action, item, source, node, before, amount,
-           factor, after, queue):
+           factor, after, queue, created=None):
     """Keep what a step did, in full precision.
 
     The printed log rounds to DECIMALS so it stays readable, and multiplying a
@@ -349,6 +355,9 @@ def ledger(event, step_no, action, item, source, node, before, amount,
         "fen": node.key if node is not None else "",
         "before": before, "amount": amount, "factor": factor, "after": after,
         "queue": queue,
+        # The item this step put on the worklist, where it makes one. Without
+        # it a forwarded item looks as though it appeared from nowhere.
+        "created": created,
     })
 
 _PCT_W = DECIMALS + 4       # percentage column width
@@ -537,10 +546,11 @@ def cascade(from_node, to_node, event_no):
     out(RULE_HEAVY)
     out("TRANSPOSITION %s" % event_id)
     out(RULE_LIGHT)
-    out("POINTER   %-34s fen=%-5s cumProb %s -> %s"
-        % (from_node.history, from_node.key, num(gain_for_to_node), num(0.0)))
-    out("OWNER     %-34s fen=%-5s cumProb %s"
-        % (to_node.history, to_node.key, num(to_node.cumProb)))
+    out("POINTER   %-34s fen=%-*s cumProb %s -> %s"
+        % (from_node.history, KEY_W, from_node.key,
+           num(gain_for_to_node), num(0.0)))
+    out("OWNER     %-34s fen=%-*s cumProb %s"
+        % (to_node.history, KEY_W, to_node.key, num(to_node.cumProb)))
     out("CASCADE   carrying=%s   endingTotal=%s"
         % (num(gain_for_to_node), num(ending_before)))
     out(RULE_LIGHT)
@@ -571,7 +581,8 @@ def cascade(from_node, to_node, event_no):
         ("queue", "%d waiting" % len(worklist)),
     ])
     ledger(event_id, seed_step, "SEED", worklist[0]["id"], from_node, to_node,
-           None, gain_for_to_node, None, None, len(worklist))
+           None, gain_for_to_node, None, None, len(worklist),
+           created=worklist[0]["id"])
 
     while worklist:                                    # TR.18 (loop back TR.20)
         item = worklist.pop(0)                         # TR.11
@@ -646,15 +657,19 @@ def cascade(from_node, to_node, event_no):
             # TR.15 - hand the gain straight on; this node stays empty
             remember(node)
             forwards += 1
+            forwarded = new_item(node.transposesTo, gain, node, state["step"] + 1)
             s = step(state, "FORWARD", item["id"], origin, [
                 ("node", "%s   [POINTER, %s]" % (node.history, node.pointerEvent)),
                 ("owner", node.transposesTo.history),
                 ("carrying", num(gain)),
+                ("queued", "#%d" % forwarded["id"]),
                 ("queue", "%d waiting" % (len(worklist) + 1)),
             ], pending)
-            worklist.append(new_item(node.transposesTo, gain, node, s))
+            forwarded["queued_at"] = s
+            worklist.append(forwarded)
             ledger(event_id, s, "FORWARD", item["id"], node,
-                   node.transposesTo, None, gain, None, None, len(worklist))
+                   node.transposesTo, None, gain, None, None, len(worklist),
+                   created=forwarded["id"])
             node.cumProb = 0.0
         else:
             # TR.16 - absorb the gain
@@ -706,7 +721,7 @@ def cascade(from_node, to_node, event_no):
                 child_item["queued_at"] = s
                 ledger(event_id, s, "ENQUEUE", child_item["id"], node, child,
                        gain, child_gain, child.moveProb, None,
-                       len(worklist) + 1)
+                       len(worklist) + 1, created=child_item["id"])
                 worklist.append(child_item)
             out()
         elif node.transposesTo is None:
@@ -921,8 +936,8 @@ row_of = {}
 for i, n in enumerate(sorted(nodes, key=lambda x: x.order), start=2):
     row_of[n] = i                       # row 2 = first node, matching the spreadsheet
 for n in sorted(nodes, key=lambda x: x.order):
-    line = ("%4d %-39s FEN=%-5s cumProb=%s routeProb=%s moveProb=%s"
-            % (row_of[n], n.history, n.key,
+    line = ("%4d %-39s FEN=%-*s cumProb=%s routeProb=%s moveProb=%s"
+            % (row_of[n], n.history, KEY_W, n.key,
                pct(n.cumProb), pct(n.routeProb), pct(n.moveProb)))
     if n.transposesTo is not None:
         line += "  [%s -> %s FEN=%s]" % (n.pointerEvent, n.transposesTo.history,

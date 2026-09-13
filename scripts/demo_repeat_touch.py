@@ -87,17 +87,56 @@ def load_real(nodes):
               % ", ".join(missing))
     return [(san, share.get(san, w)) for san, w in nodes], data
 
-def short_key(fen, used):
-    """A 3-letter tag for a real position, so the log lines stay v3-width.
-    Same position -> same tag, different position -> different tag."""
-    digest = hashlib.md5(fen.encode()).hexdigest()
-    for size in (3, 4, 5):
-        tag = "".join("abcdefghijklmnopqrstuvwxyz"[int(digest[i:i+2], 16) % 26]
-                      for i in range(0, size * 2, 2))
-        if used.get(tag, fen) == fen:
-            used[tag] = fen
-            return tag
-    raise SystemExit("could not make a unique key for " + fen)
+KEY_LENGTH = 5           # symbols in a position key, like a short git hash
+
+_KEY_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
+# A key must never be readable as something else in the log. Requiring both a
+# digit and a letter rules out every English word in one stroke, so no
+# blocked-word list is needed, and rules out a bare number too. The UCI test
+# matters more than it looks: "e2e4q" is a legal promotion string, and the
+# formatter would happily read such a key as a move.
+_UCI_LOOKALIKE = re.compile(r"^[a-h][1-8][a-h][1-8][qrbn]?$")
+
+
+def _key_candidate(fen, width, nonce):
+    digest = hashlib.md5(("%s|%d" % (fen, nonce)).encode()).hexdigest()
+    value, out = int(digest, 16), []
+    for _ in range(width):
+        value, remainder = divmod(value, 36)
+        out.append(_KEY_ALPHABET[remainder])
+    return "".join(out)
+
+
+def _key_is_usable(key):
+    return (any(c.isdigit() for c in key)
+            and any(c.isalpha() for c in key)
+            and not _UCI_LOOKALIKE.match(key))
+
+
+def build_keys(fens, width=None):
+    """A key per position, all the same width.
+
+    A taken key is simply passed over for the next candidate, so the limit is
+    how full the space is rather than the birthday square root: 50,000
+    positions in 48 million slots costs a few dozen retries, not a collision.
+    The candidates come from the position itself, so the first choice - and
+    the fallback order after it - are the same on every run."""
+    width = width or KEY_LENGTH
+    taken, keys, clashes = {}, {}, 0
+    for fen in dict.fromkeys(fens):
+        for nonce in range(10000):
+            key = _key_candidate(fen, width, nonce)
+            if not _key_is_usable(key):
+                continue            # unreadable shape, not a clash
+            if key not in taken:
+                break
+            clashes += 1
+        else:
+            raise SystemExit(
+                "no free position key of %d symbols; raise KEY_LENGTH" % width)
+        taken[key] = fen
+        keys[fen] = key
+    return keys, width, clashes
 
 def walk(san_path):
     """UCI path + the real position (placement, side, castling, legal ep)."""
@@ -121,12 +160,14 @@ else:
 print()
 
 raw_nodes, keys, tags, fen_of = [], {}, {}, {}
-for san, weight in NODES:
-    path, fen = walk(san)
-    tag = short_key(fen, tags)
+_walked = [(san, weight) + walk(san) for san, weight in NODES]
+_key_of_fen, KEY_WIDTH, _key_clashes = build_keys(
+    [fen for _s, _w, _p, fen in _walked])
+for san, weight, path, fen in _walked:
     raw_nodes.append((len(path.split()) // 2 + 1, path, weight))
-    keys[path] = tag
+    keys[path] = _key_of_fen[fen]
     fen_of[path] = fen
+    tags[_key_of_fen[fen]] = fen
 
 print("position keys")
 for tag in sorted(set(keys.values())):
@@ -185,21 +226,22 @@ print()
 _UCI_MOVE = r"[a-h][1-8][a-h][1-8][qrbn]?"
 _UCI_HISTORY = _UCI_MOVE + r"(?: +" + _UCI_MOVE + r")*"
 _NUM = r"[0-9.]+(?:[eE][-+]?[0-9]+)?"
+_KEY = r"[0-9a-z]+"          # a position key: alphanumeric, not letters only
 
 _UCI_HISTORY_RE = re.compile(
     r"(?<![A-Za-z0-9])" + _UCI_HISTORY
 )
 _NODE_TABLE_RE = re.compile(
     r"^\s*(\d+)\s+(" + _UCI_HISTORY + r")"
-    r"\s+FEN=([a-z]+)"
+    r"\s+FEN=(" + _KEY + r")"
     r"\s+cumProb=\s*(" + _NUM + r")%"
     r"\s+routeProb=\s*(" + _NUM + r")%"
     r"\s+moveProb=\s*(" + _NUM + r")%"
-    r"(?:\s+\[(TR\d+)\s+->\s+(" + _UCI_HISTORY + r")\s+FEN=([a-z]+)\])?"
+    r"(?:\s+\[(TR\d+)\s+->\s+(" + _UCI_HISTORY + r")\s+FEN=(" + _KEY + r")\])?"
     r"\s*$"
 )
 _POINTER_RE = re.compile(
-    r"\[(TR\d+)\s+->\s+(" + _UCI_HISTORY + r")\s+FEN=([a-z]+)\]"
+    r"\[(TR\d+)\s+->\s+(" + _UCI_HISTORY + r")\s+FEN=(" + _KEY + r")\]"
 )
 
 DISPLAY_ROW_BY_UCI = {}
@@ -316,10 +358,11 @@ _NODE_HEADER_PRINTED = False
 NODE_ROWS = []              # node, fen, move%, route%, note, uci, walker cum%
 _running_cum = {}           # uci -> cumProb as it stands right now
 
-_NODE_FMT = ("%4s  %-3s  " + "  ".join(["%{w}s"] * 3) + "  %-3s  %-8s %s"
-             ).replace("{w}", str(_W))
-_NODE_FMT_CHANGE = ("%4s  %-3s  " + "  ".join(["%{w}s"] * 3)
+_NODE_FMT = ("%4s  %-{k}s  " + "  ".join(["%{w}s"] * 3) + "  %-3s  %-8s %s"
+             ).replace("{k}", str(KEY_WIDTH)).replace("{w}", str(_W))
+_NODE_FMT_CHANGE = ("%4s  %-{k}s  " + "  ".join(["%{w}s"] * 3)
                     + "  %{w1}s  %-3s  %-8s %s"
+                    ).replace("{k}", str(KEY_WIDTH)
                     ).replace("{w1}", str(_W + 1)).replace("{w}", str(_W))
 
 
@@ -479,7 +522,7 @@ _TR_HEADER_RE = re.compile(r"^\s*TRANSPOSITION\s+(TR\d+)\s*$")
 _TR_RULE_RE = re.compile(r"^\s*[-=]{5,}\s*$")
 _TR_ROW_RE = re.compile(
     r"^\s*(POINTER|OWNER)\s+(" + _UCI_HISTORY + r")"
-    r"\s+fen\s*=?\s*([a-z]+)"
+    r"\s+fen\s*=?\s*(" + _KEY + r")"
     r"\s+cumProb\s*=?\s*(" + _NUM + r")\s*%"
     r"(?:\s*->\s*(" + _NUM + r")\s*%)?"
     r"\s*$"
@@ -514,7 +557,7 @@ _SUM_RE = re.compile(r"(" + _NUM + r")\s*%\s*\+\s*(" + _NUM + r")\s*%\s*->\s*(" 
 # apply. On an enqueue the first figure is the amount being split, not a
 # cumulative probability, and a seed has no before and no after at all.
 _ARITH_W = _W * 3 + 8
-_ROW_FMT = ("%-9s %-9s %-4s %4s %-2s %-4s  %-{a}s  %5s  %-3s %s"
+_ROW_FMT = ("%-9s %-9s %-6s %4s %-2s %-4s  %-{a}s  %5s  %-3s %s"
             ).replace("{a}", str(_ARITH_W))
 
 
@@ -751,6 +794,7 @@ def _render_step(step, step_id):
     source, target = fields.get("from", ""), fields.get("node", "")
     before = added = after = None
     operator = "+"
+    item_label = "#" + step["item"] if step["item"] else "--"
     m = _SUM_RE.search(fields.get("cumProb", ""))
     if m:
         before, added, after = m.groups()
@@ -793,6 +837,10 @@ def _render_step(step, step_id):
         added = re.sub(r"[^0-9.eE+-]", "", fields.get("carrying", "")) or None
 
     if step["kind"] == "FORWARD":
+        # A forward consumes one item and puts another on the queue, so the
+        # row names both: the one spent and the one created.
+        item_label = "#%s>%s" % (step["item"],
+                                 fields.get("queued", "?").lstrip("#"))
         # A forward does no arithmetic: the pointer is already empty, so it
         # only routes the amount on to its owner. The sum shows up later, in
         # the step that spends the queued item.
@@ -818,8 +866,7 @@ def _render_step(step, step_id):
     # Same reasoning for a seed - it queues an item, it does not deliver one.
     flag = "" if step["kind"] == "SEED" else ends.get(_split_uci(target)[0], "")
     out = [_row(
-        step_id, step["kind"],
-        "#" + step["item"] if step["item"] else "--",
+        step_id, step["kind"], item_label,
         _node_no(source) if source else "", "->" if source else "",
         _node_no(target) if target else "",
         _sum_text(_pct(before) if before else "", operator,
@@ -1059,12 +1106,13 @@ def write_exact_csv():
     steps_path = os.path.join(here, "cascade_steps_exact.csv")
     with open(steps_path, "w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["event", "step", "action", "item", "fromNode",
-                         "node", "fen", "before", "amount", "factor",
-                         "after", "queue", "fromPath", "path"])
+        writer.writerow(["event", "step", "action", "item", "createdItem",
+                         "fromNode", "node", "fen", "before", "amount",
+                         "factor", "after", "queue", "fromPath", "path"])
         for r in g["LEDGER"]:
             writer.writerow([
                 r["event"], r["step"], r["action"], r["item"],
+                r.get("created") if r.get("created") is not None else "",
                 DISPLAY_ROW_BY_UCI.get(r["from"], ""),
                 DISPLAY_ROW_BY_UCI.get(r["node"], ""), r["fen"],
                 exact(r["before"]), exact(r["amount"]), exact(r["factor"]),
