@@ -435,10 +435,12 @@ export async function generateRepertoire(
 
   await attemptCanonicalNodeWikibooks(rootNode.id, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
   
-  while (queue.length > 0) {
+  while (true) {
+    // S0.04/S3.01: the stop flag is read here only, before the empty-queue check.
     if (dependencies.shouldStop?.()) {
       throw new UserRequestedStopError("Generation was stopped at the user's request between positions");
     }
+    if (queue.length === 0) break;
     const nextNode = queue[0];
     console.log(`\n--- Queue Before Dequeue: ${queue.length} | Move: ${nextNode.currentMoveNumber} ---`);
     console.log(`[QUEUE] Before dequeue: ${queue.length}`);

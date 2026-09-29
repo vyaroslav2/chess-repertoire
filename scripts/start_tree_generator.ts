@@ -65,7 +65,7 @@ function pruneTreeGeneratorLogs(logPath: string): void {
 
 type LauncherDependencies = {
   logPath?: string;
-  generate?: () => Promise<void>;
+  generate?: (shouldStop: () => boolean) => Promise<void>;
   disconnect?: () => Promise<void>;
   acquire?: () => LockHandle;
   now?: () => Date;
@@ -99,8 +99,7 @@ export async function runTreeGenerator(
   };
   const generate =
     dependencies.generate ??
-    (() =>
-      generateRepertoire(START_FEN, 5, { shouldStop: () => stopRequested }));
+    ((shouldStop) => generateRepertoire(START_FEN, 5, { shouldStop }));
   const disconnect = dependencies.disconnect ?? (() => prisma.$disconnect());
   const takeLock = dependencies.acquire ?? (() => acquireLock("treegen"));
 
@@ -135,7 +134,7 @@ export async function runTreeGenerator(
       fs.appendFileSync(logPath, `[ERROR] ${format(...args)}\n`);
     };
 
-    await generate();
+    await generate(() => stopRequested);
   } catch (error) {
     runError = error;
   } finally {

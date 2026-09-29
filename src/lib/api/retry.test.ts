@@ -3,7 +3,8 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import { defaultConfig } from '../core/config';
-import { fetchWithRetry, LichessRateLimitError, UserRequestedStopError } from './retry';
+import { EventEmitter } from 'node:events';
+import { fetchWithRetry, forwardCtrlCToRun, LichessRateLimitError, UserRequestedStopError } from './retry';
 
 test('Explorer request spacing belongs to the shared request layer', async (t) => {
   const originalFetch = global.fetch;
@@ -181,4 +182,19 @@ test('request authentication and HTTP retry policy', async (t) => {
     if (originalToken === undefined) delete process.env.LICHESS_API_TOKEN;
     else process.env.LICHESS_API_TOKEN = originalToken;
   }
+});
+
+test('S0.02: Ctrl+C at a prompt reaches the run SIGINT listener', () => {
+  const prompt = new EventEmitter();
+  let heard = 0;
+  const listener = () => { heard++; };
+  process.on('SIGINT', listener);
+  try {
+    forwardCtrlCToRun(prompt);
+    prompt.emit('SIGINT');
+    prompt.emit('SIGINT');
+  } finally {
+    process.off('SIGINT', listener);
+  }
+  assert.strictEqual(heard, 2);
 });

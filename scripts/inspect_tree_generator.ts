@@ -573,7 +573,8 @@ async function main(): Promise<void> {
   let stopRequested = false;
   const requestStop = () => {
     stopRequested = true;
-    write("Stop requested; diagnostic generation will stop after the current position.");
+    // S0.03: raw console only, never the run log.
+    originalLog("Stop requested; generation will stop after the current position.");
   };
   let failure: unknown = null;
 
@@ -600,7 +601,8 @@ async function main(): Promise<void> {
     try { await prisma.$disconnect(); } catch (error) { if (!failure) failure = error; }
     try { lock?.release(); } catch (error) { if (!failure) failure = error; }
     const finished = new Date();
-    fs.appendFileSync(logPath, `\n${failure ? "[FAILED/STOPPED]" : "[FINISHED]"} ${failure instanceof Error ? failure.message : failure ?? "Detailed generation completed"}\nFinished: ${finished.toISOString()}\nElapsed: ${finished.getTime() - startedAt.getTime()}ms\n\`\`\`\n`);
+    const closingTag = failure instanceof UserRequestedStopError ? "[STOPPED]" : failure ? "[FAILED]" : "[FINISHED]";
+    fs.appendFileSync(logPath, `\n${closingTag} ${failure instanceof Error ? failure.message : failure ?? "Detailed generation completed"}\nFinished: ${finished.toISOString()}\nElapsed: ${finished.getTime() - startedAt.getTime()}ms\n\`\`\`\n`);
     restoreConsole();
   }
 

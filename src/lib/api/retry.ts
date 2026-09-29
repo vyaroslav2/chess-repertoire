@@ -65,8 +65,14 @@ function imposeLichessCooldown(delayMs: number): void {
   nextLichessRequestAt = Math.max(nextLichessRequestAt, Date.now() + delayMs);
 }
 
+/** S0.02: readline swallows Ctrl+C; hand it to the run's SIGINT listener. */
+export function forwardCtrlCToRun(rl: { on(event: 'SIGINT', listener: () => void): unknown }): void {
+  rl.on('SIGINT', () => process.emit('SIGINT', 'SIGINT'));
+}
+
 export async function promptUser(query: string): Promise<string> {
   const rl = readline.createInterface({ input: processStdin, output: processStdout });
+  forwardCtrlCToRun(rl);
   const answer = await rl.question(query);
   rl.close();
   return answer;

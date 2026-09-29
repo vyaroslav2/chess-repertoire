@@ -1,5 +1,6 @@
 import { Engine } from 'node-uci';
 import { Chess } from 'chess.js';
+import { spawn } from 'child_process';
 import * as path from 'path';
 
 import { defaultConfig, computeLocalEngineEvaluationProfile, type Config } from './config';
@@ -23,6 +24,21 @@ type StockfishEngine = {
 };
 
 export type LocalEngineFactory = (enginePath: string) => StockfishEngine;
+
+/**
+ * S0.04: Ctrl+C must not interrupt the current position. node-uci starts
+ * Stockfish on our console, so Ctrl+C would kill it mid-search. Start it
+ * detached instead; it still quits on `quit` or when its stdin closes.
+ */
+export class ConsoleDetachedEngine extends Engine {
+  async init(): Promise<void> {
+    if (this.proc) throw new Error('cannot call "init()": already initialized');
+    this.proc = spawn(this.filePath, [], { detached: true, windowsHide: true });
+    this.proc.stdout.setEncoding('utf8');
+    this.write('uci');
+    await this.getBufferUntil(line => line === 'uciok');
+  }
+}
 
 export type TrustedLocalEvaluation = LocalEngineEvaluation & {
   san: string;
@@ -150,7 +166,7 @@ export async function runTrustedLocalSearch(
   fullFenInput: string,
   settings: LocalSearchSettings,
   expectedUci?: string,
-  engineFactory: LocalEngineFactory = enginePath => new Engine(enginePath) as StockfishEngine
+  engineFactory: LocalEngineFactory = enginePath => new ConsoleDetachedEngine(enginePath) as StockfishEngine
 ): Promise<TrustedLocalEvaluation> {
   const fullFen = parseFullFen(fullFenInput);
   if (fullFen !== fullFenInput) throw new Error('Local Engine search requires canonical FullFen');

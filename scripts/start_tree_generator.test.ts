@@ -140,6 +140,35 @@ test("user-requested stop is logged as stopped, disconnects, and does not strand
   fs.unlinkSync(logPath);
 });
 
+test("S0.03 S0.07: each Ctrl+C sets the flag and prints to the raw console, never the run log", async () => {
+  const logPath = tempLog("sigint");
+  const printed: string[] = [];
+  const listenersBefore = process.listenerCount("SIGINT");
+  const consoleLog = console.log;
+  console.log = (...args: unknown[]) => { printed.push(args.join(" ")); };
+  const message = "Stop requested; generation will stop after the current position.";
+  try {
+    await runTreeGenerator({
+      logPath,
+      acquire: mockLock,
+      generate: async (shouldStop) => {
+        assert.equal(shouldStop(), false);
+        process.emit("SIGINT", "SIGINT");
+        assert.equal(shouldStop(), true);
+        process.emit("SIGINT", "SIGINT");
+        assert.equal(shouldStop(), true);
+      },
+      disconnect: async () => undefined
+    });
+  } finally {
+    console.log = consoleLog;
+  }
+  assert.deepStrictEqual(printed.filter(line => line === message), [message, message]);
+  assert.doesNotMatch(fs.readFileSync(logPath, "utf8"), /Stop requested/);
+  assert.equal(process.listenerCount("SIGINT"), listenersBefore);
+  fs.unlinkSync(logPath);
+});
+
 test("successful cleanup finalises the log, disconnects, then releases the lock", async () => {
   const logPath = tempLog("success");
   const events: string[] = [];

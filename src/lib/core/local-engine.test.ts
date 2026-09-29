@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PrismaClient } from '@prisma/client';
+import * as path from 'path';
 
 import { defaultConfig, computeLocalEngineEvaluationProfile, type Config } from './config';
 import {
+  ConsoleDetachedEngine,
   collectLocalSearchUpdates,
   getOrCreateLocalBaseline,
   getOrCreateLocalCandidate,
@@ -317,4 +319,15 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
   });
 
   await prisma.$disconnect();
+});
+
+test('S0.04: Stockfish started off the console still searches and quits', async () => {
+  const engine = new ConsoleDetachedEngine(path.resolve(process.cwd(), 'bin', 'stockfish.exe'));
+  await engine.init();
+  await engine.position(blackFen);
+  const result = await engine.go({ depth: 1 });
+  assert.ok(Array.isArray(result.info) && result.info.length > 0);
+  const proc = engine.proc!;
+  await engine.quit();
+  assert.notEqual(proc.exitCode, null);
 });
