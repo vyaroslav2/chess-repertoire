@@ -1,59 +1,50 @@
 ---
 tags:
-  - in-progress
+  - reviewed
 ---
 # EX — Explorer Data Fetching & Caching
 
 EX retrieves candidate move statistics for a given position, from local storage or the remote Lichess Explorer API.
 
-==EX is called, not entered. [[HM|HM.02]] calls it for White's moves. Whatever EX returns goes back to its caller, which then carries on.==[^1]
 
-EX.01 **Check Local Database Cache**: Look up the target `positionKey` (`normalisedFen`) + [[cache-profile|cache profile]] in the `PositionCache` table (for matching `explorerSpeeds`[^2] and `explorerRatings`[^2]).[^3]
-* **State A: Cached with moves**: Return move statistics `-->` ==back to the caller ([[HM|HM.02]]).==
-* **State B: Cached as empty**: Position was previously queried and confirmed to have 0 matching games on Lichess `-->` return empty set `-->` end the route, log the stop reason `"No opponent moves found."` `-->` proceed to [[S3|S3.01]].
-* **State C: Never fetched**: No record exists for this configuration `-->` proceed to **EX.02**.
+| Dataset | Endpoint   | Filters                                           |
+| ------- | ---------- | ------------------------------------------------- |
+| Masters | `/masters` | none                                              |
+| Elite   | `/lichess` | `explorerEliteSpeeds`, `explorerEliteRatings`[^1] |
+| Amateur | `/lichess` | `explorerSpeeds`, `explorerRatings`[^1]           |
 
-EX.02 **API Request Concurrency**: Ensure only one HTTP request to the Lichess Explorer API is in-flight at any time across the generator.[^4]
+Two callers:
+  - [[HM|HM.02]], for White's moves: Amateur gives the candidates. 
+  - [[EW|EW.02]], for Black's candidates: Masters and Elite.
 
-EX.03 **Execute API Request**: Send `GET` request to Lichess Explorer endpoint using the target position's full FEN along with configured `explorerSpeeds` and `explorerRatings`. We ask with `fullFen` but cache the answer against `positionKey`. That is deliberate, and it is the opposite of engine evaluations, which are cached against `fullFen` ([[DB|DB.32]]).
+Whatever EX returns goes back to its caller, which then carries on.
+
+EX.01 **Check Local Database Cache**: For each requested dataset, look up the target `positionKey` (`normalisedFen`) + that dataset's [[cache-profile|cache profile]]. Each dataset is checked on its own. One can be cached while another is not.
+* **State A: Cached with moves**: Use the cached move statistics for that dataset.
+* **State B: Cached as empty**: Position was previously queried and confirmed to have 0 matching games in that dataset `-->` use an empty set for that dataset. Do not fetch again.
+* **State C: Never fetched**: No record exists for this dataset and profile `-->` proceed to **EX.02** for that dataset only.
+
+EX.02 **Lichess API Request Concurrency**: Ensure only one HTTP request to Lichess is in-flight at any time across the generator. The Explorer API and the Cloud Eval API ([[EW|EW.07]]) share one lane — one request in total, not one each. Other APIs have their own lanes ([[AR|AR.01]]).
+
+EX.03 **Execute API Request**: For each dataset still missing, send a `GET` request to that dataset's endpoint with its filters (see the table above). Requests go one at a time (EX.02). We ask with `fullFen` but cache the answer against `positionKey`. That is deliberate, and it is the opposite of engine evaluations, which are cached against `fullFen` ([[DB|DB.32]]).
 
 EX.04 **Handle Rate Limits & Errors**:
-* **HTTP 429 (Rate-Limited)**: Pause all Explorer requests for `lichessRateLimitRetryDelayMs`[^2], then retry up to `lichessMaxRetries`[^2] times.
-* **Second Failure / HTTP Error**: If the retry fails or any non-retryable HTTP error occurs, exit[^5]: the error unwinds and the run closes as `[FAILED]`, with the usual cleanup ([[S0|S0.05]], [[S0|S0.06]]).[^6]
+Hand off to [[AR]].
 
 EX.05 **Store & Return Result**:
-* Write the response (or explicit 0-game empty status) into the local `PositionCache` table.[^7]
-* `eco` and opening names arrive with the Explorer response. Not a separate pipeline.[^8]
+* Write the response (or explicit 0-game empty status) into the local `PositionCache` table.
+* Every Explorer response carries `eco` and an `openingName` for the position. They are cached with it ([[DB|DB.31]]). Which name a node gets is [[DB|DB.06]]. Not a separate pipeline.
 * #note Wikibooks logic is preserved but the documentation for it is deferred. #deferred
-* ==If the fetch White move data ran and the row still is not there afterwards is treated as a critical error and triggers an immediate clean hard-stop.==[^9]
-* If returned move counts do not account for the position's total games `-->` log `"[WARNING] Explorer move counts do not add up to the position's total games. Missing: [n] games ([p]%)."` Treat the missing games count as `rareDropped`.[^10]
+* If the fetch ran and the `PositionCache` row is still missing afterwards, that is a critical error `-->` exit, with the usual cleanup.
+* Add up the games of all returned moves and compare with `positionTotalGames`:
+	* Equal `-->` carry on.
+	* Less `-->` log `"[WARNING] Explorer move counts do not add up to the position's total games. Missing: [n] games ([p]%)."`. The missing share goes to `unaccountedDropped`. Only the Amateur shortfall is recorded as `unaccountedDropped`. For Masters and Elite, log the warning only.
+	* More `-->` hard error `-->` exit.
 
-EX.06 White moves found?
-* yes `-->` return the fetched move data to the caller ([[HM|HM.02]]).
-* no `-->` treat it exactly as EX.01 State B: end the route, log the stop reason `"No opponent moves found."`, proceed to [[S3|S3.01]].
+EX.06 **Return to caller**: Return the move data for each requested dataset, empty or not, to the caller. The caller decides what an empty result means:
+* [[HM|HM.02]]: no Amateur moves `-->` end the route, log the stop reason `"No opponent moves found."`, proceed to [[S3|S3.01]].
+* [[EW|EW.02]]: handled there.
 
-[^1]: EX had no statement of who calls it or what it hands back, which is what produced the wrong return targets below. #question
-
-[^2]: see [[generation-config]]
-
-[^3]: #question EX only ever describes the amateur profile (`explorerSpeeds`, `explorerRatings`). But [[EW|EW.02]] fetches Black's candidates from the same Explorer with Masters and Elite filters (`explorerEliteSpeeds`, `explorerEliteRatings`), and [[DB|DB.31]] says one row per dataset — Masters, Elite, Amateur. So either EX covers all three and should say so, or EW does its own fetching and EX's title is too broad. Right now the Masters and Elite fetch is documented nowhere. #question
-
-[^4]: #question Does this cover the Lichess Cloud Eval API too ([[EW|EW.07]])? Same host, and presumably the same rate limit. As written, "the Lichess Explorer API" reads as Explorer only, which would let the two APIs collide.
-
-[^5]: #note Exit, not stop, in the sense [[LF]] defines: cleanup happens first, then the run halts.
-
-[^6]: The `[FAILED]` tag is not written here. [[S0|S0.05]] writes it, from the type of error that reaches the outermost catch. This block only has to throw. #question 
-
-[^7]: Answers "what exactly do we write". Neither, as a category. We write the Explorer's answer for that position under that [[cache-profile|cache profile]], and the answer is a list of moves for whoever is to move. Side is a property of the position, not of the cache row. The row is keyed on `positionKey` + cache profile and nothing else. #question 
-
-[^8]: #bug What is the bug here? Best guess: [[DB|DB.33]] stores opening metadata *per route*, but Explorer returns it *per position*. Those are different keys. Two routes reaching the same position get the same name from Explorer but need two stored rows, and [[DB|DB.06]]'s `VALID_ABSENCE` is inherited along a route, which a per-position store cannot express. Worth confirming that this is what the tag meant. #question
-
-[^9]: Check grammar.
-
-[^10]: #question Folding this into `rareDropped` makes the end-of-run sum ([[S3|S3.11]]) add up, but it hides the cause. [[rare-dropped]] means probability lost to the popularity filter — a decision we made. This is probability Lichess did not account for — something that happened to us. Same bucket, two very different meanings, and no way to tell them apart afterwards. A separate `unaccountedDropped`, summed into the same total, would balance and still be readable.
-
-
-
-
+[^1]: see [[generation-config]]
 
 

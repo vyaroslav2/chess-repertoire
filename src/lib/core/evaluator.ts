@@ -1,6 +1,6 @@
 import { Chess } from "chess.js";
 import { readRemoteEngineResult, saveRemoteEngineResult, type RemoteEngineEvaluation } from "../db/operations";
-import { fetchWithRetry, delay, GlobalState } from "../api/retry";
+import { fetchWithRetry, delay, GlobalState, LichessRateLimitError } from "../api/retry";
 import {
   getCpTolerance,
   verifyOrdinaryCpSnapshot,
@@ -136,7 +136,7 @@ export async function evaluateBlackMove(
   let lichessResult = await readRemoteEngineResult(fullFen, "LICHESS", lichessProfile);
   let lichessUnavailable = false;
 
-  if (lichessResult.status === "missing") {
+  if (lichessResult.status === "missing" && !GlobalState.lichessCloudEvalDisabled) {
     // Ordinary flow without GlobalState.lichessCloudEvals bypass
     try {
       const cloudUrl = `https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(fullFen)}&multiPv=${defaultConfig.api.lichessCloudEval.multiPv}`;
@@ -158,9 +158,15 @@ export async function evaluateBlackMove(
       }
     } catch (e: any) {
       if (e instanceof Error && (e.message.startsWith("Malformed successful") || e.message.startsWith("Invalid remote engine result"))) throw e;
+      if (e instanceof LichessRateLimitError) {
+        GlobalState.lichessCloudEvalDisabled = true;
+        console.warn("[WARNING] Lichess Cloud Eval remains rate-limited after the required cooldown. Disabling it for the rest of this run; using fallback sources instead.");
+      }
       console.log("Error fetching Lichess engine eval:", e.message);
       lichessUnavailable = true;
     }
+  } else if (lichessResult.status === "missing") {
+    lichessUnavailable = true;
   }
 
   let lichessMateContext: LichessMateContext = { kind: "NO_MATE" };

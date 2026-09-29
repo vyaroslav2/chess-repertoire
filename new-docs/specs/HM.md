@@ -1,6 +1,6 @@
 ---
 tags:
-  - in-progress
+  - reviewed
 ---
 # HM — Human Moves
 
@@ -16,33 +16,25 @@ HM.03 Calculate move probabilities ([[move-probability|moveProb]]) for each move
 
 HM.04 Filter candidate moves by popularity:
 * Keep White moves that meet the `popularityThresholds`[^1] percentage for their move-number band.
-* Drop the rest — each dropped move still gets a node, whose `cumProb` is held at 0 and whose arriving probability accumulates in `rareDropped` instead ([[RE.excalidraw|HM.23]]).[^2]
-* This "rare" is not the `rare` of `probabilityBands`.[^3]
+* Drop the rest — each dropped move still gets a node, whose `cumProb` is held at 0 and whose arriving probability accumulates in `rareDropped` instead ([[HM.excalidraw|HM.23]]).
+* Log how many moves were dropped at this position: `rareDroppedMoves`, counted from the nodes with `stopReason = Too rare`.
 
-HM.05 Assign an explicit `siblingIndex` (1, 2, 3...) to child nodes based on descending popularity, ensuring UI decks can sort cards reliably regardless of queue traversal order. UI cards are ordered from most popular White moves to least popular.[^4] Ties are resolved alphabetically by SAN.
-#question `siblingIndex` is a stored display order, not the order moves are walked or pushed — see [[S3|S3.09]], which needs the reverse.
+HM.05 Assign an explicit `siblingIndex` (1, 2, 3...) to child nodes based on descending popularity, ensuring UI decks can sort cards reliably regardless of queue traversal order. UI cards are ordered from most popular White moves to least popular.[^2] Ties are resolved alphabetically by SAN.
+
 
 HM.06 For each kept move, generate a new child node:
-* assign a position key (`normalisedFen`).
+* Handle the least popular move first, so it is pushed first and taken last ([[S3|S3.09]]).
+* assign a position key (`normalisedFen`). 
 * Compute its route probability: `routeProb = parent.routeProb * moveProb`.
-* **Transposition Check**: Is this `normalisedFen` already in the `Position` table?[^5]
 * yes `-->` see transposition logic at diagrams/[[TR.excalidraw]].
-* no `-->` set `transposesTo = null` (canonical).
+* no `-->` set `transposesTo = null` (owner).
 * Only a move that survives every check in HM.07 reaches [[EW]].
 
-HM.07 Each kept move is then checked one at a time. The order is fixed and all of it is in [[RE.excalidraw|RE]]: too rare (HM.21), record the move and create the node (HM.25), game over (HM.26), repetition (HM.30), transposition (HM.34), then ordinary expansion (HM.36). Only after all four checks pass does the position go to [[EW]] for Black's reply.
+HM.07 Each kept move is then checked one at a time. The order is fixed and all of it is in [[RE.excalidraw|RE]]: record the move and create the node (HM.25), too rare (HM.21), game over (HM.26), repetition (HM.30), transposition (HM.34), then ordinary expansion (HM.36). Only after all four checks pass does the position go to [[EW]] for Black's reply.
 
-HM.08 #question What if no move survives HM.04? The position has no children and nothing was found wrong with it — it simply has no popular continuation. This is not written anywhere. [[EX|EX.06]] covers "Explorer returned no moves"; it does not cover "Explorer returned moves and we filtered all of them away".[^6]
+HM.08 If Explorer returned moves but all of them were filtered away `-->` end the route, log the stop reason `"[WARNING] All opponent moves were filtered away."`, and go to [[S3|S3.01]].
 
 [^1]: see [[generation-config]] and [[popularity-thresholds|popularityThresholds]]
 
-[^2]: "Leak node" has no glossary note at all. #question
+[^2]: #note A limitation I found. A transposition can raise a route's depth budget, which would reopen a route that has already stopped. Its new cards would then appear out of order. That is out of scope for these docs. For now, cards should still follow the popularity order (most popular White move first) as closely as possible. Later I will need a separate sort for the UI cards, so that they appear in order. #roadmap
 
-[^3]: #question Two different filters, both called rare, both in [[generation-config]]. `popularityThresholds` tests one move's `moveProb` against 5/10/15% and decides whether to keep the move at all. `probabilityBands` tests a position's `cumProb` against 2%/0.5% and decides how deep to search it. A move can be popular and land in the `rare` band, or unpopular in a `common` one. Worth renaming one of them.
-
-[^4]: #note ==A limitation revealed. Transpositions could result in increasing depth budget limit and cause expansion of previously stopped routes. That could result in skewed order. But this is out of the scope of these docs. So we still want cards to go as much in order (popular White moves first) as possible. I'll have to invent sorting later (out of the scope for now) for the actual UI cards so they appear consecutively.==
-
-
-[^5]: #question The same question is asked in three places: here, [[RE.excalidraw|HM.34]], and [[TR.excalidraw|TR.03]]. One of them should own it and the other two should point at it.
-
-[^6]: #question Likely it should end the route with its own stop reason, the way [[EX|EX.06]] does. Note the probability is already accounted for either way, since every dropped move becomes a leak node holding its own `rareDropped`. So this is about the log and about [[S3|S3.14]] wanting a `stopReason` on every ending, not about the arithmetic.

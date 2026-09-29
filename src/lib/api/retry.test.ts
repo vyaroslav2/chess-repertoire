@@ -3,13 +3,13 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import { defaultConfig } from '../core/config';
-import { fetchWithRetry, UserRequestedStopError } from './retry';
+import { fetchWithRetry, LichessRateLimitError, UserRequestedStopError } from './retry';
 
 test('Explorer request spacing belongs to the shared request layer', async (t) => {
   const originalFetch = global.fetch;
   const originalSpacing = defaultConfig.api.betweenRequestDelayMs;
   const originalNetworkRetryDelay = defaultConfig.api.networkRetryDelayMs;
-  const originalRateLimitRetryDelay = defaultConfig.api.rateLimitRetryDelayMs;
+  const originalRateLimitRetryDelay = defaultConfig.api.rateLimitRetryInitialDelayMs;
 
   try {
     await t.test('fetchAllDatabases has no high-level spacing dependency', () => {
@@ -54,7 +54,7 @@ test('Explorer request spacing belongs to the shared request layer', async (t) =
     await t.test('a 429 imposes one shared cooldown before retrying', async () => {
       const cooldownMs = 40;
       defaultConfig.api.betweenRequestDelayMs = 0;
-      defaultConfig.api.rateLimitRetryDelayMs = cooldownMs;
+      defaultConfig.api.rateLimitRetryInitialDelayMs = cooldownMs;
       const requestTimes: number[] = [];
       global.fetch = async () => {
         requestTimes.push(Date.now());
@@ -72,7 +72,7 @@ test('Explorer request spacing belongs to the shared request layer', async (t) =
     global.fetch = originalFetch;
     defaultConfig.api.betweenRequestDelayMs = originalSpacing;
     defaultConfig.api.networkRetryDelayMs = originalNetworkRetryDelay;
-    defaultConfig.api.rateLimitRetryDelayMs = originalRateLimitRetryDelay;
+    defaultConfig.api.rateLimitRetryInitialDelayMs = originalRateLimitRetryDelay;
   }
 });
 
@@ -81,12 +81,12 @@ test('request authentication and HTTP retry policy', async (t) => {
   const originalToken = process.env.LICHESS_API_TOKEN;
   const originalNetworkRetryDelay = defaultConfig.api.networkRetryDelayMs;
   const originalSpacing = defaultConfig.api.betweenRequestDelayMs;
-  const originalRateLimitRetryDelay = defaultConfig.api.rateLimitRetryDelayMs;
+  const originalRateLimitRetryDelay = defaultConfig.api.rateLimitRetryInitialDelayMs;
   try {
     process.env.LICHESS_API_TOKEN = 'secret-token';
     defaultConfig.api.networkRetryDelayMs = 0;
     defaultConfig.api.betweenRequestDelayMs = 0;
-    defaultConfig.api.rateLimitRetryDelayMs = 0;
+    defaultConfig.api.rateLimitRetryInitialDelayMs = 0;
 
     await t.test('Explorer never sends Authorization while token-enabled eval still does', async () => {
       const headers: HeadersInit[] = [];
@@ -120,6 +120,19 @@ test('request authentication and HTTP retry policy', async (t) => {
       };
       assert.equal(await fetchWithRetry('https://lichess.org/api/missing', 3, true, 'eval'), null);
       assert.equal(attempts, 1);
+    });
+
+    await t.test('Cloud Eval gets one cooldown retry then returns control to its fallback', async () => {
+      let attempts = 0;
+      global.fetch = async () => {
+        attempts++;
+        return new Response('limited', { status: 429 });
+      };
+      await assert.rejects(
+        fetchWithRetry('https://lichess.org/api/cloud-eval', 10, false, 'eval'),
+        error => error instanceof LichessRateLimitError
+      );
+      assert.equal(attempts, 2);
     });
 
     await t.test('required Explorer prompt offers retry/stop and stop throws a distinct error', async () => {
@@ -164,7 +177,7 @@ test('request authentication and HTTP retry policy', async (t) => {
     global.fetch = originalFetch;
     defaultConfig.api.networkRetryDelayMs = originalNetworkRetryDelay;
     defaultConfig.api.betweenRequestDelayMs = originalSpacing;
-    defaultConfig.api.rateLimitRetryDelayMs = originalRateLimitRetryDelay;
+    defaultConfig.api.rateLimitRetryInitialDelayMs = originalRateLimitRetryDelay;
     if (originalToken === undefined) delete process.env.LICHESS_API_TOKEN;
     else process.env.LICHESS_API_TOKEN = originalToken;
   }

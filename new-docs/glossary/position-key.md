@@ -1,8 +1,10 @@
 ---
 tags:
   - glossary
-  - in-progress
+  - reviewed
+aliases:
+  - positionKey
 ---
 positionKey = normalisedFen used as a key for a board identity. 
 
-We're ignoring the threefold and fifty-move rules by design. `positionKey` drops the clocks, so the same position gets the same answer whether it's its first or third occurrence.
+It drops the move clocks, so the same board with the same side to move is the same key, however it was reached. See [[repetition]] for why the threefold and fifty-move rules are ignored.

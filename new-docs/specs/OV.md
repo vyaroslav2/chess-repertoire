@@ -1,6 +1,5 @@
 ---
 tags:
-  - in-progress
   - reviewed
 ---
 # OV — Overview
@@ -23,23 +22,24 @@ OV.04 A run is a rebuild, not an update. The tree is wiped at the start ([[S2|S2
 
 OV.05 
 
-| Note                  | Covers                                                              |
-| --------------------- | ------------------------------------------------------------------- |
-| [[S0]]                | Stop-request handling (Ctrl+C)                                      |
-| [[S1]]                | Start run, lock check, log routing                                  |
-| [[LF]]                | Lockfile handling                                                   |
-| [[S2]]                | User, repertoire, wipe, seed the queue                              |
-| [[S3]]                | The main queue loop                                                 |
-| [[EX]]                | Explorer data: fetching and caching                                 |
-| [[HM]]                | White candidate moves and how they are filtered                     |
-| [[TR.excalidraw\|TR]] | Transpositions and the probability cascade                          |
-| [[EW]]                | The engine waterfall and Black's single response                    |
-| [[RE.excalidraw\|RE]] | The checks that run after Black's response: game over, depth budget |
-| [[DB]]                | What a record contains                                              |
-| [[TGL]]               | What the run log prints                                             |
-| [[generation-config]] | Every tunable setting                                               |
-| [[file-naming]]       | How notes, block IDs and log messages are written                   |
-| [[tag-vocabulary]]    | What each tag means, and when to use it                             |
+| Note                          | Covers                                                                             |
+| ----------------------------- | ---------------------------------------------------------------------------------- |
+| [[S0]]                        | Stop-request handling (Ctrl+C)                                                     |
+| [[S1]]                        | Start run, lock check, log routing                                                 |
+| [[LF]]                        | Lockfile handling                                                                  |
+| [[S2]]                        | User, repertoire, wipe, seed the queue                                             |
+| [[S3]]                        | The main queue loop                                                                |
+| [[EX]]                        | Explorer data: fetching and caching                                                |
+| [[HM]]                        | White candidate moves and how they are filtered                                    |
+| [[TR.excalidraw\|TR]]         | Transpositions and the probability cascade                                         |
+| [[EW]]                        | The engine waterfall and Black's single response                                   |
+| [[RE.excalidraw\|RE]]         | The checks that run after Black's response: game over, depth budget                |
+| [[HM.excalidraw\|HM diagram]] | The checks on each kept White move: too rare, game over, repetition, transposition |
+| [[DB]]                        | What a record contains                                                             |
+| [[TGL]]                       | What the run log prints                                                            |
+| [[generation-config]]         | Every tunable setting                                                              |
+| [[file-naming]]               | How notes, block IDs and log messages are written                                  |
+| [[tag-vocabulary]]            | What each tag means, and when to use it                                            |
 
 
 ## One run, in order
@@ -66,7 +66,7 @@ OV.14 **Finish.** The queue empties, or you press Ctrl+C, or something goes wron
 
 OV.15 **A cached answer is permanent truth.** It never expires. Only a changed [[cache-profile|cache profile]] makes the generator ask again ([[DB|DB.35]]).
 
-OV.18 **Probability is conserved.** Everything that leaves the tree is counted: popularity filtering into `rareDropped`, cascade remainders into `tinyDropped`. `Endings` plus `rareDroppedTotal` plus `tinyDroppedTotal` must come to 100% ([[TR.excalidraw|TR.41]]).
+OV.18 **Probability is conserved.** Everything that leaves the tree is counted: popularity filtering into `rareDropped`, games missing from Lichess Explorer's answer into `unaccountedDropped`, and cascade remainders into `tinyDroppedTotal`. Endings plus `rareDroppedTotal` plus `unaccountedDroppedTotal` plus `tinyDroppedTotal` must come to 100% at the end of the run ([[S3|S3.11]]). A cascade must not change the sum of all four ([[TR.excalidraw|TR.41]]).
 
 OV.19 **Every Black response is verified by local Stockfish.** `deepVerified` is checked for all of them at the end of a run; a single `false` is a hard error ([[DB|DB.14]]).
 

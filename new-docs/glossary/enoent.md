@@ -1,7 +1,7 @@
 ---
 tags:
-  - processed
+  - reviewed
 aliases:
   - ENOENT
 ---
-OS-level code, surfaced by Node (and virtually any language), when a file/directory operation targets something that isn't there.
+An OS-level error code (surfaced by Node.js and other languages), when a file/directory operation targets something that isn't there.

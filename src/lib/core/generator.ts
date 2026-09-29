@@ -290,7 +290,12 @@ export function dequeueGeneratorQueueItem(
   queue: GeneratorQueueItem[],
   pendingByResponseSource: PendingCanonicalContinuations
 ) {
-  const item = queue.shift();
+  // Tree generation is deliberately depth-first.  Apart from keeping the
+  // working set small, this is important for transpositions: the first node
+  // which reaches a position becomes its canonical owner, just as it does in
+  // the reference tree walker.  `push` below and `pop` here therefore form a
+  // LIFO worklist; do not replace this with `shift`.
+  const item = queue.pop();
   if (item?.responseSourceNodeId && pendingByResponseSource.get(item.responseSourceNodeId) === item) {
     pendingByResponseSource.delete(item.responseSourceNodeId);
   }
@@ -754,7 +759,12 @@ export async function generateRepertoire(
       } else {
           let posAfterBlackNode = await getRepertoireNode(repertoire.id, blackHistory) ??
             await prisma.repertoireNode.findFirst({
-              where: { repertoireId: repertoire.id, positionKey: positionKeyFromFen(selectedDestinationFen) }
+              // `positionKey` deliberately omits the halfmove/fullmove fields,
+              // but an edge must still point at the exact FullFen produced by
+              // its UCI move.  A same-key node with different clocks is a
+              // separate route node; treating it as this edge's destination
+              // breaks the move/FEN integrity check in createResponseMove.
+              where: { repertoireId: repertoire.id, fullFen: selectedDestinationFen }
             });
           const responseIsRepetition = posAfterBlackNode !== null &&
             (posAfterBlackNode.history === "" || posAfterWhiteNode.history.startsWith(`${posAfterBlackNode.history} `));

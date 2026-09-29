@@ -696,13 +696,18 @@ export async function propagateRepertoireProbabilities(repertoireId: string, sta
         }
       });
     }
+    // This is the production form of the transposition cascade.  Keep it a
+    // stack so the generator and the probability propagation agree on which
+    // newly reached position is handled first.  The sum at each destination
+    // is still computed from every incoming route, so changing traversal order
+    // cannot create or lose probability.
     const pending = [startNodeId];
     const nodeCount = await tx.repertoireNode.count({ where: { repertoireId } });
     const maximumSteps = Math.max(1, nodeCount * nodeCount);
     let steps = 0;
     while (pending.length > 0) {
       if (++steps > maximumSteps) throw new Error("Repertoire probability graph did not converge");
-      const sourceId = pending.shift()!;
+      const sourceId = pending.pop()!;
       const source = await tx.repertoireNode.findUnique({ where: { id: sourceId } });
       if (!source || source.repertoireId !== repertoireId) continue;
       const outgoing = await tx.repertoireMove.findMany({ where: { fromNodeId: sourceId } });

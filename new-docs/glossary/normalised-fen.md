@@ -1,8 +1,9 @@
 ---
-aliases:
 tags:
-  - in-progress
   - glossary
+  - reviewed
+aliases:
+  - normalisedFen
 ---
 The first four FEN fields, with the halfmove clock and fullmove number removed.
 

@@ -1,7 +1,7 @@
 ---
 tags:
-  - processed
+  - reviewed
 aliases:
   - EEXIST
 ---
-OS-level code, surfaced by Node (and virtually any language), when an operation tries to create something at a path where something already exists. 
+An OS-level error code (surfaced by Node.js and other languages) indicating that a file system operation failed because a file or directory already exists at the target path.

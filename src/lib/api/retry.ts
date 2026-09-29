@@ -3,8 +3,16 @@ import { stdin as processStdin, stdout as processStdout } from 'process';
 import { defaultConfig } from '../core/config';
 
 export const GlobalState = {
-    lichessCloudEvals: false
+    lichessCloudEvals: false,
+    lichessCloudEvalDisabled: false
 };
+
+export class LichessRateLimitError extends Error {
+  constructor(url: string) {
+    super(`Lichess continued to rate-limit ${url} after the required one-minute cooldown`);
+    this.name = "LichessRateLimitError";
+  }
+}
 
 export class UserRequestedStopError extends Error {
   constructor(message = 'Generation was stopped at the user\'s request') {
@@ -25,7 +33,7 @@ function automaticRetryDelay(baseMs: number, attemptIndex: number): number {
 let lichessRequestQueue = Promise.resolve();
 let nextLichessRequestAt = 0;
 
-async function runInLichessRequestSlot<T>(request: () => Promise<T>): Promise<T> {
+async function runInLichessRequestSlot<T>(request: () => Promise<T>, beforeRequestDelayMs = 0): Promise<T> {
   const previousRequest = lichessRequestQueue;
   let releaseRequest!: () => void;
   lichessRequestQueue = new Promise<void>(resolve => {
@@ -37,6 +45,9 @@ async function runInLichessRequestSlot<T>(request: () => Promise<T>): Promise<T>
     const waitMs = Math.max(0, nextLichessRequestAt - Date.now());
     if (waitMs > 0) {
       await delay(waitMs);
+    }
+    if (beforeRequestDelayMs > 0) {
+      await delay(beforeRequestDelayMs);
     }
     const startedAt = Date.now();
     const result = await request();
@@ -90,27 +101,34 @@ export async function fetchWithRetry(url: string, retryAttempts: number, useToke
     return fetchWithRetry(url, retryAttempts, useToken, apiType, dependencies);
   }
 
+  let lichessRateLimitResponses = 0;
   for (let i = 0; i < retryAttempts; i++) {
     try {
       const isLichessRequest = apiType === 'explorer' || apiType === 'eval';
-      // Lichess requires a full cooldown after every 429; do not shorten it via
-      // the ordinary retry-backoff cap used for transient network/server errors.
-      const retryDelayMs = defaultConfig.api.rateLimitRetryDelayMs;
-      const request = async () => {
-        const result = await fetch(url, { headers, signal: AbortSignal.timeout(defaultConfig.api.requestTimeoutMs) });
-        if (isLichessRequest && result.status === 429) imposeLichessCooldown(retryDelayMs);
-        return result;
-      };
+      const request = () => fetch(url, { headers, signal: AbortSignal.timeout(defaultConfig.api.requestTimeoutMs) });
       const response = isLichessRequest
-        ? await runInLichessRequestSlot(request)
+        ? await runInLichessRequestSlot(request, apiType === "eval" ? defaultConfig.api.cloudEvalBeforeRequestDelayMs : 0)
         : await request();
       if (response.status === 429) {
-        if (i < retryAttempts - 1) {
-            console.log(`[WARNING] Rate limit (429) on ${url}. Pausing all Lichess requests for ${retryDelayMs}ms before retrying (Attempt ${i+1}/${retryAttempts})...`);
+        lichessRateLimitResponses++;
+        // Cloud Eval is optional: one cooldown retry establishes whether the
+        // limit has cleared.  More retries only burn the shared allowance and
+        // prevent the evaluator from reaching ChessDB/local Stockfish.
+        const allowedRateLimitRetries = apiType === "eval"
+          ? 1
+          : defaultConfig.api.rateLimitRetryAttempts;
+        const retryDelayMs = defaultConfig.api.rateLimitRetryInitialDelayMs * Math.pow(
+          defaultConfig.api.retryBackoffMultiplier,
+          Math.min(lichessRateLimitResponses, allowedRateLimitRetries) - 1
+        );
+        if (isLichessRequest) imposeLichessCooldown(retryDelayMs);
+        if (isLichessRequest && lichessRateLimitResponses <= allowedRateLimitRetries && i < retryAttempts - 1) {
+            console.log(`[WARNING] Rate limit (429) on ${url}. Pausing all Lichess requests for ${retryDelayMs}ms before retry ${lichessRateLimitResponses}/${allowedRateLimitRetries}...`);
             continue;
         }
 
         console.log(`\n[WARNING] Rate limit (429) on ${url}`);
+        if (isLichessRequest) throw new LichessRateLimitError(url);
         return handleExhaustedRetries('Rate-limit retries exhausted.');
       }
       if (response.status >= 500 && response.status <= 599) {
@@ -131,6 +149,11 @@ export async function fetchWithRetry(url: string, retryAttempts: number, useToke
       return await response.json();
     } catch (e: any) {
       if (e instanceof UserRequestedStopError) {
+        throw e;
+      }
+      // This is a deliberate control-flow signal, not a transient network
+      // error.  Let the evaluator disable optional Cloud Eval for this run.
+      if (e instanceof LichessRateLimitError) {
         throw e;
       }
 

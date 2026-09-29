@@ -388,7 +388,10 @@ export async function reconcileOpponentBranches(input: {
       }
 
       const matchingNodes = await tx.repertoireNode.findMany({
-        where: { repertoireId: input.repertoireId, positionKey: candidate.destinationPositionKey },
+        // A PositionKey intentionally normalizes the counters.  It is useful
+        // for detecting a transposition, but cannot select an edge target:
+        // chess moves must land on the exact FullFen they produced.
+        where: { repertoireId: input.repertoireId, fullFen: candidate.destinationFullFen },
         orderBy: { pgn: "asc" },
         take: 2
       });

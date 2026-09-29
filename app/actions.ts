@@ -160,8 +160,19 @@ export async function fetchDemoPositions(repertoireId: string) {
     };
   }))).filter((card): card is NonNullable<typeof card> => card !== null);
 
-  cards.sort((a, b) => a.lineMoves.length - b.lineMoves.length || a.routeLabel.localeCompare(b.routeLabel));
-  return cards.slice(0, 42);
+  // Preorder traversal keeps a line together: introduce the Black response
+  // after move 1, then its continuation after move 2, and so on until that
+  // branch ends before moving to the next variation.  Comparing move tokens
+  // also guarantees that a route precedes every route below it.
+  cards.sort((a, b) => {
+    const sharedLength = Math.min(a.lineMoves.length, b.lineMoves.length);
+    for (let index = 0; index < sharedLength; index++) {
+      const comparison = a.lineMoves[index].localeCompare(b.lineMoves[index]);
+      if (comparison !== 0) return comparison;
+    }
+    return a.lineMoves.length - b.lineMoves.length;
+  });
+  return cards;
 }
 
 export async function updateSrsStats(statId: string, quality: number) {

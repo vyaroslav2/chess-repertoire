@@ -83,7 +83,9 @@ export interface Config {
             retryAttempts: number;
         };
         networkRetryDelayMs: number;
-        rateLimitRetryDelayMs: number;
+        rateLimitRetryInitialDelayMs: number;
+        rateLimitRetryAttempts: number;
+        cloudEvalBeforeRequestDelayMs: number;
         betweenRequestDelayMs: number;
         requestTimeoutMs: number;
         retryBackoffMultiplier: number;
@@ -234,8 +236,11 @@ export const defaultConfig: Config = {
 
         // Delay durations (in milliseconds)
         networkRetryDelayMs: 1000,
-        // Lichess asks API clients to wait a full minute after any HTTP 429.
-        rateLimitRetryDelayMs: 60_000,
+        // Lichess asks API clients to wait at least a full minute after HTTP 429.
+        rateLimitRetryInitialDelayMs: 90_000,
+        rateLimitRetryAttempts: 3,
+        // Extra breathing room before each Cloud Eval request.
+        cloudEvalBeforeRequestDelayMs: 10_000,
         betweenRequestDelayMs: 1000,
         requestTimeoutMs: 15000,
         retryBackoffMultiplier: 2,
@@ -307,7 +312,9 @@ export function validateConfig(config: Config) {
     if (!Number.isInteger(config.api?.chessDb?.retryAttempts) || config.api.chessDb.retryAttempts < 1) throw new Error("Invalid api.chessDb.retryAttempts");
 
     if (typeof config.api?.networkRetryDelayMs !== 'number' || config.api.networkRetryDelayMs < 0 || !Number.isFinite(config.api.networkRetryDelayMs)) throw new Error("Invalid api.networkRetryDelayMs");
-    if (typeof config.api?.rateLimitRetryDelayMs !== 'number' || config.api.rateLimitRetryDelayMs < 0 || !Number.isFinite(config.api.rateLimitRetryDelayMs)) throw new Error("Invalid api.rateLimitRetryDelayMs");
+    if (typeof config.api?.rateLimitRetryInitialDelayMs !== 'number' || config.api.rateLimitRetryInitialDelayMs < 60_000 || !Number.isFinite(config.api.rateLimitRetryInitialDelayMs)) throw new Error("Invalid api.rateLimitRetryInitialDelayMs");
+    if (!Number.isInteger(config.api?.rateLimitRetryAttempts) || config.api.rateLimitRetryAttempts < 1) throw new Error("Invalid api.rateLimitRetryAttempts");
+    if (typeof config.api?.cloudEvalBeforeRequestDelayMs !== 'number' || config.api.cloudEvalBeforeRequestDelayMs < 0 || !Number.isFinite(config.api.cloudEvalBeforeRequestDelayMs)) throw new Error("Invalid api.cloudEvalBeforeRequestDelayMs");
     if (typeof config.api?.betweenRequestDelayMs !== 'number' || config.api.betweenRequestDelayMs < 0 || !Number.isFinite(config.api.betweenRequestDelayMs)) throw new Error("Invalid api.betweenRequestDelayMs");
     if (!Number.isInteger(config.api?.requestTimeoutMs) || config.api.requestTimeoutMs < 1) throw new Error("Invalid api.requestTimeoutMs");
     if (typeof config.api?.retryBackoffMultiplier !== 'number' || config.api.retryBackoffMultiplier < 1 || !Number.isFinite(config.api.retryBackoffMultiplier)) throw new Error("Invalid api.retryBackoffMultiplier");

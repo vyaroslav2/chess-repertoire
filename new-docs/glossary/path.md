@@ -1,6 +1,6 @@
 ---
 tags:
   - glossary
-  - in-progress
+  - reviewed
 ---
 Move history (ordinary chess sense; also what makes a node unique).

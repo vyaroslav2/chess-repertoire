@@ -1,7 +1,7 @@
 ---
 tags:
   - glossary
-  - in-progress
+  - reviewed
 aliases:
   - nodes
 ---

@@ -6,6 +6,12 @@ import { test } from "node:test";
 import { spawnSync } from "node:child_process";
 import { UserRequestedStopError } from "../src/lib/api/retry";
 import { acquireLock, LOCKFILE_PATH, type LockHandle } from "../src/lib/core/lockfile";
+import {
+  dequeueGeneratorQueueItem,
+  enqueueCanonicalContinuation,
+  type GeneratorQueueItem,
+  type PendingCanonicalContinuations
+} from "../src/lib/core/generator";
 import { runTreeGenerator } from "./start_tree_generator";
 
 function tempLog(label: string): string {
@@ -19,6 +25,20 @@ function mockLock(): LockHandle {
     release() {}
   };
 }
+
+test("canonical continuation worklist is LIFO", () => {
+  const queue: GeneratorQueueItem[] = [];
+  const pending: PendingCanonicalContinuations = new Map();
+  const first = { nodeId: "first", fen: "8/8/8/8/8/8/8/8 w - - 0 1", currentMoveNumber: 1, cumulativeProb: 0.1, history: [] };
+  const second = { nodeId: "second", fen: "8/8/8/8/8/8/8/8 w - - 0 1", currentMoveNumber: 1, cumulativeProb: 0.2, history: [] };
+
+  enqueueCanonicalContinuation({ queue, pendingByResponseSource: pending, responseSourceNodeId: "response-1", item: first });
+  enqueueCanonicalContinuation({ queue, pendingByResponseSource: pending, responseSourceNodeId: "response-2", item: second });
+
+  assert.equal(dequeueGeneratorQueueItem(queue, pending), second);
+  assert.equal(dequeueGeneratorQueueItem(queue, pending), first);
+  assert.equal(pending.size, 0);
+});
 
 test("default log is project-relative from another cwd and creates docs/logs", async () => {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "treegen-project-"));

@@ -1,8 +1,8 @@
 ---
 tags:
-  - in-progress
   - glossary
+  - reviewed
 ---
 `routeProb = parent.routeProb × moveProb`
 
-The share of games travelling down this one [[edge]].
+The share of games travelling down this one route.

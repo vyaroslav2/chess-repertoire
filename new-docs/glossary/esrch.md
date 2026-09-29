@@ -1,7 +1,8 @@
 ---
 tags:
-  - processed
+  - reviewed
 aliases:
   - ESRCH
 ---
-OS-level code, surfaced by Node (and virtually any language), meaning "no such process." Normally produced when you try to signal or interact with a process ID that doesn't exist. 
+An OS-level error code (surfaced by Node.js and other languages) meaning "no such process." Normally produced when you try to signal or interact with a process ID that doesn't exist. 
+

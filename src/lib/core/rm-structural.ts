@@ -185,7 +185,10 @@ export async function replaceResponseBranch(input: ReplaceResponseBranchInput) {
 
   const newPgn = `${oldResponse.fromNode.pgn ? `${oldResponse.fromNode.pgn} ` : ""}${chessMove.san}`;
   const newHistory = `${oldResponse.fromNode.history ? `${oldResponse.fromNode.history} ` : ""}${input.newUci}`;
-  const existingDestinationNode = await tx.repertoireNode.findFirst({ where: { repertoireId, positionKey: posKey } });
+  // Position keys omit move clocks, whereas a persisted edge must retain the
+  // exact FullFen produced by its UCI.  Only that exact state can be reused as
+  // this edge's destination.
+  const existingDestinationNode = await tx.repertoireNode.findFirst({ where: { repertoireId, fullFen: canonicalFullFen } });
   const isRepetition = existingDestinationNode !== null && (existingDestinationNode.history === "" ||
     (oldResponse.fromNode.history?.startsWith(`${existingDestinationNode.history} `) ?? false));
   const newDestinationNode = existingDestinationNode ??

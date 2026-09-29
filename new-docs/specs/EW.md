@@ -1,18 +1,23 @@
 ---
-
 tags:
-
-- in-progress
-
+  - reviewed
 ---
-
 # EW — Engine Waterfall
 
 EW receives a position after White's move (Black to play), evaluates candidate Black responses using a 3-tier engine waterfall, and selects Black's single repertoire move.
 
-EW.01 **Receive Position**: Accept the position FEN after White's move from [[HM|HM.06]].
+EW.01 **Receive Position**: Accept the position FEN after White's move from [[HM|HM.07]]. Go to EW.13.
 
-EW.02 **Fetch Black Candidate Moves**: Look up the cache (should match ==engine cache profile[^7]==), if empty (never fetched) `-->` query the Explorer dataset for Black response moves at this position using Masters and Elite filters (`explorerEliteSpeeds`, `explorerEliteRatings`).
+EW.13 **Hardcoded response?** Does the route so far match a line in `hardcodedBlackResponses`[^1], up to and including White's last move?
+* yes `-->` take Black's move from that line. No Explorer, no filtering, no scoring, no candidate loop. Record `selectionMethod = Hardcoded`, `moveOrigin = Hardcoded Move` ([[DB|DB.14]]).  Evaluate it for the record only (because every node keeps an eval). Take the first eval found: Lichess, then ChessDB, then local Stockfish. Store it, but never reject the move on it. Go to EW.12.
+* no `-->` go to EW.02.
+
+The match is on the route (the moves played), not the position. A different route that transposes into the same position does not get the hardcoded move.
+
+
+
+
+EW.02 **Fetch Black Candidate Moves**: Look up the cache [[EX]].
 
 EW.03 **Filter Candidate Moves**:
 
@@ -21,88 +26,78 @@ EW.03 **Filter Candidate Moves**:
 $$\text{weightedGames} = (\text{mastersGames} \times \text{mastersWeight}) + \text{eliteGames}$$
 (see [[generation-config]] for mastersWeight)
 
-* Keep Black moves meeting `minimumWeightedGames`[^2] threshold.
+* Keep Black moves meeting `minimumWeightedGames`[^1] threshold.
 
-* **Fallback when no moves qualify**: If no candidate move passes `minimumWeightedGames`, skip human candidate filtering and fall back directly to top engine recommendation for Black (Lichess `-->` ChessDB `-->` local Stockfish).
+* **Fallback when no moves qualify**: If no candidate move passes `minimumWeightedGames`, skip human candidate filtering and fall back directly to top engine recommendation for Black (Lichess `-->` ChessDB `-->` local Stockfish). Record `moveOrigin = Engine Move`.
 
 ---
-EW.04 Calculate Score for the candidate Black moves. 
+EW.04 Calculate Score for the candidate Black moves.
 
-==Black score = (weighted Black wins + 0.5 × weighted draws + 50 × 0.48) / (weighted games + 50).[^8]==
+$$\text{blackScore} = \frac{\text{weightedWins} + 0.5 \times \text{weightedDraws} + (\text{anchorGames} \times \text{repertoireSidePrior})}{\text{weightedGames} + \text{anchorGames}}$$
 
-50 here is [[anchor-games|anchorGames]].
-And 48% is [[repertoire-side-prior|repertoireSidePrior]]. 
+`anchorGames` is 50 and `repertoireSidePrior` is 48%; both are in [[generation-config]]. See [[anchor-games|anchorGames]] and [[repertoire-side-prior|repertoireSidePrior]].
 
-EW.05 Sort in descending order (top score at the top). ==Ties are resolved in favour of more evidence (more total weighted games). If everything is identical, evaluate two moves with local Stockfish. Choose the higher cp move (better according to the engine). If engine eval is a tie, use alphabetical order for the san/uci.==
+EW.05 Sort in descending order (top score at the top). Ties are resolved in favour of more evidence (more total weighted games). If everything is identical, evaluate all tied moves with local Stockfish. Choose the higher cp move (better according to the engine). If engine eval is a tie, use alphabetical order for the san/uci.
 
-EW.06 Take the first move in the list (top score) and pass it to the engine waterfall.
-
+EW.06 Take the first move in the list (top score) and pass it to the engine waterfall. EW.07 to EW.09 run for one candidate at a time. A rejected candidate sends us back here for the next one down the list; running out of candidates is the fallback in EW.10.
 
 EW.07 **Tier 1 — Lichess Cloud Eval API**:
-* ==Query the Lichess Cloud Eval API[^4] (`lichessCloudEvalMultiPv`[^2]) for the position FEN.[^9]==
+* Check `EngineCache` first, for this `fullFen` under the Lichess cache profile ([[DB|DB.32]]). A hit is used as-is; only a miss is fetched.
+* If Cloud Eval is off for this run ([[AR|AR.13]]) `-->` jump to EW.08.
+* Query the Lichess Cloud Eval API for the position FEN, with `lichessCloudEvalMultiPv`[^1]. Request rules: [[AR]]. On give-up ([[AR|AR.11]]) `-->` jump to EW.08.
 * If Lichess responds with valid/legitimate 'no evals found' `-->` jump to EW.08.
-* If valid evaluations exist for the baseline and candidate moves within configured CP tolerances (`apiToleranceCp`[^2]), cache results and jump to EW.10.
-* If the candidate move is not in the Lichess response, but the lowest eval of Lichess moves is already ==pass[^10]== the `apiToleranceCp` `-->` reject the move and go to the next candidate move. 
+* If valid evaluations exist for the baseline and candidate moves within configured CP tolerances (`apiToleranceCp`[^1], for this move-number band), cache results and jump to EW.10.
+* If the candidate move is absent from the Lichess response, it is worse than every move Lichess did return. So if even the weakest returned move already fails `apiToleranceCp`, the candidate cannot pass either `-->` reject it and go back to EW.06 for the next candidate.[^3]
 * Otherwise, proceed to **EW.08**.
 
 EW.08 **Tier 2 — ChessDB API**:
-* ==For candidate moves missing from Tier 1, query the ChessDB API.[^5][^11]==
+* Check `EngineCache` first, for this `fullFen` under the ChessDB cache profile. For candidate moves missing from Tier 1, query the ChessDB API.
+* ChessDB requests follow [[AR]]. If ChessDB is off for this run ([[AR|AR.13]]), or gives up ([[AR|AR.11]]) `-->` jump to EW.09.
 * If ChessDB responds with valid/legitimate 'no evals found' `-->` jump to EW.09.
 * If valid evaluations are returned, cache results and jump to **EW.10**.
-* If the candidate move is not in the ChessDB response, but the lowest eval of ChessDB moves is already pass the `apiToleranceCp` `-->` reject the move and go to the next candidate move. 
-* ==If the candidate move has eval >= 1000 cp `-->` reject.==[^13] 
+* Same rule as Tier 1: if the candidate is absent and the weakest returned move already fails `apiToleranceCp` `-->` reject it and go back to EW.06.
+* If any move in the ChessDB answer is `>= chessDbMaxAbsCp`[^1] or `<= -chessDbMaxAbsCp` `-->` ChessDB may be hiding a mate. Skip ChessDB for this position and go to **EW.09**. The answer is still cached as received.[^4]
 * Otherwise, proceed to **EW.09**.
 
 EW.09 **Tier 3 — Local Deep Stockfish**:
-* Run local Stockfish (`localStockfishDepth`[^2], `localStockfishMultiPv`[^2]) for the baseline move and the current unevaluated move.
-* ==Store both evaluation results in the local `EngineCache` table with its corresponding local engine cache profile.==
+* Run local Stockfish (`localStockfishDepth`[^1], `localStockfishMultiPv`[^1]) for the baseline move and the current unevaluated move.
+* Store both evaluation results in the local `EngineCache` table with its corresponding local engine cache profile.
 
 EW.10 **Move Selection (CP Loss Verification)**:
-* Calculate Centipawn Loss for each candidate relative to the best baseline evaluation:
-  $$\text{cpLoss} = \text{candidateEval} - \text{bestEval}$$
-* Keep candidates passing the CP loss tolerance for their move-number band (`apiToleranceCp` or `localToleranceCp`).
-* For each engine compare the candidate evaluation to the current engine baseline.
-* Select Black's single repertoire move (best score for Black within tolerance). 
-* If non of the human candidate moves survives the waterfall --> choose the top Engine move --> Lichess. If Lichess is empty --> top ChessDB move. If ChessDB response empty --> top local Stockfish move. 
-* If a move was chosen by API engine, run a double check with local Stockfish:
-1. A: the cp loss between local Stockfish baseline and chosen move (by API engine) is within localToleranceCp. --> record Stockfish evals to cache and continue. 
-2. A chosen response is not in Stockfish baseline-chosenResponse tolerance for cp loss: log `[WARNING] Stockfish vetoed the API engine chosen move. Log chosenResponse, selectionMethod, moverOrigin, engineRank, evals and baselines for both API engine that chose the move and Stockfish that vetoed it.` In other words log all meta data that is available for debugging `-->` hard stop.    
-3. B: API chose a move that has cp value, but Stockfish found mate: stop generation: prompt the user "Stockfish found a mate -- user intervention required. PGN:... Lichess/ChessDB move, Stockfish move ... mate in #." The user has to choose engine response or Stockfish response. Or hard error? #question
-4. Same as B, but API the number of moves to mate by API is bigger than what Stockfish found (e.g. Stockfish shows mate in 4 moves and API returned mate in 5): : stop generation: prompt the user "Stockfish found a mate -- user intervention required. PGN:... `source` (Lichess/ChessDB)  `chosenResponse`, `selectionMethod`, `moveOrigin`, `engineRank`. Stockfish move ... mate in #." The user has to choose engine response or Stockfish response. Or hard error? 
-// The goal is to double check API response with local Stockfish -- for missed mates. //
+* Calculate the candidate's centipawn loss against the best baseline evaluation: $$\text{cpLoss} = \text{candidateEval} - \text{bestEval}$$
+* If it is within tolerance for its move-number band (`apiToleranceCp` or `localToleranceCp`), select it as Black's repertoire move and stop. Lower candidates are not evaluated.
+* If not, reject it and go back to EW.06 for the next candidate.
+* If no candidate passes, take the top engine move instead: Lichess, then ChessDB, then local Stockfish. Record `moveOrigin = Engine Move`. This is the same fallback as EW.03's, reached by a different route.
+* Record on the chosen move ([[DB|DB.14]]): its `cp` or `mate`, the `source` of that eval, `selectionMethod`, `moveOrigin` and `engineRank`. The eval is the one from the engine that accepted the move, in White's point of view ([[DB|DB.15]]). This holds for every path: the waterfall, the engine fallback, and a hardcoded response ([[EW|EW.13]]).
 
-   
+EW.11 **Deep verification**: a move chosen by either API is always checked against local Stockfish before it is kept. 
 
-EW.11 **Return Position**:
-* Apply Black's selected repertoire move to the position, producing a new position (White to move). Cache its eval and eval source. If no eval exists for a Black response `-->` ==hard error.==  
-* ==If this position is already past its [[generation-config|depth budget]] -- stop -- do not continue expansion. Log this reason to stop.[^14]== 
-*  If the position is game-over (checkmate/stalemate/draw), don't generate anything further for it — skip to the next queue item. Log this game game-over state.
-* ==Hand the resulting position to RE.[^12]== 
+Set `deepVerified` on success ([[DB|DB.14]], [[S3|S3.12]]).
+
+| Case                                                                                                | What happens                                                                                                                                                                                           |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| EW.11a The cp loss between the Stockfish baseline and the chosen move is within `localToleranceCp`. | Accept. Record the Stockfish evals to cache, set `deepVerified = true`, continue. The move keeps the API's `cp`/`mate` and `source`. Stockfish's eval is cached, not written on the move.              |
+| EW.11b It is outside `localToleranceCp`.                                                            | Log `"[WARNING] Stockfish vetoed the API engine chosen move."` with `chosenResponse`, `selectionMethod`, `moveOrigin`, `engineRank`, and the eval and baseline from both engines `-->` hard error.[^5] |
+| EW.11c The API returned a `cp`, Stockfish found a mate.                                             | Hard error. Log everything EW.11b logs, plus the mate distance.                                                                                                                                        |
+| EW.11d Both found a mate, and Stockfish's is shorter (Stockfish mate in 4, API mate in 5).          | Hard error, same log as EW.11c.                                                                                                                                                                        |
+
+EW.12 **Return**: the chosen move must carry exactly one of `cp` or `mate` ([[DB|DB.14]]). If it carries neither, hard error. Apply Black's move to the position, giving a new position with White to move, and create its node with `routeProb = parent.routeProb` and `cumProb = parent.cumProb`. Black plays one move, so everything that reaches the parent passes to this node. Hand that node to [[RE.excalidraw|RE]], which decides whether the route ends and, if not, pushes the node onto the [[S3]] queue ([[RE.excalidraw|RE.09]]).
 
 
-EW.12 Push the new child nodes onto the generator work queue (`S3`) and return to [[S3|S3.01]]. 
-==hand the resulting position to RE==
-==The children are pushed in order in which the resulting generation will produce nodes in descending popularity order. Why this matters? When I read the log, I want white responses not to be random, but go from most popular moves to less popular.== 
-
-[^2]: see [[generation-config]]
 
 
-[^4]:  **HTTP 429 (Rate-Limited)**: Pause all requests for `lichessRateLimitRetryDelayMs`[^2], then retry the request `lichessMaxRetries`[^2]. If 429 (or other error) again after lichessMaxRetries turn-off Lichess Cloud Eval API for the rest of the run.  
 
-[^5]: What are the existing ChessDB API call rules? #question
 
-[^7]: Should define exact default settings for engines. Or actually we should check cache profile (e.g. speeds=Classical/Rapid, rating=2500, and masters -- masters are always masters) for fetching Black responses, isn't it? We don't need engine for this step, I reckon. 
+[^1]: see [[generation-config]]
 
-[^8]: Use the same formula format for formula.
+[^2]: **HTTP 429 (Rate-Limited)**: Pause all requests for `apiRetryDelayMs`, then retry the request `lichessMaxRetries`. If 429 (or other error) again after lichessMaxRetries turn-off Lichess Cloud Eval API for the rest of the run. 
 
-[^9]: Add look up in cache with cache-profile match. 
+[^3]: The test is: does the weakest move Lichess returned already fail tolerance?
 
-[^10]: Check grammar
+[^4]: ChessDB cannot report a mate, so large scores in either direction are not trusted.
 
-[^11]: Same -- we should check cache, perhaps check cache. 
+[^5]: Hard error is a deliberate design choice.
 
-[^12]: This looks wrong to me. We need to push the resulting position (after Black response) into the main queue (for fetching following White moves) and take the next item for choosing a Black response for. 
 
-[^13]: ChessDB has no way of reliably reporting a mate -- it arrives as a very large ordinary `cp`. // ==I hope I get the value of 1000 cp right -- it's 10.00 or approx. one Queen and two pawns -- ten points of material.== 
 
-[^14]: Remove this bullet?
+

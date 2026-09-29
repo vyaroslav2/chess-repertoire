@@ -1,3 +1,7 @@
+---
+tags:
+  - reviewed
+---
 
 `#note` — something to remember. No action implied.
 `#bug` — behaviour that contradicts intention. Needs fixing.

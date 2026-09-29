@@ -1,7 +1,7 @@
 ---
 tags:
-  - in-progress
   - glossary
+  - "#reviewed"
 aliases:
   - cumProb
 ---
