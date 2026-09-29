@@ -33,6 +33,7 @@ OV.05
 | [[HM]]                        | White candidate moves and how they are filtered                                    |
 | [[TR.excalidraw\|TR]]         | Transpositions and the probability cascade                                         |
 | [[EW]]                        | The engine waterfall and Black's single response                                   |
+| [[AR]]                        | API requests: lanes, gaps, retry once, giving up                                   |
 | [[RE.excalidraw\|RE]]         | The checks that run after Black's response: game over, depth budget                |
 | [[HM.excalidraw\|HM diagram]] | The checks on each kept White move: too rare, game over, repetition, transposition |
 | [[DB]]                        | What a record contains                                                             |
@@ -72,12 +73,14 @@ OV.19 **Every Black response is verified by local Stockfish.** `deepVerified` is
 
 OV.20 **A hard error stops the run.** Nothing is repaired, nothing is retried past its configured limit. The partial tree is left on disk and the run closes as `[FAILED]`. A tree from a run that did not close as `[FINISHED]` is treated as corrupt, and that is the user's call, not the code's ([[S0|S0.05]]).
 
+OV.23 **Outside APIs are treated gently.** One request at a time per host, a generous gap between requests, one retry, then give up ([[AR]]). Only Explorer failing stops the run; the others are turned off for the rest of it.
+
 ## Out of scope
 
 OV.21 These docs describe generation and storage only. They deliberately say nothing about:
 * Spaced repetition and card scheduling. #roadmap
 * Reconciliation — abandoned; wipe and rebuild is the only strategy. 
-* Wikibooks text, which is kept working in code but not documented. #deferred
+* Wikibooks text, which is kept working in code but not documented. Its requests follow [[AR]]. #deferred
 * The final UI card order ([[HM|HM.05]] gives sorting, not the finished order). #roadmap
 * Reopening a branch when a transposition lifts its depth budget into a deeper band. #roadmap
 * Engine evaluation of White moves ([[DB|DB.10]]). #roadmap
