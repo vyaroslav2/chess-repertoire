@@ -14,6 +14,7 @@ import { prisma } from "../src/lib/db/operations";
 import {
   acquireLock,
   LockAcquisitionError,
+  LockReleaseError,
   type LockHandle,
 } from "../src/lib/core/lockfile";
 import { UserRequestedStopError } from "../src/lib/api/retry";
@@ -160,7 +161,10 @@ export async function runTreeGenerator(
 
 if (require.main === module) {
   runTreeGenerator().catch((error) => {
-    if (error instanceof LockAcquisitionError) {
+    if (
+      error instanceof LockAcquisitionError ||
+      error instanceof LockReleaseError
+    ) {
       console.error(error.message);
     } else if (error instanceof UserRequestedStopError) {
       console.error(

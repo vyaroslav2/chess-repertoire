@@ -128,9 +128,7 @@ test("S1.02: a refused lock stops with the lock message alone in the console and
       env: { ...process.env, TREE_GEN_LOG_PATH: dummyLogPath }
     });
     assert.equal(res.status, 1);
-    assert.match(res.stderr, /deep-verify/);
-    assert.match(res.stderr, new RegExp(String(process.pid)));
-    assert.match(res.stderr, /lockfile-never-remove-by-yourself-unless-stale/);
+    assert.equal(res.stderr.trim(), `deep-verify (process ${process.pid}) has been running since ${owner.owner.startedAt} UTC.`);
     assert.doesNotMatch(res.stderr, /Tree generation failed/);
     assert.doesNotMatch(res.stderr, /^\s+at /m);
     assert.equal(fs.readFileSync(dummyLogPath, "utf8"), originalLogContent);
