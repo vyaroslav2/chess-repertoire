@@ -11,7 +11,11 @@ if (fs.existsSync("C:\\Files\\.env")) {
 
 import { generateRepertoire } from "../src/lib/core/generator";
 import { prisma } from "../src/lib/db/operations";
-import { acquireLock, type LockHandle } from "../src/lib/core/lockfile";
+import {
+  acquireLock,
+  LockAcquisitionError,
+  type LockHandle,
+} from "../src/lib/core/lockfile";
 import { UserRequestedStopError } from "../src/lib/api/retry";
 
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -35,32 +39,10 @@ export function resolveTreeGeneratorLogPath(
     ? environment.TREE_GEN_LOG_PATH
     : path.join(
         projectRoot,
-        "docs",
+        "new-docs",
         "logs",
         `treegen-${runTimestamp(startedAt)}.md`,
       );
-}
-
-function pruneTreeGeneratorLogs(logPath: string): void {
-  const directory = path.dirname(logPath);
-  const currentName = path.basename(logPath);
-  const existing = fs
-    .readdirSync(directory, { withFileTypes: true })
-    .filter(
-      (entry) =>
-        entry.isFile() &&
-        entry.name.startsWith("treegen-") &&
-        entry.name.endsWith(".md") &&
-        entry.name !== currentName,
-    )
-    .map((entry) => ({
-      name: entry.name,
-      modified: fs.statSync(path.join(directory, entry.name)).mtimeMs,
-    }))
-    .sort((a, b) => b.modified - a.modified || b.name.localeCompare(a.name));
-  for (const obsolete of existing.slice(2)) {
-    fs.unlinkSync(path.join(directory, obsolete.name));
-  }
 }
 
 type LauncherDependencies = {
@@ -113,12 +95,6 @@ export async function runTreeGenerator(
     process.on("SIGINT", requestStop);
     lock = takeLock();
     fs.mkdirSync(path.dirname(logPath), { recursive: true });
-    if (
-      dependencies.logPath === undefined &&
-      environment.TREE_GEN_LOG_PATH === undefined
-    ) {
-      pruneTreeGeneratorLogs(logPath);
-    }
     fs.writeFileSync(
       logPath,
       `# Tree Generation Log\n\nStarted: ${startedAt.toISOString()}\nDepth: testing default (3 full moves)\n\n\`\`\`text\n`,
@@ -184,7 +160,9 @@ export async function runTreeGenerator(
 
 if (require.main === module) {
   runTreeGenerator().catch((error) => {
-    if (error instanceof UserRequestedStopError) {
+    if (error instanceof LockAcquisitionError) {
+      console.error(error.message);
+    } else if (error instanceof UserRequestedStopError) {
       console.error(
         `Generation stopped at the user's request: ${error.message}`,
       );

@@ -40,7 +40,7 @@ test("canonical continuation worklist is LIFO", () => {
   assert.equal(pending.size, 0);
 });
 
-test("default log is project-relative from another cwd and creates docs/logs", async () => {
+test("S1.03: default log is project-relative from another cwd and creates new-docs/logs", async () => {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "treegen-project-"));
   const otherCwd = fs.mkdtempSync(path.join(os.tmpdir(), "treegen-cwd-"));
   const originalCwd = process.cwd();
@@ -53,16 +53,45 @@ test("default log is project-relative from another cwd and creates docs/logs", a
       generate: async () => undefined,
       disconnect: async () => undefined
     });
-    const logDirectory = path.join(fixtureRoot, "docs", "logs");
+    const logDirectory = path.join(fixtureRoot, "new-docs", "logs");
     const generatedLogs = fs.readdirSync(logDirectory).filter(name => /^treegen-.*\.md$/.test(name));
     assert.equal(generatedLogs.length, 1);
     const expected = path.join(logDirectory, generatedLogs[0]);
     assert.match(fs.readFileSync(expected, "utf8"), /\[FINISHED\]/);
-    assert.equal(fs.existsSync(path.join(otherCwd, "docs", "logs")), false);
+    assert.equal(fs.existsSync(path.join(otherCwd, "new-docs", "logs")), false);
   } finally {
     process.chdir(originalCwd);
     fs.rmSync(fixtureRoot, { recursive: true, force: true });
     fs.rmSync(otherCwd, { recursive: true, force: true });
+  }
+});
+
+test("S1.03: each run writes its own log and earlier run logs are never touched", async () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "treegen-keep-"));
+  const logDirectory = path.join(fixtureRoot, "new-docs", "logs");
+  fs.mkdirSync(logDirectory, { recursive: true });
+  const earlier = [
+    "treegen-2026-08-01T100000Z.md",
+    "treegen-2026-08-02T100000Z.md",
+    "treegen-2026-08-03T100000Z.md"
+  ];
+  for (const name of earlier) fs.writeFileSync(path.join(logDirectory, name), `earlier ${name}`);
+  try {
+    await runTreeGenerator({
+      environment: {},
+      projectRoot: fixtureRoot,
+      acquire: mockLock,
+      generate: async () => undefined,
+      disconnect: async () => undefined,
+      now: () => new Date("2026-08-30T11:15:23.456Z")
+    });
+    for (const name of earlier) {
+      assert.equal(fs.readFileSync(path.join(logDirectory, name), "utf8"), `earlier ${name}`);
+    }
+    assert.equal(fs.existsSync(path.join(logDirectory, "treegen-2026-08-30T111523Z.md")), true);
+    assert.equal(fs.readdirSync(logDirectory).length, earlier.length + 1);
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
   }
 });
 
@@ -78,14 +107,14 @@ test("TREE_GEN_LOG_PATH override wins exactly", async () => {
       disconnect: async () => undefined
     });
     assert.equal(fs.existsSync(override), true);
-    assert.equal(fs.existsSync(path.join(unrelatedRoot, "docs", "logs", "TreeGenLog.md")), false);
+    assert.equal(fs.existsSync(path.join(unrelatedRoot, "new-docs", "logs")), false);
   } finally {
     if (fs.existsSync(override)) fs.unlinkSync(override);
     fs.rmSync(unrelatedRoot, { recursive: true, force: true });
   }
 });
 
-test("start_tree_generator refuses a live lock with owner/path details without truncating log", () => {
+test("S1.02: a refused lock stops with the lock message alone in the console and never touches the log", () => {
   const dummyLogPath = tempLog("refusal");
   const originalLogContent = "This is the original log content. Do not truncate me.";
   fs.writeFileSync(dummyLogPath, originalLogContent);
@@ -102,6 +131,8 @@ test("start_tree_generator refuses a live lock with owner/path details without t
     assert.match(res.stderr, /deep-verify/);
     assert.match(res.stderr, new RegExp(String(process.pid)));
     assert.match(res.stderr, /lockfile-never-remove-by-yourself-unless-stale/);
+    assert.doesNotMatch(res.stderr, /Tree generation failed/);
+    assert.doesNotMatch(res.stderr, /^\s+at /m);
     assert.equal(fs.readFileSync(dummyLogPath, "utf8"), originalLogContent);
   } finally {
     owner.release();

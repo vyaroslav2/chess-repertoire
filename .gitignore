@@ -51,6 +51,7 @@ docs/.obsidian/
 
 # run logs
 docs/logs/
+new-docs/logs/
 
 # engine
 /bin/
