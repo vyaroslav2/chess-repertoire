@@ -117,15 +117,15 @@ export async function fetchAllDatabases(
     ? await processBucket("MASTERS", mastersUrl, defaultConfig.api.lichessExplorer.retryAttempts)
     : skippedBucket();
 
-  const eliteSpeeds = defaultConfig.humanExplorerRequest.elite.speeds.join(',');
-  const eliteRatings = defaultConfig.humanExplorerRequest.elite.ratings.join(',');
+  const eliteSpeeds = defaultConfig.explorerEliteSpeeds.join(',');
+  const eliteRatings = defaultConfig.explorerEliteRatings.join(',');
   const eliteUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(fullFen)}&speeds=${eliteSpeeds}&ratings=${eliteRatings}`;
   const eRes = requestedBuckets.includes("ELITE")
     ? await processBucket("ELITE", eliteUrl, defaultConfig.api.lichessExplorer.retryAttempts)
     : skippedBucket();
 
-  const amateurSpeeds = defaultConfig.humanExplorerRequest.amateur.speeds.join(',');
-  const amateurRatings = defaultConfig.humanExplorerRequest.amateur.ratings.join(',');
+  const amateurSpeeds = defaultConfig.explorerSpeeds.join(',');
+  const amateurRatings = defaultConfig.explorerRatings.join(',');
   const amateurUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(fullFen)}&speeds=${amateurSpeeds}&ratings=${amateurRatings}`;
   const aRes = requestedBuckets.includes("AMATEUR")
     ? await processBucket("AMATEUR", amateurUrl, defaultConfig.api.lichessExplorer.retryAttempts)

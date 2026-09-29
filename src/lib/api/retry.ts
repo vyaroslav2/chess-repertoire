@@ -53,7 +53,7 @@ async function runInLichessRequestSlot<T>(request: () => Promise<T>, beforeReque
     const result = await request();
     nextLichessRequestAt = Math.max(
       nextLichessRequestAt,
-      startedAt + defaultConfig.api.betweenRequestDelayMs
+      startedAt + defaultConfig.apiRequestGapMs
     );
     return result;
   } finally {
@@ -105,9 +105,9 @@ export async function fetchWithRetry(url: string, retryAttempts: number, useToke
   for (let i = 0; i < retryAttempts; i++) {
     try {
       const isLichessRequest = apiType === 'explorer' || apiType === 'eval';
-      const request = () => fetch(url, { headers, signal: AbortSignal.timeout(defaultConfig.api.requestTimeoutMs) });
+      const request = () => fetch(url, { headers, signal: AbortSignal.timeout(defaultConfig.apiRequestTimeoutMs) });
       const response = isLichessRequest
-        ? await runInLichessRequestSlot(request, apiType === "eval" ? defaultConfig.api.cloudEvalBeforeRequestDelayMs : 0)
+        ? await runInLichessRequestSlot(request, apiType === "eval" ? defaultConfig.cloudEvalExtraGapMs : 0)
         : await request();
       if (response.status === 429) {
         lichessRateLimitResponses++;
@@ -117,7 +117,7 @@ export async function fetchWithRetry(url: string, retryAttempts: number, useToke
         const allowedRateLimitRetries = apiType === "eval"
           ? 1
           : defaultConfig.api.rateLimitRetryAttempts;
-        const retryDelayMs = defaultConfig.api.rateLimitRetryInitialDelayMs * Math.pow(
+        const retryDelayMs = defaultConfig.apiRetryDelayMs * Math.pow(
           defaultConfig.api.retryBackoffMultiplier,
           Math.min(lichessRateLimitResponses, allowedRateLimitRetries) - 1
         );

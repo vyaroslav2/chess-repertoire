@@ -101,7 +101,7 @@ test("start_tree_generator refuses a live lock with owner/path details without t
     assert.equal(res.status, 1);
     assert.match(res.stderr, /deep-verify/);
     assert.match(res.stderr, new RegExp(String(process.pid)));
-    assert.match(res.stderr, /generator\.lock/);
+    assert.match(res.stderr, /lockfile-never-remove-by-yourself-unless-stale/);
     assert.equal(fs.readFileSync(dummyLogPath, "utf8"), originalLogContent);
   } finally {
     owner.release();

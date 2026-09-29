@@ -2,7 +2,7 @@ import { Chess } from "chess.js";
 import { prisma, getOrCreatePositionCache, getRepertoireNode, createRepertoireNode, createResponseMove, getOrCreateHumanDataSnapshot, ensureRepertoireNodeWikibooks, propagateRepertoireProbabilities } from "../db/operations";
 import { parseFullFen, positionKeyFromFen } from "./fen";
 import { fetchAllDatabases, fetchMastersOpeningMetadata } from "../api/lichess";
-import { defaultConfig, computeExplorerRequestProfile, createRuntimeConfig } from "../core/config";
+import { defaultConfig, computeExplorerRequestProfile, createRuntimeConfig, getProbabilityBand } from "../core/config";
 import { selectWhiteCandidates, evaluateBlackMove } from "./evaluator";
 import { reconcileExistingResponse } from "./rm-reconciliation";
 import { delay } from "../api/retry";
@@ -466,15 +466,8 @@ export async function generateRepertoire(
       continue;
     }
 
-    let dynamicMaxDepth = runtime.config.generation.rareDepthBudget;
-    let dynamicProbabilityBand = "rare";
-    if (node.cumulativeProb >= runtime.config.generation.commonProbability) {
-        dynamicMaxDepth = runtime.config.generation.commonDepthBudget;
-        dynamicProbabilityBand = "common";
-    } else if (node.cumulativeProb >= runtime.config.generation.uncommonProbability) {
-        dynamicMaxDepth = runtime.config.generation.uncommonDepthBudget;
-        dynamicProbabilityBand = "uncommon";
-    }
+    const dynamicProbabilityBand = getProbabilityBand(node.cumulativeProb, runtime.config);
+    let dynamicMaxDepth = runtime.config.depthBudget[dynamicProbabilityBand];
     const uncappedDynamicMaxDepth = dynamicMaxDepth;
     dynamicMaxDepth = Math.min(uncappedDynamicMaxDepth, maxDepth);
     console.log(`[DYNAMIC DEPTH] cumulative probability=${(node.cumulativeProb * 100).toFixed(3)}%; band=${dynamicProbabilityBand}; dynamic budget=${uncappedDynamicMaxDepth} full moves; generation cap=${maxDepth} full moves; effective depth limit=${dynamicMaxDepth} full moves.`);
@@ -590,12 +583,8 @@ export async function generateRepertoire(
       if (!reconciledOpponent) throw new Error(`Reconciled OPPONENT branch ${canonicalWhiteMove.uci} is missing`);
       console.log(`\nEvaluating White Move: ${whiteMove.san} (Reason: ${whiteMove.reason}, Prob: ${whiteMove.probability ? (whiteMove.probability*100).toFixed(1) : 0}%)`);
       const resultingProbability = canonicalWhiteMove.trueProbability;
-      const resultingBand = resultingProbability >= runtime.config.generation.commonProbability
-        ? "common"
-        : resultingProbability >= runtime.config.generation.uncommonProbability ? "uncommon" : "rare";
-      const resultingBudget = resultingBand === "common"
-        ? runtime.config.generation.commonDepthBudget
-        : resultingBand === "uncommon" ? runtime.config.generation.uncommonDepthBudget : runtime.config.generation.rareDepthBudget;
+      const resultingBand = getProbabilityBand(resultingProbability, runtime.config);
+      const resultingBudget = runtime.config.depthBudget[resultingBand];
       console.log(`[BRANCH PROBABILITY] route probability before White move=${(canonicalSourceNode.cumulativeProb * 100).toFixed(3)}%; White move share at this position=${(whiteMove.probability * 100).toFixed(3)}%; resulting route probability=${(resultingProbability * 100).toFixed(3)}%; band=${resultingBand}; dynamic budget=${resultingBudget} full moves; generation cap=${maxDepth}; effective depth limit=${Math.min(resultingBudget, maxDepth)}.`);
       const newPgn = canonicalWhiteMove.destinationPgn;
       const reconciledEdge = await prisma.repertoireMove.findUnique({ where: { id: reconciledOpponent.edgeId } });

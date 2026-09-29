@@ -95,10 +95,10 @@ export function buildBlackHumanShortlist(
   processMoves(eliteMoves, false);
 
   const shortlist: BlackHumanCandidate[] = [];
-  const minGames = config.humanMoves.minimumWeightedGames;
-  const weight = config.humanMoves.mastersWeight;
-  const anchorGames = config.smoothing.anchorGames;
-  const repertoireSidePrior = config.smoothing.repertoireSidePrior;
+  const minGames = config.minimumWeightedGames;
+  const weight = config.mastersWeight;
+  const anchorGames = config.anchorGames;
+  const repertoireSidePrior = config.repertoireSidePrior;
 
   for (const candidate of Array.from(candidatesByUci.values())) {
     candidate.weightedGames = (candidate.mastersGames * weight) + candidate.eliteGames;

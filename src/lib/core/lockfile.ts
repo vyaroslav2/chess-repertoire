@@ -1,7 +1,8 @@
 import * as fs from "fs";
 import * as path from "path";
+import { defaultConfig } from "./config";
 
-export const LOCKFILE_PATH = path.resolve(__dirname, "../../..", "generator.lock");
+export const LOCKFILE_PATH = path.resolve(__dirname, "../../..", defaultConfig.lockfileName);
 
 export type LockData = {
   script: string;

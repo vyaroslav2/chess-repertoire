@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { acquireLock, LOCKFILE_PATH, releaseLock } from "./lockfile";
+import { defaultConfig } from "./config";
 
 function temporaryLock(label: string): string {
   return path.join(os.tmpdir(), `chess-repertoire-${label}-${process.pid}-${Date.now()}.lock`);
@@ -68,6 +69,10 @@ test("malformed existing lock is preserved for manual intervention", () => {
 });
 
 test("default lock path is repository-relative, not cwd-relative", () => {
-  assert.equal(LOCKFILE_PATH, path.resolve(__dirname, "../../..", "generator.lock"));
-  assert.notEqual(LOCKFILE_PATH, path.resolve(os.tmpdir(), "generator.lock"));
+  assert.equal(LOCKFILE_PATH, path.resolve(__dirname, "../../..", defaultConfig.lockfileName));
+  assert.notEqual(LOCKFILE_PATH, path.resolve(os.tmpdir(), defaultConfig.lockfileName));
+});
+
+test("generation-config lockfileName names the default lockfile", () => {
+  assert.equal(path.basename(LOCKFILE_PATH), "lockfile-never-remove-by-yourself-unless-stale");
 });

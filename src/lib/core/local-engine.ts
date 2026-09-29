@@ -190,8 +190,8 @@ export async function runTrustedLocalSearch(
 
 function deepLocalSettings(config: Config): LocalSearchSettings {
   return {
-    depth: config.engine.deepVerification.depth,
-    multiPv: config.engine.deepVerification.multiPv
+    depth: config.localStockfishDepth,
+    multiPv: config.localStockfishMultiPv
   };
 }
 

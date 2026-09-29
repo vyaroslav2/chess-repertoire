@@ -51,7 +51,7 @@ test('Slice 12 B4 Local Deep integration', async (t) => {
     const requested: Array<string | undefined> = [];
     const runner: LocalSearchRunner = async (_fen, settings, expected) => {
       requested.push(expected);
-      assert.equal(settings.depth, defaultConfig.engine.deepVerification.depth);
+      assert.equal(settings.depth, defaultConfig.localStockfishDepth);
       assert.equal(settings.multiPv, 1);
       return expected ? cpEval(expected, 'Nbd7', -50) : cpEval('e7e5', 'e5', -100);
     };

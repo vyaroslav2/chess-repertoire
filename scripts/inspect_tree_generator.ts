@@ -82,23 +82,23 @@ function percentage(part: number, total: number): string {
 function printConfiguration(): void {
   console.log(`\n${line()}\nDIAGNOSTIC RUN CONFIGURATION\n${line()}`);
   console.log("Generation depth cap: 3 full moves (testing run).");
-  console.log(`Dynamic depth budgets: common=${defaultConfig.generation.commonDepthBudget}, uncommon=${defaultConfig.generation.uncommonDepthBudget}, rare=${defaultConfig.generation.rareDepthBudget} full moves.`);
-  console.log(`Dynamic probability bands: common >= ${(defaultConfig.generation.commonProbability * 100).toFixed(2)}%; uncommon >= ${(defaultConfig.generation.uncommonProbability * 100).toFixed(2)}% and < ${(defaultConfig.generation.commonProbability * 100).toFixed(2)}%; rare < ${(defaultConfig.generation.uncommonProbability * 100).toFixed(2)}%.`);
-  console.log(`Move-number bands: early through ${defaultConfig.moveBands.earlyThrough}; middle through ${defaultConfig.moveBands.middleThrough}; later moves use the late band.`);
-  console.log(`White Amateur popularity thresholds: early=${(defaultConfig.whiteMoveFiltering.mainlinePopularity.early * 100).toFixed(2)}%, middle=${(defaultConfig.whiteMoveFiltering.mainlinePopularity.middle * 100).toFixed(2)}%, late=${(defaultConfig.whiteMoveFiltering.mainlinePopularity.late * 100).toFixed(2)}%.`);
-  console.log(`API CP tolerances: early=${defaultConfig.engineVerification.apiToleranceCp.early}, middle=${defaultConfig.engineVerification.apiToleranceCp.middle}, late=${defaultConfig.engineVerification.apiToleranceCp.late}.`);
-  console.log(`Local CP tolerances: early=${defaultConfig.engineVerification.localToleranceCp.early}, middle=${defaultConfig.engineVerification.localToleranceCp.middle}, late=${defaultConfig.engineVerification.localToleranceCp.late}.`);
-  console.log(`Black minimum weighted games: ${defaultConfig.humanMoves.minimumWeightedGames}; Masters weight: ${defaultConfig.humanMoves.mastersWeight}.`);
-  console.log(`Repertoire-side smoothing: anchor games=${defaultConfig.smoothing.anchorGames}; cautious prior score=${(defaultConfig.smoothing.repertoireSidePrior * 100).toFixed(2)}%. In this Black repertoire, that is a ${(defaultConfig.smoothing.repertoireSidePrior * 100).toFixed(2)}% Black score (equivalently ${(100 - defaultConfig.smoothing.repertoireSidePrior * 100).toFixed(2)}% White score).`);
-  console.log(`Lichess Cloud: MultiPV=${defaultConfig.api.lichessCloudEval.multiPv}; retries=${defaultConfig.api.lichessCloudEval.retryAttempts}. ChessDB retries=${defaultConfig.api.chessDb.retryAttempts}.`);
-  console.log(`Lichess request gate: one in-flight request at a time; minimum ${defaultConfig.api.betweenRequestDelayMs}ms between request starts; any HTTP 429 pauses all Lichess requests for at least ${defaultConfig.api.rateLimitRetryDelayMs}ms.`);
-  console.log(`Local Deep Stockfish: depth=${defaultConfig.engine.deepVerification.depth}; MultiPV=${defaultConfig.engine.deepVerification.multiPv}.`);
-  console.log(`Explorer filters (fixed for this run): Elite speeds=${defaultConfig.humanExplorerRequest.elite.speeds.join(",")}, ratings=${defaultConfig.humanExplorerRequest.elite.ratings.join(",")}; Amateur speeds=${defaultConfig.humanExplorerRequest.amateur.speeds.join(",")}, ratings=${defaultConfig.humanExplorerRequest.amateur.ratings.join(",")}.`);
+  console.log(`Dynamic depth budgets: deep=${defaultConfig.depthBudget.deep}, medium=${defaultConfig.depthBudget.medium}, shallow=${defaultConfig.depthBudget.shallow} full moves.`);
+  console.log(`Dynamic probability bands: deep >= ${(defaultConfig.probabilityBands.deep * 100).toFixed(2)}%; medium >= ${(defaultConfig.probabilityBands.medium * 100).toFixed(2)}% and < ${(defaultConfig.probabilityBands.deep * 100).toFixed(2)}%; shallow < ${(defaultConfig.probabilityBands.medium * 100).toFixed(2)}%.`);
+  console.log(`Move-number bands: early through ${defaultConfig.moveNumberBands.early}; middle through ${defaultConfig.moveNumberBands.middle}; later moves use the late band.`);
+  console.log(`White Amateur popularity thresholds: early=${(defaultConfig.popularityThresholds.early * 100).toFixed(2)}%, middle=${(defaultConfig.popularityThresholds.middle * 100).toFixed(2)}%, late=${(defaultConfig.popularityThresholds.late * 100).toFixed(2)}%.`);
+  console.log(`API CP tolerances: early=${defaultConfig.apiToleranceCp.early}, middle=${defaultConfig.apiToleranceCp.middle}, late=${defaultConfig.apiToleranceCp.late}.`);
+  console.log(`Local CP tolerances: early=${defaultConfig.localToleranceCp.early}, middle=${defaultConfig.localToleranceCp.middle}, late=${defaultConfig.localToleranceCp.late}.`);
+  console.log(`Black minimum weighted games: ${defaultConfig.minimumWeightedGames}; Masters weight: ${defaultConfig.mastersWeight}.`);
+  console.log(`Repertoire-side smoothing: anchor games=${defaultConfig.anchorGames}; cautious prior score=${(defaultConfig.repertoireSidePrior * 100).toFixed(2)}%. In this Black repertoire, that is a ${(defaultConfig.repertoireSidePrior * 100).toFixed(2)}% Black score (equivalently ${(100 - defaultConfig.repertoireSidePrior * 100).toFixed(2)}% White score).`);
+  console.log(`Lichess Cloud: MultiPV=${defaultConfig.lichessCloudEvalMultiPv}; retries=${defaultConfig.api.lichessCloudEval.retryAttempts}. ChessDB retries=${defaultConfig.api.chessDb.retryAttempts}.`);
+  console.log(`Lichess request gate: one in-flight request at a time; minimum ${defaultConfig.apiRequestGapMs}ms between request starts; any HTTP 429 pauses all Lichess requests for at least ${defaultConfig.apiRetryDelayMs}ms.`);
+  console.log(`Local Deep Stockfish: depth=${defaultConfig.localStockfishDepth}; MultiPV=${defaultConfig.localStockfishMultiPv}.`);
+  console.log(`Explorer filters (fixed for this run): Elite speeds=${defaultConfig.explorerEliteSpeeds.join(",")}, ratings=${defaultConfig.explorerEliteRatings.join(",")}; Amateur speeds=${defaultConfig.explorerSpeeds.join(",")}, ratings=${defaultConfig.explorerRatings.join(",")}.`);
   console.log("White expansion requests only Masters metadata and Amateur moves; it never fetches or caches Elite. Black-response selection requests Masters plus Elite statistics.");
-  console.log(`Move-number band endpoints are inclusive: full move ${defaultConfig.moveBands.earlyThrough} is early and full move ${defaultConfig.moveBands.middleThrough} is middle.`);
+  console.log(`Move-number band endpoints are inclusive: full move ${defaultConfig.moveNumberBands.early} is early and full move ${defaultConfig.moveNumberBands.middle} is middle.`);
   console.log("All engine evaluations use White's point of view: positive is better for White, negative is better for Black. Example: +0.32 means +32 cp for White.");
   console.log("A remote-engine cache stores the complete move/evaluation snapshot returned by one source for one exact Full FEN and request profile.");
-  console.log(`Our application—not Stockfish—hashes role=deep-local, depth=${defaultConfig.engine.deepVerification.depth}, and MultiPV=${defaultConfig.engine.deepVerification.multiPv} with SHA-256 to produce the local-engine profile ID.`);
+  console.log(`Our application—not Stockfish—hashes role=deep-local, depth=${defaultConfig.localStockfishDepth}, and MultiPV=${defaultConfig.localStockfishMultiPv} with SHA-256 to produce the local-engine profile ID.`);
   console.log("The profile hash is a non-reversible fingerprint of those settings only. Full FEN and candidate UCI are separate database-key fields; they are not inside the profile hash.");
   console.log("Baseline cache identity = exact Full FEN + profile ID. Exact-candidate cache identity = exact Full FEN + candidate UCI + profile ID.");
   console.log("The profile does not currently distinguish Stockfish version/binary build, Threads (parallel CPU workers), Hash (transposition-table memory), neural-network file, or other engine options.");
@@ -108,9 +108,9 @@ function printConfiguration(): void {
   console.log("\nFORMULAS USED THROUGHOUT THE RUN");
   console.log("White conditional popularity = Amateur games for the move / total Amateur games.");
   console.log("Resulting route probability = route probability before White move × White move share at this position. Black's deterministic response does not multiply it again.");
-  console.log(`Black weighted games = Masters games × ${defaultConfig.humanMoves.mastersWeight} + Elite games.`);
-  console.log(`Black score = (weighted Black wins + 0.5 × weighted draws + ${defaultConfig.smoothing.anchorGames} × ${defaultConfig.smoothing.repertoireSidePrior}) / (weighted games + ${defaultConfig.smoothing.anchorGames}).`);
-  console.log(`Smoothing adds ${(defaultConfig.smoothing.anchorGames * defaultConfig.smoothing.repertoireSidePrior).toFixed(0)} result points—not wins—from ${defaultConfig.smoothing.anchorGames} imaginary games. A win is 1 point, a draw is 0.5, and a loss is 0; small samples stay near ${(defaultConfig.smoothing.repertoireSidePrior * 100).toFixed(2)}%, while large samples dominate the prior.`);
+  console.log(`Black weighted games = Masters games × ${defaultConfig.mastersWeight} + Elite games.`);
+  console.log(`Black score = (weighted Black wins + 0.5 × weighted draws + ${defaultConfig.anchorGames} × ${defaultConfig.repertoireSidePrior}) / (weighted games + ${defaultConfig.anchorGames}).`);
+  console.log(`Smoothing adds ${(defaultConfig.anchorGames * defaultConfig.repertoireSidePrior).toFixed(0)} result points—not wins—from ${defaultConfig.anchorGames} imaginary games. A win is 1 point, a draw is 0.5, and a loss is 0; small samples stay near ${(defaultConfig.repertoireSidePrior * 100).toFixed(2)}%, while large samples dominate the prior.`);
   console.log("Evaluations use White's perspective, so Black prefers the lowest number: negative favors Black and positive favors White.");
   console.log("CP loss = candidate evaluation − best evaluation. Example: g6=-10cp is better for Black than d5=+20cp because -10 is lower; d5's loss is 20-(-10)=30cp, so it passes an 80cp tolerance and fails a 20cp tolerance.");
   console.log("\nCOUNTER DEFINITIONS");
@@ -193,7 +193,7 @@ async function diagnosticFetchAllDatabases(
 
   const moveNumber = fullmoveNumber(fullFen);
   const band = getMoveBand(moveNumber, defaultConfig);
-  const threshold = defaultConfig.whiteMoveFiltering.mainlinePopularity[band];
+  const threshold = defaultConfig.popularityThresholds[band];
   const amateurSan = new Set(result[2].moves.map(move => move.san));
   const whiteDecisions = [...amateurSan].map(san => ({
     san,
@@ -308,7 +308,7 @@ async function diagnosticEvaluateBlackMove(
   logExplorerRows("BLACK ELITE RAW DATA — LICHESS OPENING EXPLORER", elite);
   console.log(`[REMOTE CACHE BEFORE] Lichess=${lichessBefore.status}; ChessDB=${chessDbBefore.status}`);
   console.log(`[LOCAL CACHE BEFORE] baseline=${localBaselineBefore ? "hit" : "miss"}; exact candidates=${localCandidatesBefore.length}; role=available only if local fallback or verification is needed.`);
-  console.log(`[MINIMUM WEIGHTED GAMES] ${defaultConfig.humanMoves.minimumWeightedGames}`);
+  console.log(`[MINIMUM WEIGHTED GAMES] ${defaultConfig.minimumWeightedGames}`);
   const survivingUci = new Set(candidates.map(candidate => candidate.uci));
   const rawByUci = new Map<string, { san: string; masters: number; elite: number }>();
   for (const move of masters.moves) rawByUci.set(move.uci, { san: move.san, masters: move.games, elite: 0 });
@@ -319,9 +319,9 @@ async function diagnosticEvaluateBlackMove(
   }
   for (const [uci, raw] of rawByUci) {
     if (survivingUci.has(uci)) continue;
-    const weighted = raw.masters * defaultConfig.humanMoves.mastersWeight + raw.elite;
+    const weighted = raw.masters * defaultConfig.mastersWeight + raw.elite;
     console.log(`  ${raw.san} (${uci}): Masters=${raw.masters}, Elite=${raw.elite}, weighted=${weighted} => ABORT`);
-    console.log(`    Reason: ${weighted} weighted games is below the required ${defaultConfig.humanMoves.minimumWeightedGames}.`);
+    console.log(`    Reason: ${weighted} weighted games is below the required ${defaultConfig.minimumWeightedGames}.`);
   }
   for (const candidate of candidates) {
     console.log(`  ${candidate.san} (${candidate.uci}): Black score=${(candidate.blackScore * 100).toFixed(3)}%; Masters=${candidate.mastersGames}, Elite=${candidate.eliteGames}, weighted=${candidate.weightedGames}, weighted Black wins=${candidate.weightedBlackWins}, weighted draws=${candidate.weightedDraws}`);
@@ -374,7 +374,7 @@ async function diagnosticEvaluateBlackMove(
       else console.log("    ChessDB unavailable/empty => fall through to Local Deep Stockfish.");
       if (chessDecision === "REJECT") continue;
       if (chessDecision === "ACCEPT") break;
-      console.log(`    Local Deep Stockfish is required; local tolerance=${getCpTolerance(moveNumber, true)}cp, depth=${defaultConfig.engine.deepVerification.depth}, MultiPV=${defaultConfig.engine.deepVerification.multiPv}.`);
+      console.log(`    Local Deep Stockfish is required; local tolerance=${getCpTolerance(moveNumber, true)}cp, depth=${defaultConfig.localStockfishDepth}, MultiPV=${defaultConfig.localStockfishMultiPv}.`);
       if (candidate.uci === result.selectedUci) break;
     }
   }

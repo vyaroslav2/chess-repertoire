@@ -100,8 +100,8 @@ describe('B1 Black Human Shortlist Construction', () => {
 
   it('12. minimum evidence boundary: one below drops, exact survives', () => {
     const config = JSON.parse(JSON.stringify(defaultConfig));
-    config.humanMoves.minimumWeightedGames = 15;
-    config.humanMoves.mastersWeight = 5;
+    config.minimumWeightedGames = 15;
+    config.mastersWeight = 5;
 
     const listDrop = buildBlackHumanShortlist([{ uci: 'e2e4', san: 'e4', white: 0, draws: 0, black: 0, games: 2 }], [], config);
     assert.strictEqual(listDrop.length, 0, "10 weighted drops");
@@ -175,14 +175,14 @@ describe('B1 Black Human Shortlist Construction', () => {
     const masters = [{ uci: 'e2e4', san: 'e4', white: 1, draws: 2, black: 3, games: 6 }];
     const c1 = JSON.parse(JSON.stringify(defaultConfig));
     const c2 = JSON.parse(JSON.stringify(defaultConfig));
-    c1.smoothing.repertoireSidePrior = 1.0;
-    c2.smoothing.repertoireSidePrior = 0.0;
+    c1.repertoireSidePrior = 1.0;
+    c2.repertoireSidePrior = 0.0;
     
     const l1 = buildBlackHumanShortlist(masters, [], c1);
     const l2 = buildBlackHumanShortlist(masters, [], c2);
     assert.ok(l1[0].blackScore !== l2[0].blackScore, "blackScore reacts to prior config");
 
-    c1.humanMoves.mastersWeight = 100;
+    c1.mastersWeight = 100;
     const l3 = buildBlackHumanShortlist(masters, [], c1);
     assert.ok(l1[0].weightedGames !== l3[0].weightedGames, "weightedGames reacts to weight config");
   });

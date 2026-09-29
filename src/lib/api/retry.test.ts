@@ -7,19 +7,19 @@ import { fetchWithRetry, LichessRateLimitError, UserRequestedStopError } from '.
 
 test('Explorer request spacing belongs to the shared request layer', async (t) => {
   const originalFetch = global.fetch;
-  const originalSpacing = defaultConfig.api.betweenRequestDelayMs;
+  const originalSpacing = defaultConfig.apiRequestGapMs;
   const originalNetworkRetryDelay = defaultConfig.api.networkRetryDelayMs;
-  const originalRateLimitRetryDelay = defaultConfig.api.rateLimitRetryInitialDelayMs;
+  const originalRateLimitRetryDelay = defaultConfig.apiRetryDelayMs;
 
   try {
     await t.test('fetchAllDatabases has no high-level spacing dependency', () => {
       const source = fs.readFileSync(path.resolve(process.cwd(), 'src/lib/api/lichess.ts'), 'utf8');
-      assert.doesNotMatch(source, /betweenRequestDelayMs|\bdelay\s*\(/);
+      assert.doesNotMatch(source, /apiRequestGapMs|\bdelay\s*\(/);
     });
 
     await t.test('concurrent Explorer requests are centrally spaced', async () => {
       const spacingMs = 40;
-      defaultConfig.api.betweenRequestDelayMs = spacingMs;
+      defaultConfig.apiRequestGapMs = spacingMs;
       const requestTimes: number[] = [];
       global.fetch = async () => {
         requestTimes.push(Date.now());
@@ -37,7 +37,7 @@ test('Explorer request spacing belongs to the shared request layer', async (t) =
     });
 
     await t.test('retry attempts still occur through the spaced request layer', async () => {
-      defaultConfig.api.betweenRequestDelayMs = 10;
+      defaultConfig.apiRequestGapMs = 10;
       defaultConfig.api.networkRetryDelayMs = 0;
       let attempts = 0;
       global.fetch = async () => {
@@ -53,8 +53,8 @@ test('Explorer request spacing belongs to the shared request layer', async (t) =
 
     await t.test('a 429 imposes one shared cooldown before retrying', async () => {
       const cooldownMs = 40;
-      defaultConfig.api.betweenRequestDelayMs = 0;
-      defaultConfig.api.rateLimitRetryInitialDelayMs = cooldownMs;
+      defaultConfig.apiRequestGapMs = 0;
+      defaultConfig.apiRetryDelayMs = cooldownMs;
       const requestTimes: number[] = [];
       global.fetch = async () => {
         requestTimes.push(Date.now());
@@ -70,9 +70,9 @@ test('Explorer request spacing belongs to the shared request layer', async (t) =
     });
   } finally {
     global.fetch = originalFetch;
-    defaultConfig.api.betweenRequestDelayMs = originalSpacing;
+    defaultConfig.apiRequestGapMs = originalSpacing;
     defaultConfig.api.networkRetryDelayMs = originalNetworkRetryDelay;
-    defaultConfig.api.rateLimitRetryInitialDelayMs = originalRateLimitRetryDelay;
+    defaultConfig.apiRetryDelayMs = originalRateLimitRetryDelay;
   }
 });
 
@@ -80,13 +80,13 @@ test('request authentication and HTTP retry policy', async (t) => {
   const originalFetch = global.fetch;
   const originalToken = process.env.LICHESS_API_TOKEN;
   const originalNetworkRetryDelay = defaultConfig.api.networkRetryDelayMs;
-  const originalSpacing = defaultConfig.api.betweenRequestDelayMs;
-  const originalRateLimitRetryDelay = defaultConfig.api.rateLimitRetryInitialDelayMs;
+  const originalSpacing = defaultConfig.apiRequestGapMs;
+  const originalRateLimitRetryDelay = defaultConfig.apiRetryDelayMs;
   try {
     process.env.LICHESS_API_TOKEN = 'secret-token';
     defaultConfig.api.networkRetryDelayMs = 0;
-    defaultConfig.api.betweenRequestDelayMs = 0;
-    defaultConfig.api.rateLimitRetryInitialDelayMs = 0;
+    defaultConfig.apiRequestGapMs = 0;
+    defaultConfig.apiRetryDelayMs = 0;
 
     await t.test('Explorer never sends Authorization while token-enabled eval still does', async () => {
       const headers: HeadersInit[] = [];
@@ -176,8 +176,8 @@ test('request authentication and HTTP retry policy', async (t) => {
   } finally {
     global.fetch = originalFetch;
     defaultConfig.api.networkRetryDelayMs = originalNetworkRetryDelay;
-    defaultConfig.api.betweenRequestDelayMs = originalSpacing;
-    defaultConfig.api.rateLimitRetryInitialDelayMs = originalRateLimitRetryDelay;
+    defaultConfig.apiRequestGapMs = originalSpacing;
+    defaultConfig.apiRetryDelayMs = originalRateLimitRetryDelay;
     if (originalToken === undefined) delete process.env.LICHESS_API_TOKEN;
     else process.env.LICHESS_API_TOKEN = originalToken;
   }

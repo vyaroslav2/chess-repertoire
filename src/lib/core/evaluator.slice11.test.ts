@@ -490,8 +490,8 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
       
       // To prevent it actually taking 5 seconds running depth 24 Stockfish during tests,
       // we can temporarily override defaultConfig inside the test:
-      const oldDepth = defaultConfig.engine.deepVerification.depth;
-      defaultConfig.engine.deepVerification.depth = 1;
+      const oldDepth = defaultConfig.localStockfishDepth;
+      defaultConfig.localStockfishDepth = 1;
       
       try {
         await assert.rejects(
@@ -504,7 +504,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
           "Must branch to Local Deep Stockfish (which throws ENOENT on missing binary)"
         );
       } finally {
-        defaultConfig.engine.deepVerification.depth = oldDepth;
+        defaultConfig.localStockfishDepth = oldDepth;
       }
     } finally {
       global.fetch = originalFetch;

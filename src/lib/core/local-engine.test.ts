@@ -25,7 +25,7 @@ const mateEval = (uci: string, san: string, mate: number): TrustedLocalEvaluatio
 
 function configWithDepth(depth: number): Config {
   const config = JSON.parse(JSON.stringify(defaultConfig)) as Config;
-  config.engine.deepVerification.depth = depth;
+  config.localStockfishDepth = depth;
   return config;
 }
 

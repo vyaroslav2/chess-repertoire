@@ -57,7 +57,7 @@ export function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: numbe
     const amateurGames = amateurData.games ?? (amateurData.white + amateurData.draws + amateurData.black);
     const probability = totalAmateurGames > 0 ? amateurGames / totalAmateurGames : 0;
     const band = getMoveBand(currentMoveNumber, defaultConfig);
-    const requiredProbability = defaultConfig.whiteMoveFiltering.mainlinePopularity[band];
+    const requiredProbability = defaultConfig.popularityThresholds[band];
     const include = totalAmateurGames > 0 && probability >= requiredProbability;
 
     return {
@@ -139,7 +139,7 @@ export async function evaluateBlackMove(
   if (lichessResult.status === "missing" && !GlobalState.lichessCloudEvalDisabled) {
     // Ordinary flow without GlobalState.lichessCloudEvals bypass
     try {
-      const cloudUrl = `https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(fullFen)}&multiPv=${defaultConfig.api.lichessCloudEval.multiPv}`;
+      const cloudUrl = `https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(fullFen)}&multiPv=${defaultConfig.lichessCloudEvalMultiPv}`;
       const cloudData = await fetchWithRetry(cloudUrl, defaultConfig.api.lichessCloudEval.retryAttempts, false, 'eval');
       
       if (cloudData && !cloudData.error) {
