@@ -80,7 +80,7 @@ export function selectWhiteCandidates(currentMoveNumber: number, amateurList: an
     .filter(move => move.include);
 }
 
-import { fetchAllDatabases } from "../api/lichess";
+import { fetchAllDatabases, pickExplorerOpening, type ExplorerOpening } from "../api/lichess";
 import { buildBlackHumanShortlist } from "./black-human-shortlist";
 
 
@@ -101,8 +101,11 @@ export type SelectedResponseResult = {
   selectedStats: any;
   candidateMoves: ReturnType<typeof buildBlackHumanShortlist>;
   enginePvs: any[];
-  openingMetadata?: { eco?: string | null; name?: string | null } | null;
-  openingMetadataRetrieval?: "CACHE" | "FRESH";
+  /** DB.06 rule 1: the opening Explorer returned for this position: Masters, then Elite, then Amateur. */
+  openingMetadata: ExplorerOpening | null;
+  /** DB.13: all games in each dataset that reached this position. */
+  totalMastersGames: number;
+  totalEliteGames: number;
   /** @deprecated diagnostic compatibility; persistence uses source/cp/mate. */
   evalSource: ResponseEvaluationSource;
   /** @deprecated diagnostic compatibility; persistence uses cp. */
@@ -116,7 +119,6 @@ export async function evaluateBlackMove(
   chess: Chess,
   moveNumber: number,
   previousMovesSan: string[],
-  snapshotId: string,
   dependencies: EvaluateBlackMoveDependencies = {}
 ): Promise<SelectedResponseResult> {
   const fullFen = parseFullFen(fen);
@@ -124,7 +126,7 @@ export async function evaluateBlackMove(
   let evalSource: ResponseEvaluationSource = 'Lichess Cloud Evaluation';
 
   // 1. Check Explorer Cache via lichess.ts
-  const [mastersData, eliteData] = await fetchAllDatabases(fen, snapshotId);
+  const [mastersData, eliteData, amateurData] = await fetchAllDatabases(fen);
   
   // 2. Compute Black human candidate shortlist (B1)
   const candidateMoves = buildBlackHumanShortlist(mastersData.moves || [], eliteData.moves || [], defaultConfig);
@@ -442,8 +444,9 @@ export async function evaluateBlackMove(
     selectedMate,
     selectedStats,
     candidateMoves,
-    openingMetadata: mastersData.opening,
-    openingMetadataRetrieval: mastersData.retrieval,
+    openingMetadata: pickExplorerOpening([mastersData, eliteData, amateurData]),
+    totalMastersGames: mastersData.positionTotalGames,
+    totalEliteGames: eliteData.positionTotalGames,
     enginePvs: lichessPvs.length > 0 ? lichessPvs : (chessDbOrdinarySnapshot ? toLegacyEnginePvs((chessDbResult as any).evaluations) : []) 
   };
 }

@@ -11,10 +11,10 @@ const chessDbProfile = computeRemoteEngineEvaluationProfile('CHESSDB', defaultCo
 const cpMove = (uci: string, cp: number, san: string | null = null) => ({ uci, san, cp, mate: null });
 const mateMove = (uci: string, mate: number, san: string | null = null) => ({ uci, san, cp: null, mate });
 
-test('Slice 7 coherent remote engine cache', async (t) => {
-  const { saveRemoteEngineResult, readRemoteEngineResult, readRemoteEngineCandidate, createHumanDataSnapshot } = await import('../db/operations');
-  await prisma.remoteEngineEvalCache.deleteMany();
-  await prisma.remoteEngineFetch.deleteMany();
+test('DB.32 remote engine cache', async (t) => {
+  const { saveRemoteEngineResult, readRemoteEngineResult, readRemoteEngineCandidate } = await import('../db/operations');
+  await prisma.engineCacheEvaluation.deleteMany();
+  await prisma.engineCache.deleteMany();
 
   await t.test('exact identity creates one marker and atomically replaces all children', async () => {
     await saveRemoteEngineResult(fen1, 'LICHESS', lichessProfile, [cpMove('e2e4', 20), cpMove('d2d4', 20), mateMove('g1f3', 4)]);
@@ -22,13 +22,13 @@ test('Slice 7 coherent remote engine cache', async (t) => {
     assert.strictEqual(initial.status, 'success');
     if (initial.status === 'success') assert.strictEqual(initial.evaluations.length, 3);
     await saveRemoteEngineResult(fen1, 'LICHESS', lichessProfile, [cpMove('e2e4', 20)]);
-    assert.strictEqual(await prisma.remoteEngineFetch.count({ where: { fullFen: fen1, source: 'LICHESS', evaluationProfile: lichessProfile } }), 1);
+    assert.strictEqual(await prisma.engineCache.count({ where: { fullFen: fen1, engine: 'LICHESS', engineProfile: lichessProfile } }), 1);
     const result = await readRemoteEngineResult(fen1, 'LICHESS', lichessProfile);
     assert.strictEqual(result.status, 'success');
     if (result.status === 'success') assert.deepStrictEqual(result.evaluations.map(row => row.uci), ['e2e4']);
   });
 
-  await t.test('FullFen, source, and profile are independent identity dimensions', async () => {
+  await t.test('DB.32 FullFen, source, and profile are independent identity dimensions', async () => {
     assert.strictEqual((await readRemoteEngineResult(fen2, 'LICHESS', lichessProfile)).status, 'missing');
     assert.strictEqual((await readRemoteEngineResult(fen1, 'CHESSDB', chessDbProfile)).status, 'missing');
     assert.strictEqual((await readRemoteEngineResult(fen1, 'LICHESS', `${lichessProfile}-other`)).status, 'missing');
@@ -45,7 +45,7 @@ test('Slice 7 coherent remote engine cache', async (t) => {
     assert.strictEqual((await readRemoteEngineResult(fen1, 'LICHESS', profile)).status, 'missing');
     await saveRemoteEngineResult(fen1, 'LICHESS', profile, []);
     assert.strictEqual((await readRemoteEngineResult(fen1, 'LICHESS', profile)).status, 'empty');
-    assert.strictEqual(await prisma.remoteEngineEvalCache.count({ where: { fetch: { fullFen: fen1, source: 'LICHESS', evaluationProfile: profile } } }), 0);
+    assert.strictEqual(await prisma.engineCacheEvaluation.count({ where: { cache: { fullFen: fen1, engine: 'LICHESS', engineProfile: profile } } }), 0);
     assert.strictEqual((await readRemoteEngineResult(fen1, 'LICHESS', lichessProfile)).status, 'success');
   });
 
@@ -85,7 +85,16 @@ test('Slice 7 coherent remote engine cache', async (t) => {
     assert.deepStrictEqual(await readRemoteEngineResult(fen1, 'LICHESS', lichessProfile), before);
   });
 
+  await t.test('DB.32 engineRank is the place in the list the engine returned', async () => {
+    const profile = `${lichessProfile}-rank`;
+    await saveRemoteEngineResult(fen1, 'LICHESS', profile, [cpMove('d2d4', 30), cpMove('e2e4', 25)]);
+    const result = await readRemoteEngineResult(fen1, 'LICHESS', profile);
+    if (result.status !== 'success') assert.fail('expected result');
+    assert.deepStrictEqual(Object.fromEntries(result.evaluations.map(row => [row.uci, row.rank])), { d2d4: 1, e2e4: 2 });
+  });
+
   await t.test('UCI is authoritative and candidate absence is not fetch absence', async () => {
+
     const profile = `${lichessProfile}-uci`;
     await saveRemoteEngineResult(fen1, 'LICHESS', profile, [cpMove('e2e4', 12)]);
     const result = await readRemoteEngineResult(fen1, 'LICHESS', profile);
@@ -105,12 +114,11 @@ test('Slice 7 coherent remote engine cache', async (t) => {
     assert.deepStrictEqual(first.evaluations.map(row => ({ uci: row.uci, cp: row.cp })), second.evaluations.map(row => ({ uci: row.uci, cp: row.cp })));
   });
 
-  await t.test('repertoire and human snapshot deletion preserve remote evidence', async () => {
+  await t.test('DB.30 wiping the tree or deleting a repertoire keeps remote evidence', async () => {
     const user = await prisma.user.create({ data: { username: `slice7-${Date.now()}` } });
     const repertoire = await prisma.repertoire.create({ data: { title: 'Slice 7 lifetime', color: 'black', userId: user.id } });
-    const snapshot = await createHumanDataSnapshot(repertoire.id, 'slice7-lifetime');
     const before = await readRemoteEngineResult(fen1, 'LICHESS', lichessProfile);
-    await prisma.humanDataSnapshot.delete({ where: { id: snapshot.id } });
+    await prisma.repertoireNode.deleteMany({ where: { repertoireId: repertoire.id } });
     assert.deepStrictEqual(await readRemoteEngineResult(fen1, 'LICHESS', lichessProfile), before);
     await prisma.repertoire.delete({ where: { id: repertoire.id } });
     assert.deepStrictEqual(await readRemoteEngineResult(fen1, 'LICHESS', lichessProfile), before);

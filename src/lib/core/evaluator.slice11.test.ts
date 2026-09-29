@@ -4,7 +4,7 @@ import { Chess } from 'chess.js';
 import { evaluateBlackMove } from './evaluator';
 import * as verifier from './verifier';
 import { PrismaClient } from '@prisma/client';
-import { createHumanDataSnapshot, getOrCreatePosition, getOrCreatePositionCache } from '../db/operations';
+import { parseFullFen, positionKeyFromFen } from './fen';
 import { defaultConfig } from './config';
 
 const prisma = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
@@ -15,13 +15,10 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
 
     const user = await prisma.user.create({ data: { username: `evaltest11-1-${Date.now()}` } });
     const repertoire = await prisma.repertoire.create({ data: { title: 'Eval Test', color: 'black', userId: user.id } });
-    const snapshot = await createHumanDataSnapshot(repertoire.id, `snapshot-${Date.now()}`);
     const fen = "rn1qkb1r/ppp1pppp/5n2/3p4/3P4/5N2/PPP1PPPP/RN1QKB1R b KQkq - 0 3";
     
-    await prisma.remoteEngineFetch.deleteMany({ where: { fullFen: fen } });
-    await prisma.humanExplorerFetch.deleteMany({ where: { positionKey: fen.split(" ")[0] } });
-    await getOrCreatePosition(fen);
-    await getOrCreatePositionCache(fen, undefined, []);
+    await prisma.engineCache.deleteMany({ where: { fullFen: fen, engine: { in: ["LICHESS", "CHESSDB"] } } });
+    await prisma.positionCache.deleteMany({ where: { positionKey: positionKeyFromFen(parseFullFen(fen)) } });
 
     let chessDbFetched = false;
 
@@ -46,7 +43,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
       };
 
       const chess = new Chess(fen);
-      const res = await evaluateBlackMove(fen, chess, 3, ["d4", "Nf6", "Nf3", "d5"], snapshot.id);
+      const res = await evaluateBlackMove(fen, chess, 3, ["d4", "Nf6", "Nf3", "d5"]);
       
       assert.strictEqual(res.selectedMoveSan, "Nbd7");
       assert.strictEqual(res.evalSource, "Lichess Cloud Evaluation");
@@ -71,13 +68,10 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
 
     const user = await prisma.user.create({ data: { username: `evaltest11-2-${Date.now()}` } });
     const repertoire = await prisma.repertoire.create({ data: { title: 'Eval Test', color: 'black', userId: user.id } });
-    const snapshot = await createHumanDataSnapshot(repertoire.id, `snapshot-${Date.now()}`);
     const fen = "rn1qkb1r/ppp1pppp/5n2/3p4/3P4/5N2/PPP1PPPP/RN1QKB1R b KQkq - 0 3";
     
-    await prisma.remoteEngineFetch.deleteMany({ where: { fullFen: fen } });
-    await prisma.humanExplorerFetch.deleteMany({ where: { positionKey: fen.split(" ")[0] } });
-    await getOrCreatePosition(fen);
-    await getOrCreatePositionCache(fen, undefined, []);
+    await prisma.engineCache.deleteMany({ where: { fullFen: fen, engine: { in: ["LICHESS", "CHESSDB"] } } });
+    await prisma.positionCache.deleteMany({ where: { positionKey: positionKeyFromFen(parseFullFen(fen)) } });
 
     let chessDbFetched = false;
 
@@ -102,7 +96,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
       };
 
       const chess = new Chess(fen);
-      const res = await evaluateBlackMove(fen, chess, 3, ["d4", "Nf6", "Nf3", "d5"], snapshot.id);
+      const res = await evaluateBlackMove(fen, chess, 3, ["d4", "Nf6", "Nf3", "d5"]);
       
       assert.strictEqual(res.selectedMoveSan, "Nbd7");
       assert.strictEqual(res.evalSource, "ChessDB");
@@ -125,13 +119,10 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
 
     const user = await prisma.user.create({ data: { username: `evaltest11-3-${Date.now()}` } });
     const repertoire = await prisma.repertoire.create({ data: { title: 'Eval Test', color: 'black', userId: user.id } });
-    const snapshot = await createHumanDataSnapshot(repertoire.id, `snapshot-${Date.now()}`);
     const fen = "rn1qkb1r/ppp1pppp/5n2/3p4/3P4/5N2/PPP1PPPP/RN1QKB1R b KQkq - 0 3";
     
-    await prisma.remoteEngineFetch.deleteMany({ where: { fullFen: fen } });
-    await prisma.humanExplorerFetch.deleteMany({ where: { positionKey: fen.split(" ")[0] } });
-    await getOrCreatePosition(fen);
-    await getOrCreatePositionCache(fen, undefined, []);
+    await prisma.engineCache.deleteMany({ where: { fullFen: fen, engine: { in: ["LICHESS", "CHESSDB"] } } });
+    await prisma.positionCache.deleteMany({ where: { positionKey: positionKeyFromFen(parseFullFen(fen)) } });
 
     try {
       global.fetch = async (url: any) => {
@@ -154,7 +145,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
       const chess = new Chess(fen);
       await assert.rejects(
         async () => {
-          await evaluateBlackMove(fen, chess, 3, ["d4", "Nf6", "Nf3", "d5"], snapshot.id);
+          await evaluateBlackMove(fen, chess, 3, ["d4", "Nf6", "Nf3", "d5"]);
         },
         (err: Error) => {
           return err.message.includes("Malformed successful ChessDB engine snapshot");
@@ -174,13 +165,10 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
 
     const user = await prisma.user.create({ data: { username: `evaltest11-4-${Date.now()}` } });
     const repertoire = await prisma.repertoire.create({ data: { title: 'Eval Test', color: 'black', userId: user.id } });
-    const snapshot = await createHumanDataSnapshot(repertoire.id, `snapshot-${Date.now()}`);
     const fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
     
-    await prisma.remoteEngineFetch.deleteMany({ where: { fullFen: fen } });
-    await prisma.humanExplorerFetch.deleteMany({ where: { positionKey: fen.split(" ")[0] } });
-    await getOrCreatePosition(fen);
-    await getOrCreatePositionCache(fen, undefined, []);
+    await prisma.engineCache.deleteMany({ where: { fullFen: fen, engine: { in: ["LICHESS", "CHESSDB"] } } });
+    await prisma.positionCache.deleteMany({ where: { positionKey: positionKeyFromFen(parseFullFen(fen)) } });
 
     try {
       global.fetch = async (url: any) => {
@@ -195,7 +183,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
       };
 
       const chess = new Chess(fen);
-      const res = await evaluateBlackMove(fen, chess, 1, ["e4"], snapshot.id);
+      const res = await evaluateBlackMove(fen, chess, 1, ["e4"]);
       
       assert.strictEqual(res.selectedMoveSan, "c6");
       assert.strictEqual(res.evalSource, "Lichess Cloud Evaluation");
@@ -215,13 +203,10 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
     const originalFetch = global.fetch;
     const user = await prisma.user.create({ data: { username: `evaltest11-5-${Date.now()}` } });
     const repertoire = await prisma.repertoire.create({ data: { title: 'Eval Test', color: 'black', userId: user.id } });
-    const snapshot = await createHumanDataSnapshot(repertoire.id, `snapshot-${Date.now()}`);
     const fen = "rn1qkb1r/ppp1pppp/5n2/3p4/3P4/5N2/PPP1PPPP/RN1QKB1R b KQkq - 0 3";
     
-    await prisma.remoteEngineFetch.deleteMany({ where: { fullFen: fen } });
-    await prisma.humanExplorerFetch.deleteMany({ where: { positionKey: fen.split(" ")[0] } });
-    await getOrCreatePosition(fen);
-    await getOrCreatePositionCache(fen, undefined, []);
+    await prisma.engineCache.deleteMany({ where: { fullFen: fen, engine: { in: ["LICHESS", "CHESSDB"] } } });
+    await prisma.positionCache.deleteMany({ where: { positionKey: positionKeyFromFen(parseFullFen(fen)) } });
 
     try {
       global.fetch = async (url: any) => {
@@ -241,7 +226,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
       const chess = new Chess(fen);
       await assert.rejects(
         async () => {
-          await evaluateBlackMove(fen, chess, 3, ["d4", "Nf6", "Nf3", "d5"], snapshot.id);
+          await evaluateBlackMove(fen, chess, 3, ["d4", "Nf6", "Nf3", "d5"]);
         },
         (err: Error) => {
           return err.message.includes("Invalid remote engine result");
@@ -260,13 +245,10 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
     const originalFetch = global.fetch;
     const user = await prisma.user.create({ data: { username: `evaltest11-6-${Date.now()}` } });
     const repertoire = await prisma.repertoire.create({ data: { title: 'Eval Test', color: 'black', userId: user.id } });
-    const snapshot = await createHumanDataSnapshot(repertoire.id, `snapshot-${Date.now()}`);
     const fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
     
-    await prisma.remoteEngineFetch.deleteMany({ where: { fullFen: fen } });
-    await prisma.humanExplorerFetch.deleteMany({ where: { positionKey: fen.split(" ")[0] } });
-    await getOrCreatePosition(fen);
-    await getOrCreatePositionCache(fen, undefined, []);
+    await prisma.engineCache.deleteMany({ where: { fullFen: fen, engine: { in: ["LICHESS", "CHESSDB"] } } });
+    await prisma.positionCache.deleteMany({ where: { positionKey: positionKeyFromFen(parseFullFen(fen)) } });
 
     try {
       global.fetch = async (url: any) => {
@@ -283,7 +265,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
       };
 
       const chess = new Chess(fen);
-      const res = await evaluateBlackMove(fen, chess, 1, ["e4"], snapshot.id);
+      const res = await evaluateBlackMove(fen, chess, 1, ["e4"]);
       assert.strictEqual(res.selectedMoveSan, "c6");
       assert.strictEqual(res.evalSource, "Lichess Cloud Evaluation");
       assert.strictEqual(res.selectedEngineCp, 500);
@@ -299,13 +281,10 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
     const originalFetch = global.fetch;
     const user = await prisma.user.create({ data: { username: `evaltest11-6c-${Date.now()}` } });
     const repertoire = await prisma.repertoire.create({ data: { title: 'Eval Test', color: 'black', userId: user.id } });
-    const snapshot = await createHumanDataSnapshot(repertoire.id, `snapshot-${Date.now()}`);
     const fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
     
-    await prisma.remoteEngineFetch.deleteMany({ where: { fullFen: fen } });
-    await prisma.humanExplorerFetch.deleteMany({ where: { positionKey: fen.split(" ")[0] } });
-    await getOrCreatePosition(fen);
-    await getOrCreatePositionCache(fen, undefined, []);
+    await prisma.engineCache.deleteMany({ where: { fullFen: fen, engine: { in: ["LICHESS", "CHESSDB"] } } });
+    await prisma.positionCache.deleteMany({ where: { positionKey: positionKeyFromFen(parseFullFen(fen)) } });
 
     try {
       global.fetch = async (url: any) => {
@@ -336,7 +315,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
       try {
         await assert.rejects(
           async () => {
-            await evaluateBlackMove(fen, chess, 1, ["e4"], snapshot.id);
+            await evaluateBlackMove(fen, chess, 1, ["e4"]);
           },
           (err: Error) => err.message.includes("Local Engine returned no usable result for expected root c7c6"),
           "Must throw a descriptive hard generation error when a hardcoded move is completely missing"
@@ -355,13 +334,10 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
     const originalFetch = global.fetch;
     const user = await prisma.user.create({ data: { username: `evaltest11-6d-${Date.now()}` } });
     const repertoire = await prisma.repertoire.create({ data: { title: 'Eval Test', color: 'black', userId: user.id } });
-    const snapshot = await createHumanDataSnapshot(repertoire.id, `snapshot-${Date.now()}`);
     const fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
     
-    await prisma.remoteEngineFetch.deleteMany({ where: { fullFen: fen } });
-    await prisma.humanExplorerFetch.deleteMany({ where: { positionKey: fen.split(" ")[0] } });
-    await getOrCreatePosition(fen);
-    await getOrCreatePositionCache(fen, undefined, []);
+    await prisma.engineCache.deleteMany({ where: { fullFen: fen, engine: { in: ["LICHESS", "CHESSDB"] } } });
+    await prisma.positionCache.deleteMany({ where: { positionKey: positionKeyFromFen(parseFullFen(fen)) } });
 
     try {
       global.fetch = async (url: any) => {
@@ -390,7 +366,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
 
       const chess = new Chess(fen);
       try {
-        const res = await evaluateBlackMove(fen, chess, 1, ["e4"], snapshot.id);
+        const res = await evaluateBlackMove(fen, chess, 1, ["e4"]);
         assert.strictEqual(res.selectedMoveSan, "c6");
         assert.strictEqual(res.evalSource, "Local Deep Stockfish");
         assert.strictEqual(res.selectedEngineCp, -777);
@@ -410,14 +386,11 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
     const originalFetch = global.fetch;
     const user = await prisma.user.create({ data: { username: `evaltest11-6e-${Date.now()}` } });
     const repertoire = await prisma.repertoire.create({ data: { title: 'Eval Test', color: 'black', userId: user.id } });
-    const snapshot = await createHumanDataSnapshot(repertoire.id, `snapshot-${Date.now()}`);
     const fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
-    await prisma.localEngineCandidate.deleteMany({ where: { fullFen: fen } });
+    await prisma.engineCacheEvaluation.deleteMany({ where: { rank: null, cache: { fullFen: fen, engine: "LOCAL" } } });
     
-    await prisma.remoteEngineFetch.deleteMany({ where: { fullFen: fen } });
-    await prisma.humanExplorerFetch.deleteMany({ where: { positionKey: fen.split(" ")[0] } });
-    await getOrCreatePosition(fen);
-    await getOrCreatePositionCache(fen, undefined, []);
+    await prisma.engineCache.deleteMany({ where: { fullFen: fen, engine: { in: ["LICHESS", "CHESSDB"] } } });
+    await prisma.positionCache.deleteMany({ where: { positionKey: positionKeyFromFen(parseFullFen(fen)) } });
 
     try {
       global.fetch = async (url: any) => {
@@ -443,7 +416,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
       try {
         await assert.rejects(
           async () => {
-            await evaluateBlackMove(fen, chess, 1, ["e4"], snapshot.id);
+            await evaluateBlackMove(fen, chess, 1, ["e4"]);
           },
           (err: Error) => err.message.includes("Invariant violation: Local Stockfish searchmoves requested c7c6 but returned e7e5"),
           "Must throw an invariant error if Local Stockfish returns a different move than the forced searchmoves"
@@ -462,13 +435,10 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
     const originalFetch = global.fetch;
     const user = await prisma.user.create({ data: { username: `evaltest11-7-${Date.now()}` } });
     const repertoire = await prisma.repertoire.create({ data: { title: 'Eval Test', color: 'black', userId: user.id } });
-    const snapshot = await createHumanDataSnapshot(repertoire.id, `snapshot-${Date.now()}`);
     const fen = "rn1qkb1r/ppp1pppp/5n2/3p4/3P4/5N2/PPP1PPPP/RN1QKB1R b KQkq - 0 3";
     
-    await prisma.remoteEngineFetch.deleteMany({ where: { fullFen: fen } });
-    await prisma.humanExplorerFetch.deleteMany({ where: { positionKey: fen.split(" ")[0] } });
-    await getOrCreatePosition(fen);
-    await getOrCreatePositionCache(fen, undefined, []);
+    await prisma.engineCache.deleteMany({ where: { fullFen: fen, engine: { in: ["LICHESS", "CHESSDB"] } } });
+    await prisma.positionCache.deleteMany({ where: { positionKey: positionKeyFromFen(parseFullFen(fen)) } });
 
     try {
       global.fetch = async (url: any) => {
@@ -496,7 +466,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
       try {
         await assert.rejects(
           async () => {
-            await evaluateBlackMove(fen, chess, 3, ["d4", "Nf6", "Nf3", "d5"], snapshot.id);
+            await evaluateBlackMove(fen, chess, 3, ["d4", "Nf6", "Nf3", "d5"]);
           },
           (err: any) => {
             return err.code === 'ENOENT' && err.syscall.includes('spawn');
@@ -517,13 +487,10 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
     const originalFetch = global.fetch;
     const user = await prisma.user.create({ data: { username: `evaltest11-6b-${Date.now()}` } });
     const repertoire = await prisma.repertoire.create({ data: { title: 'Eval Test', color: 'black', userId: user.id } });
-    const snapshot = await createHumanDataSnapshot(repertoire.id, `snapshot-${Date.now()}`);
     const fen = "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1";
     
-    await prisma.remoteEngineFetch.deleteMany({ where: { fullFen: fen } });
-    await prisma.humanExplorerFetch.deleteMany({ where: { positionKey: fen.split(" ")[0] } });
-    await getOrCreatePosition(fen);
-    await getOrCreatePositionCache(fen, undefined, []);
+    await prisma.engineCache.deleteMany({ where: { fullFen: fen, engine: { in: ["LICHESS", "CHESSDB"] } } });
+    await prisma.positionCache.deleteMany({ where: { positionKey: positionKeyFromFen(parseFullFen(fen)) } });
 
     try {
       global.fetch = async (url: any) => {
@@ -538,7 +505,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
       };
 
       const chess = new Chess(fen);
-      const res = await evaluateBlackMove(fen, chess, 1, ["d4"], snapshot.id);
+      const res = await evaluateBlackMove(fen, chess, 1, ["d4"]);
       assert.strictEqual(res.selectedMoveSan, "d5");
       assert.strictEqual(res.evalSource, "Lichess Cloud Evaluation");
       assert.strictEqual(res.selectedEngineCp, 500);
@@ -553,13 +520,10 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
     const originalFetch = global.fetch;
     const user = await prisma.user.create({ data: { username: `evaltest11-8-${Date.now()}` } });
     const repertoire = await prisma.repertoire.create({ data: { title: 'Eval Test', color: 'black', userId: user.id } });
-    const snapshot = await createHumanDataSnapshot(repertoire.id, `snapshot-${Date.now()}`);
     const fen = "rn1qkb1r/ppp1pppp/5n2/3p4/3P4/5N2/PPP1PPPP/RN1QKB1R b KQkq - 0 3";
     
-    await prisma.remoteEngineFetch.deleteMany({ where: { fullFen: fen } });
-    await prisma.humanExplorerFetch.deleteMany({ where: { positionKey: fen.split(" ")[0] } });
-    await getOrCreatePosition(fen);
-    await getOrCreatePositionCache(fen, undefined, []);
+    await prisma.engineCache.deleteMany({ where: { fullFen: fen, engine: { in: ["LICHESS", "CHESSDB"] } } });
+    await prisma.positionCache.deleteMany({ where: { positionKey: positionKeyFromFen(parseFullFen(fen)) } });
 
     try {
       global.fetch = async (url: any) => {
@@ -580,7 +544,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
       try {
         await assert.rejects(
           async () => {
-            await evaluateBlackMove(fen, chess, 3, ["d4", "Nf6", "Nf3", "d5"], snapshot.id);
+            await evaluateBlackMove(fen, chess, 3, ["d4", "Nf6", "Nf3", "d5"]);
           },
           (err: Error) => err.message.includes("Local Engine returned zero usable root evaluations"),
           "Must throw descriptive error when deep fallback returns no PVs"

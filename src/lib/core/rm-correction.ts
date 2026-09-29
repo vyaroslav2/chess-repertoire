@@ -1,5 +1,7 @@
 import {
   prisma,
+  readLocalEngineBaseline,
+  readLocalEngineCandidate,
   type ResponseEvaluationSource,
   type ResponseSelectionMethod,
   type ResponseMoveOrigin,
@@ -54,7 +56,7 @@ export async function applyApprovedDeepCorrection(input: CorrectionInput): Promi
     moveOrigin: input.proposal.moveOrigin,
     deepVerified: input.proposal.deepVerified,
     localEvaluationProfile: input.proposal.localEvaluationProfile,
-    weightedCount: null
+    weightedGames: null
   });
 
   return await prisma.$transaction(async (tx) => {
@@ -91,19 +93,16 @@ export async function applyApprovedDeepCorrection(input: CorrectionInput): Promi
       selectionMethod: oldResponse.selectionMethod as ResponseSelectionMethod,
       moveOrigin: oldResponse.moveOrigin as ResponseMoveOrigin,
       deepVerified: false,
-      localEvaluationProfile: oldResponse.localEvaluationProfile,
-      weightedCount: oldResponse.weightedCount
+      localEvaluationProfile: null,
+      weightedGames: oldResponse.weightedGames
       ,stopReason: oldResponse.stopReason === "Repetition" || oldResponse.stopReason === "Transposition" ? oldResponse.stopReason : null
-      ,routeHistory: oldResponse.routeHistory
     });
 
     // 2. Revalidate Local evidence for the proposal
     const profile = input.proposal.localEvaluationProfile;
 
     // Check baseline exactly matches the proposal's stored baseline
-    const baseline = await tx.localEngineBaseline.findUnique({
-      where: { fullFen_evaluationProfile: { fullFen: input.failed.fullFen, evaluationProfile: profile } }
-    });
+    const baseline = await readLocalEngineBaseline(input.failed.fullFen, profile);
     if (!baseline) throw new Error("Stale proposal: LocalEngineBaseline missing");
     if (baseline.bestUci !== input.proposal.baselineUci) throw new Error("Stale proposal: baseline bestUci changed");
     if (baseline.cp !== input.proposal.baselineCp || baseline.mate !== input.proposal.baselineMate) {
@@ -116,9 +115,7 @@ export async function applyApprovedDeepCorrection(input: CorrectionInput): Promi
         throw new Error("Stale proposal: engine proposal evaluation changed");
       }
     } else if (input.proposal.moveOrigin === "Human Move") {
-      const candidate = await tx.localEngineCandidate.findUnique({
-        where: { fullFen_candidateUci_evaluationProfile: { fullFen: input.failed.fullFen, candidateUci: input.proposal.uci, evaluationProfile: profile } }
-      });
+      const candidate = await readLocalEngineCandidate(input.failed.fullFen, input.proposal.uci, profile);
       if (!candidate) throw new Error("Stale proposal: LocalEngineCandidate missing");
       if (candidate.cp !== input.proposal.cp || candidate.mate !== input.proposal.mate) {
         throw new Error("Stale proposal: candidate evaluation changed");
@@ -139,8 +136,9 @@ export async function applyApprovedDeepCorrection(input: CorrectionInput): Promi
         newMoveOrigin: input.proposal.moveOrigin,
         newDeepVerified: input.proposal.deepVerified,
         newLocalEvaluationProfile: input.proposal.localEvaluationProfile,
-        newWeightedCount: null,
-        cumulativeProb: oldResponse.fromNode.cumulativeProb
+        newWeightedGames: null,
+        cumProb: oldResponse.fromNode.cumProb
+
     });
   });
 }

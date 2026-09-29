@@ -1,8 +1,9 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import * as assert from "node:assert";
-import { prisma, createRepertoireMove, createResponseMove, createRepertoireNode } from "../db/operations";
+import { prisma, createRepertoireMove, createResponseMove, createRepertoireNode, saveLocalEngineBaseline } from "../db/operations";
 import { reconcileExistingResponse, type RecomputedResponse } from "./rm-reconciliation";
 import { positionKeyFromFen, parseFullFen } from "./fen";
+import { computeLocalEngineEvaluationProfile, defaultConfig } from "./config";
 import { createEmptyCard } from "ts-fsrs";
 import { Chess } from "chess.js";
 import {
@@ -48,7 +49,7 @@ describe("RM Reconciliation", () => {
             san: "c5",
             cp: -30,
             mate: null,
-            weightedCount: 100,
+            weightedGames: 100,
             source: "Lichess Cloud Evaluation",
             selectionMethod: "Ordinary API",
             moveOrigin: "Human Move",
@@ -104,15 +105,14 @@ describe("RM Reconciliation", () => {
             toNodeId: canonicalSource.id,
             uci: "d2d4",
             san: "d4",
-            playerTurn: "OPPONENT",
-            trueProbability: incomingProbability
+            playerTurn: "OPPONENT"
         });
         const destinationChess = new Chess(canonicalSource.fullFen);
         destinationChess.move({ from: "c7", to: "c5" });
         const canonicalDestination = await createRepertoireNode(
             repertoire.id,
             destinationChess.fen(),
-            `${canonicalSource.pgn} c5`,
+            `${canonicalSource.displayPgn} c5`,
             existingProbability
         );
         const storedResponse = await createResponseMove({
@@ -127,7 +127,7 @@ describe("RM Reconciliation", () => {
             moveOrigin: "Human Move",
             deepVerified: false,
             localEvaluationProfile: null,
-            weightedCount: 20
+            weightedGames: 20
         });
         await prisma.repertoirePositionStat.create({
             data: { repertoireId: repertoire.id, nodeId: canonicalSource.id, targetMoveId: storedResponse.id }
@@ -142,7 +142,7 @@ describe("RM Reconciliation", () => {
         return reconcileExistingResponse({
             repertoireId: repertoire.id,
             sourceNodeId: setup.canonicalSource.id,
-            cumulativeProb: effectiveProbability,
+            cumProb: effectiveProbability,
             expectedStoredResponse: {
                 id: setup.storedResponse.id,
                 uci: "c7c5",
@@ -160,7 +160,7 @@ describe("RM Reconciliation", () => {
                 moveOrigin: "Human Move",
                 deepVerified: false,
                 localEvaluationProfile: null,
-                weightedCount: 40
+                weightedGames: 40
             }
         });
     }
@@ -179,8 +179,7 @@ describe("RM Reconciliation", () => {
                 uci: "g1f3",
                 san: "Nf3",
                 playerTurn: "OPPONENT",
-                prob: 1.0,
-                trueProbability: 1.0
+                moveProb: 1.0
             });
 
             const recomputed: RecomputedResponse = {
@@ -193,13 +192,13 @@ describe("RM Reconciliation", () => {
                 moveOrigin: "Engine Move", // changed
                 deepVerified: false,
                 localEvaluationProfile: null,
-                weightedCount: null // changed
+                weightedGames: null // changed
             };
 
             const result = await reconcileExistingResponse({
                 repertoireId: repertoire.id,
                 sourceNodeId: sourceNode.id,
-                cumulativeProb: 1.0,
+                cumProb: 1.0,
                 expectedStoredResponse: {
                     id: responseMove.id,
                     uci: responseMove.uci!,
@@ -217,9 +216,8 @@ describe("RM Reconciliation", () => {
             assert.strictEqual(updatedResponse!.cp, -15);
             assert.strictEqual(updatedResponse!.source, "Local Deep Stockfish");
             assert.strictEqual(updatedResponse!.moveOrigin, "Engine Move");
-            assert.strictEqual(updatedResponse!.weightedCount, null); // changed to null
+            assert.strictEqual(updatedResponse!.weightedGames, null); // changed to null
             assert.strictEqual(updatedResponse!.deepVerified, false);
-            assert.strictEqual(updatedResponse!.localEvaluationProfile, null);
 
             const preservedStat = await prisma.repertoirePositionStat.findUnique({ where: { id: stat.id } });
             assert.ok(preservedStat);
@@ -237,18 +235,8 @@ describe("RM Reconciliation", () => {
         it("preserves deepVerified=true if recomputation returns false", async () => {
             const { sourceNode, responseMove } = await setupBase();
 
-            await prisma.localEngineBaseline.upsert({
-                where: { fullFen_evaluationProfile: { fullFen: sourceNode.fullFen, evaluationProfile: "profile-v1" } },
-                update: { bestUci: "c7c5", san: "c5", cp: 0, mate: null },
-                create: {
-                    fullFen: sourceNode.fullFen,
-                    evaluationProfile: "profile-v1",
-                    bestUci: "c7c5",
-                    san: "c5",
-                    cp: 0,
-                    mate: null
-                }
-            });
+            // DB.14: a stored move keeps no profile, so the evidence is read under the current local profile.
+            await saveLocalEngineBaseline(sourceNode.fullFen, computeLocalEngineEvaluationProfile(defaultConfig), { uci: "c7c5", cp: 0, mate: null });
             const dvResponse = await prisma.repertoireMove.update({
                 where: { id: responseMove.id },
                 data: {
@@ -256,8 +244,7 @@ describe("RM Reconciliation", () => {
                     source: "Local Deep Stockfish",
                     selectionMethod: "Corrected after Deep Verification",
                     moveOrigin: "Human Move",
-                    deepVerified: true,
-                    localEvaluationProfile: "profile-v1"
+                    deepVerified: true
                 }
             });
 
@@ -271,13 +258,13 @@ describe("RM Reconciliation", () => {
                 moveOrigin: "Human Move",
                 deepVerified: false,
                 localEvaluationProfile: null,
-                weightedCount: 50
+                weightedGames: 50
             };
 
             const result = await reconcileExistingResponse({
                 repertoireId: repertoire.id,
                 sourceNodeId: sourceNode.id,
-                cumulativeProb: 1.0,
+                cumProb: 1.0,
                 expectedStoredResponse: {
                     id: dvResponse.id,
                     uci: "c7c5",
@@ -292,8 +279,7 @@ describe("RM Reconciliation", () => {
             assert.strictEqual(updated!.cp, 10);
             assert.strictEqual(updated!.source, "Lichess Cloud Evaluation");
             assert.strictEqual(updated!.deepVerified, true, "deepVerified must remain true");
-            assert.strictEqual(updated!.localEvaluationProfile, "profile-v1", "Local profile must remain");
-            assert.strictEqual(updated!.weightedCount, 50, "current Human weighted evidence must refresh");
+            assert.strictEqual(updated!.weightedGames, 50, "current Human weighted evidence must refresh");
         });
 
         it("replaces cp with mate atomically and keeps an unverified RESPONSE unverified", async () => {
@@ -301,7 +287,7 @@ describe("RM Reconciliation", () => {
             await reconcileExistingResponse({
                 repertoireId: repertoire.id,
                 sourceNodeId: sourceNode.id,
-                cumulativeProb: 1,
+                cumProb: 1,
                 expectedStoredResponse: {
                     id: responseMove.id, uci: "c7c5", fromNodeId: sourceNode.id,
                     toNodeId: responseMove.toNodeId, fullFen: sourceNode.fullFen
@@ -310,15 +296,14 @@ describe("RM Reconciliation", () => {
                     selectedUci: "c7c5", selectedMoveSan: "c5", cp: null, mate: -3,
                     source: "Lichess Cloud Evaluation", selectionMethod: "Ordinary API",
                     moveOrigin: "Engine Move", deepVerified: false,
-                    localEvaluationProfile: null, weightedCount: null
+                    localEvaluationProfile: null, weightedGames: null
                 }
             });
             const updated = await prisma.repertoireMove.findUniqueOrThrow({ where: { id: responseMove.id } });
             assert.equal(updated.cp, null);
             assert.equal(updated.mate, -3);
             assert.equal(updated.deepVerified, false);
-            assert.equal(updated.localEvaluationProfile, null);
-            assert.equal(updated.weightedCount, null);
+            assert.equal(updated.weightedGames, null);
             assert.ok(await prisma.repertoirePositionStat.findUnique({ where: { id: stat.id } }));
         });
 
@@ -327,7 +312,7 @@ describe("RM Reconciliation", () => {
             await reconcileExistingResponse({
                 repertoireId: repertoire.id,
                 sourceNodeId: sourceNode.id,
-                cumulativeProb: 1,
+                cumProb: 1,
                 expectedStoredResponse: {
                     id: responseMove.id, uci: "c7c5", fromNodeId: sourceNode.id,
                     toNodeId: responseMove.toNodeId, fullFen: sourceNode.fullFen
@@ -335,7 +320,7 @@ describe("RM Reconciliation", () => {
                 recomputed: {
                     selectedUci: "c7c5", selectedMoveSan: "c5", cp: 7, mate: null,
                     source: "ChessDB", selectionMethod: "Hardcoded Opening", moveOrigin: "Hardcoded Move",
-                    deepVerified: false, localEvaluationProfile: null, weightedCount: null
+                    deepVerified: false, localEvaluationProfile: null, weightedGames: null
                 }
             });
             const updated = await prisma.repertoireMove.findUniqueOrThrow({ where: { id: responseMove.id } });
@@ -370,8 +355,7 @@ describe("RM Reconciliation", () => {
                 uci: "g1f3",
                 san: "Nf3",
                 playerTurn: "OPPONENT",
-                prob: 1.0,
-                trueProbability: 1.0
+                moveProb: 1.0
             });
 
             const recomputed: RecomputedResponse = {
@@ -384,13 +368,13 @@ describe("RM Reconciliation", () => {
                 moveOrigin: "Engine Move",
                 deepVerified: false,
                 localEvaluationProfile: null,
-                weightedCount: null
+                weightedGames: null
             };
 
             const result = await reconcileExistingResponse({
                 repertoireId: repertoire.id,
                 sourceNodeId: sourceNode.id,
-                cumulativeProb: 1.0,
+                cumProb: 1.0,
                 expectedStoredResponse: {
                     id: responseMove.id,
                     uci: responseMove.uci!,
@@ -426,11 +410,10 @@ describe("RM Reconciliation", () => {
             assert.strictEqual(newR!.selectionMethod, "Ordinary API");
             assert.strictEqual(newR!.moveOrigin, "Engine Move");
             assert.strictEqual(newR!.deepVerified, false);
-            assert.strictEqual(newR!.localEvaluationProfile, null);
 
             // New destination exists
             const newDest = await prisma.repertoireNode.findUnique({ where: { id: result.destinationNodeId! } });
-            assert.strictEqual(newDest!.pgn, "e4 e5");
+            assert.strictEqual(newDest!.displayPgn, "e4 e5");
             const chess = new Chess(sourceNode.fullFen);
             chess.move({ from: "e7", to: "e5" });
             assert.strictEqual(newDest!.fullFen, parseFullFen(chess.fen()));
@@ -449,7 +432,7 @@ describe("RM Reconciliation", () => {
 
         it("preserves an externally owned transposition target while removing its obsolete incoming edge", async () => {
             const { sourceNode, responseMove, destNode } = await setupBase();
-            await prisma.repertoireNode.update({ where: { id: destNode.id }, data: { pgn: "d4 c5" } });
+            await prisma.repertoireNode.update({ where: { id: destNode.id }, data: { displayPgn: "d4 c5" } });
             const childFen = "rnbqkbnr/pp1ppppp/8/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2";
             const child = await createRepertoireNode(repertoire.id, childFen, "d4 c5 Nf3", 1);
             const safeEdge = await createRepertoireMove({
@@ -457,7 +440,7 @@ describe("RM Reconciliation", () => {
                 uci: "g1f3", san: "Nf3", playerTurn: "OPPONENT"
             });
             const result = await reconcileExistingResponse({
-                repertoireId: repertoire.id, sourceNodeId: sourceNode.id, cumulativeProb: 1,
+                repertoireId: repertoire.id, sourceNodeId: sourceNode.id, cumProb: 1,
                 expectedStoredResponse: {
                     id: responseMove.id, uci: "c7c5", fromNodeId: sourceNode.id,
                     toNodeId: destNode.id, fullFen: sourceNode.fullFen
@@ -465,7 +448,7 @@ describe("RM Reconciliation", () => {
                 recomputed: {
                     selectedUci: "e7e5", selectedMoveSan: "e5", cp: 4, mate: null,
                     source: "Lichess Cloud Evaluation", selectionMethod: "Ordinary API", moveOrigin: "Human Move",
-                    deepVerified: false, localEvaluationProfile: null, weightedCount: 12
+                    deepVerified: false, localEvaluationProfile: null, weightedGames: 12
                 }
             });
             assert.equal(result.action, "REPLACED");
@@ -476,23 +459,16 @@ describe("RM Reconciliation", () => {
 
         it("does not inherit correction provenance or verification when a corrected UCI changes", async () => {
             const { sourceNode, responseMove, destNode } = await setupBase();
-            await prisma.localEngineBaseline.upsert({
-                where: { fullFen_evaluationProfile: { fullFen: sourceNode.fullFen, evaluationProfile: "corrected-profile" } },
-                update: { bestUci: "c7c5", san: "c5", cp: -30, mate: null },
-                create: {
-                    fullFen: sourceNode.fullFen, evaluationProfile: "corrected-profile",
-                    bestUci: "c7c5", san: "c5", cp: -30, mate: null
-                }
-            });
+            await saveLocalEngineBaseline(sourceNode.fullFen, "corrected-profile", { uci: "c7c5", cp: -30, mate: null });
             await prisma.repertoireMove.update({
                 where: { id: responseMove.id },
                 data: {
                     source: "Local Deep Stockfish", selectionMethod: "Corrected after Deep Verification",
-                    moveOrigin: "Engine Move", deepVerified: true, localEvaluationProfile: "corrected-profile"
+                    moveOrigin: "Engine Move", deepVerified: true
                 }
             });
             const result = await reconcileExistingResponse({
-                repertoireId: repertoire.id, sourceNodeId: sourceNode.id, cumulativeProb: 1,
+                repertoireId: repertoire.id, sourceNodeId: sourceNode.id, cumProb: 1,
                 expectedStoredResponse: {
                     id: responseMove.id, uci: "c7c5", fromNodeId: sourceNode.id,
                     toNodeId: destNode.id, fullFen: sourceNode.fullFen
@@ -500,7 +476,7 @@ describe("RM Reconciliation", () => {
                 recomputed: {
                     selectedUci: "e7e5", selectedMoveSan: "e5", cp: 9, mate: null,
                     source: "Lichess Cloud Evaluation", selectionMethod: "Ordinary API", moveOrigin: "Human Move",
-                    deepVerified: false, localEvaluationProfile: null, weightedCount: 25
+                    deepVerified: false, localEvaluationProfile: null, weightedGames: 25
                 }
             });
             const replacement = await prisma.repertoireMove.findUniqueOrThrow({ where: { id: result.responseId } });
@@ -508,8 +484,7 @@ describe("RM Reconciliation", () => {
             assert.equal(replacement.selectionMethod, "Ordinary API");
             assert.equal(replacement.source, "Lichess Cloud Evaluation");
             assert.equal(replacement.deepVerified, false);
-            assert.equal(replacement.localEvaluationProfile, null);
-            assert.equal(replacement.weightedCount, 25);
+            assert.equal(replacement.weightedGames, 25);
         });
     });
 
@@ -520,7 +495,7 @@ describe("RM Reconciliation", () => {
                 reconcileExistingResponse({
                     repertoireId: repertoire.id,
                     sourceNodeId: sourceNode.id,
-                    cumulativeProb: 1.0,
+                    cumProb: 1.0,
                     expectedStoredResponse: {
                         id: responseMove.id,
                         uci: "e7e6", // mismatch
@@ -531,7 +506,7 @@ describe("RM Reconciliation", () => {
                     recomputed: {
                         selectedUci: "e7e6", selectedMoveSan: "e6", cp: 0, mate: null,
                         source: "Lichess Cloud Evaluation", selectionMethod: "Ordinary API", moveOrigin: "Engine Move",
-                        deepVerified: false, localEvaluationProfile: null, weightedCount: null
+                        deepVerified: false, localEvaluationProfile: null, weightedGames: null
                     }
                 }),
                 /Stale stored RESPONSE: UCI changed/
@@ -542,7 +517,7 @@ describe("RM Reconciliation", () => {
         it("hard-errors with zero mutation when expected destination identity is stale", async () => {
             const { sourceNode, responseMove, destNode, stat } = await setupBase();
             await assert.rejects(reconcileExistingResponse({
-                repertoireId: repertoire.id, sourceNodeId: sourceNode.id, cumulativeProb: 1,
+                repertoireId: repertoire.id, sourceNodeId: sourceNode.id, cumProb: 1,
                 expectedStoredResponse: {
                     id: responseMove.id, uci: "c7c5", fromNodeId: sourceNode.id,
                     toNodeId: "stale-destination", fullFen: sourceNode.fullFen
@@ -550,7 +525,7 @@ describe("RM Reconciliation", () => {
                 recomputed: {
                     selectedUci: "e7e5", selectedMoveSan: "e5", cp: 1, mate: null,
                     source: "ChessDB", selectionMethod: "Ordinary API", moveOrigin: "Human Move",
-                    deepVerified: false, localEvaluationProfile: null, weightedCount: 1
+                    deepVerified: false, localEvaluationProfile: null, weightedGames: 1
                 }
             }), /toNodeId changed/);
             assert.ok(await prisma.repertoireMove.findUnique({ where: { id: responseMove.id } }));
@@ -563,7 +538,7 @@ describe("RM Reconciliation", () => {
             const alternateDestination = await createRepertoireNode(repertoire.id, destNode.fullFen, "d4 c5", 1);
             await prisma.repertoireMove.update({ where: { id: responseMove.id }, data: { toNodeId: alternateDestination.id } });
             await assert.rejects(reconcileExistingResponse({
-                repertoireId: repertoire.id, sourceNodeId: sourceNode.id, cumulativeProb: 1,
+                repertoireId: repertoire.id, sourceNodeId: sourceNode.id, cumProb: 1,
                 expectedStoredResponse: {
                     id: responseMove.id, uci: "c7c5", fromNodeId: sourceNode.id,
                     toNodeId: destNode.id, fullFen: sourceNode.fullFen
@@ -571,7 +546,7 @@ describe("RM Reconciliation", () => {
                 recomputed: {
                     selectedUci: "e7e5", selectedMoveSan: "e5", cp: 1, mate: null,
                     source: "ChessDB", selectionMethod: "Ordinary API", moveOrigin: "Human Move",
-                    deepVerified: false, localEvaluationProfile: null, weightedCount: 1
+                    deepVerified: false, localEvaluationProfile: null, weightedGames: 1
                 }
             }), /toNodeId changed/);
             assert.equal((await prisma.repertoireMove.findUniqueOrThrow({ where: { id: responseMove.id } })).toNodeId, alternateDestination.id);
@@ -581,15 +556,11 @@ describe("RM Reconciliation", () => {
         it("hard-errors with zero mutation when source FullFen changed after evaluation", async () => {
             const { sourceNode, responseMove, destNode } = await setupBase();
             const changedFen = "rnbqkbnr/pppppppp/8/8/3PP3/8/PPP2PPP/RNBQKBNR b KQkq d3 0 2";
-            await prisma.position.upsert({
-                where: { positionKey: positionKeyFromFen(parseFullFen(changedFen)) }, update: {},
-                create: { positionKey: positionKeyFromFen(parseFullFen(changedFen)) }
-            });
             await prisma.repertoireNode.update({ where: { id: sourceNode.id }, data: {
                 fullFen: changedFen, positionKey: positionKeyFromFen(parseFullFen(changedFen))
             } });
             await assert.rejects(reconcileExistingResponse({
-                repertoireId: repertoire.id, sourceNodeId: sourceNode.id, cumulativeProb: 1,
+                repertoireId: repertoire.id, sourceNodeId: sourceNode.id, cumProb: 1,
                 expectedStoredResponse: {
                     id: responseMove.id, uci: "c7c5", fromNodeId: sourceNode.id,
                     toNodeId: destNode.id, fullFen: sourceNode.fullFen
@@ -597,7 +568,7 @@ describe("RM Reconciliation", () => {
                 recomputed: {
                     selectedUci: "e7e5", selectedMoveSan: "e5", cp: 1, mate: null,
                     source: "ChessDB", selectionMethod: "Ordinary API", moveOrigin: "Human Move",
-                    deepVerified: false, localEvaluationProfile: null, weightedCount: 1
+                    deepVerified: false, localEvaluationProfile: null, weightedGames: 1
                 }
             }), /fullFen changed/);
             assert.ok(await prisma.repertoireMove.findUnique({ where: { id: responseMove.id } }));
@@ -607,15 +578,11 @@ describe("RM Reconciliation", () => {
         it("rejects a stored legal move pointing at the wrong destination before mutation", async () => {
             const { sourceNode, responseMove, destNode } = await setupBase();
             const wrongFen = "rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2";
-            await prisma.position.upsert({
-                where: { positionKey: positionKeyFromFen(parseFullFen(wrongFen)) }, update: {},
-                create: { positionKey: positionKeyFromFen(parseFullFen(wrongFen)) }
-            });
             await prisma.repertoireNode.update({ where: { id: destNode.id }, data: {
                 fullFen: wrongFen, positionKey: positionKeyFromFen(parseFullFen(wrongFen))
             } });
             await assert.rejects(reconcileExistingResponse({
-                repertoireId: repertoire.id, sourceNodeId: sourceNode.id, cumulativeProb: 1,
+                repertoireId: repertoire.id, sourceNodeId: sourceNode.id, cumProb: 1,
                 expectedStoredResponse: {
                     id: responseMove.id, uci: "c7c5", fromNodeId: sourceNode.id,
                     toNodeId: destNode.id, fullFen: sourceNode.fullFen
@@ -623,7 +590,7 @@ describe("RM Reconciliation", () => {
                 recomputed: {
                     selectedUci: "e7e5", selectedMoveSan: "e5", cp: 1, mate: null,
                     source: "ChessDB", selectionMethod: "Ordinary API", moveOrigin: "Human Move",
-                    deepVerified: false, localEvaluationProfile: null, weightedCount: 1
+                    deepVerified: false, localEvaluationProfile: null, weightedGames: 1
                 }
             }), /destination FullFen/);
             assert.ok(await prisma.repertoireMove.findUnique({ where: { id: responseMove.id } }));
@@ -634,7 +601,7 @@ describe("RM Reconciliation", () => {
             const otherSource = await createRepertoireNode(repertoire.id, sourceNode.fullFen, "d4", 1);
             await prisma.repertoireMove.update({ where: { id: responseMove.id }, data: { fromNodeId: otherSource.id } });
             await assert.rejects(reconcileExistingResponse({
-                repertoireId: repertoire.id, sourceNodeId: sourceNode.id, cumulativeProb: 1,
+                repertoireId: repertoire.id, sourceNodeId: sourceNode.id, cumProb: 1,
                 expectedStoredResponse: {
                     id: responseMove.id, uci: "c7c5", fromNodeId: sourceNode.id,
                     toNodeId: destNode.id, fullFen: sourceNode.fullFen
@@ -642,7 +609,7 @@ describe("RM Reconciliation", () => {
                 recomputed: {
                     selectedUci: "e7e5", selectedMoveSan: "e5", cp: 1, mate: null,
                     source: "ChessDB", selectionMethod: "Ordinary API", moveOrigin: "Human Move",
-                    deepVerified: false, localEvaluationProfile: null, weightedCount: 1
+                    deepVerified: false, localEvaluationProfile: null, weightedGames: 1
                 }
             }), /fromNodeId changed/);
             assert.equal((await prisma.repertoireMove.findUniqueOrThrow({ where: { id: responseMove.id } })).fromNodeId, otherSource.id);
@@ -652,7 +619,7 @@ describe("RM Reconciliation", () => {
             const { sourceNode, responseMove, destNode } = await setupBase();
             await prisma.repertoireMove.delete({ where: { id: responseMove.id } });
             await assert.rejects(reconcileExistingResponse({
-                repertoireId: repertoire.id, sourceNodeId: sourceNode.id, cumulativeProb: 1,
+                repertoireId: repertoire.id, sourceNodeId: sourceNode.id, cumProb: 1,
                 expectedStoredResponse: {
                     id: responseMove.id, uci: "c7c5", fromNodeId: sourceNode.id,
                     toNodeId: destNode.id, fullFen: sourceNode.fullFen
@@ -660,7 +627,7 @@ describe("RM Reconciliation", () => {
                 recomputed: {
                     selectedUci: "e7e5", selectedMoveSan: "e5", cp: 1, mate: null,
                     source: "ChessDB", selectionMethod: "Ordinary API", moveOrigin: "Human Move",
-                    deepVerified: false, localEvaluationProfile: null, weightedCount: 1
+                    deepVerified: false, localEvaluationProfile: null, weightedGames: 1
                 }
             }), /not found/);
             assert.equal(await prisma.repertoireMove.count({ where: { fromNodeId: sourceNode.id } }), 0);
@@ -673,14 +640,14 @@ describe("RM Reconciliation", () => {
             const currentResponse = await createResponseMove({
                 fromNodeId: sourceNode.id, toNodeId: destNode.id, uci: "c7c5", san: "c5",
                 cp: -22, mate: null, source: "ChessDB", selectionMethod: "Ordinary API",
-                moveOrigin: "Human Move", deepVerified: false, localEvaluationProfile: null, weightedCount: 18
+                moveOrigin: "Human Move", deepVerified: false, localEvaluationProfile: null, weightedGames: 18
             });
             await prisma.repertoirePositionStat.update({
                 where: { repertoireId_nodeId: { repertoireId: repertoire.id, nodeId: sourceNode.id } },
                 data: { targetMoveId: currentResponse.id, targetUci: "c7c5", reps: 3 }
             });
             await assert.rejects(reconcileExistingResponse({
-                repertoireId: repertoire.id, sourceNodeId: sourceNode.id, cumulativeProb: 1,
+                repertoireId: repertoire.id, sourceNodeId: sourceNode.id, cumProb: 1,
                 expectedStoredResponse: {
                     id: responseMove.id, uci: "c7c5", fromNodeId: sourceNode.id,
                     toNodeId: destNode.id, fullFen: sourceNode.fullFen
@@ -688,7 +655,7 @@ describe("RM Reconciliation", () => {
                 recomputed: {
                     selectedUci: "e7e5", selectedMoveSan: "e5", cp: 1, mate: null,
                     source: "ChessDB", selectionMethod: "Ordinary API", moveOrigin: "Human Move",
-                    deepVerified: false, localEvaluationProfile: null, weightedCount: 1
+                    deepVerified: false, localEvaluationProfile: null, weightedGames: 1
                 }
             }), /not found/);
             const preserved = await prisma.repertoireMove.findUniqueOrThrow({ where: { id: currentResponse.id } });
@@ -703,7 +670,7 @@ describe("RM Reconciliation", () => {
             });
             await prisma.repertoireMove.update({ where: { id: responseMove.id }, data: { repertoireId: other.id } });
             await assert.rejects(reconcileExistingResponse({
-                repertoireId: repertoire.id, sourceNodeId: sourceNode.id, cumulativeProb: 1,
+                repertoireId: repertoire.id, sourceNodeId: sourceNode.id, cumProb: 1,
                 expectedStoredResponse: {
                     id: responseMove.id, uci: "c7c5", fromNodeId: sourceNode.id,
                     toNodeId: destNode.id, fullFen: sourceNode.fullFen
@@ -711,7 +678,7 @@ describe("RM Reconciliation", () => {
                 recomputed: {
                     selectedUci: "e7e5", selectedMoveSan: "e5", cp: 1, mate: null,
                     source: "ChessDB", selectionMethod: "Ordinary API", moveOrigin: "Human Move",
-                    deepVerified: false, localEvaluationProfile: null, weightedCount: 1
+                    deepVerified: false, localEvaluationProfile: null, weightedGames: 1
                 }
             }), /wrong repertoire/);
             assert.equal((await prisma.repertoireMove.findUniqueOrThrow({ where: { id: responseMove.id } })).repertoireId, other.id);
@@ -722,7 +689,7 @@ describe("RM Reconciliation", () => {
         const { sourceNode, responseMove, destNode } = await setupBase();
         assert.equal(await prisma.repertoireMove.count({ where: { fromNodeId: destNode.id } }), 0);
         const result = await reconcileExistingResponse({
-            repertoireId: repertoire.id, sourceNodeId: sourceNode.id, cumulativeProb: 1,
+            repertoireId: repertoire.id, sourceNodeId: sourceNode.id, cumProb: 1,
             expectedStoredResponse: {
                 id: responseMove.id, uci: "c7c5", fromNodeId: sourceNode.id,
                 toNodeId: destNode.id, fullFen: sourceNode.fullFen
@@ -730,7 +697,7 @@ describe("RM Reconciliation", () => {
             recomputed: {
                 selectedUci: "c7c5", selectedMoveSan: "c5", cp: -12, mate: null,
                 source: "ChessDB", selectionMethod: "Ordinary API", moveOrigin: "Human Move",
-                deepVerified: false, localEvaluationProfile: null, weightedCount: 20
+                deepVerified: false, localEvaluationProfile: null, weightedGames: 20
             }
         });
         const queue = [{ nodeId: result.destinationNodeId, fen: result.destinationFullFen }];
@@ -748,12 +715,12 @@ describe("RM Reconciliation", () => {
 
     it("raises one already-queued canonical continuation when a later route raises 0.04 to 0.12", async () => {
         const setup = await setupProbabilityTransposition(0.04, 0.12);
-        assert.notEqual(setup.transposingHistory.join(" "), setup.canonicalSource.pgn);
+        assert.notEqual(setup.transposingHistory.join(" "), setup.canonicalSource.displayPgn);
         const firstEffectiveNode = await persistCanonicalMaxCumulativeProbability({
             node: setup.canonicalSource,
             incomingPathProb: 0.04
         });
-        const reconciled = await reconcileProbabilityTransposition(setup, firstEffectiveNode.cumulativeProb);
+        const reconciled = await reconcileProbabilityTransposition(setup, firstEffectiveNode.cumProb);
         const queue: GeneratorQueueItem[] = [];
         const pending: PendingCanonicalContinuations = new Map();
         enqueueCanonicalContinuation({
@@ -764,13 +731,13 @@ describe("RM Reconciliation", () => {
                 destinationNode: {
                     id: reconciled.destinationNodeId!,
                     fullFen: reconciled.destinationFullFen,
-                    pgn: reconciled.destinationPgn
+                    displayPgn: reconciled.destinationPgn
                 },
-                cumulativeProb: firstEffectiveNode.cumulativeProb
+                cumProb: firstEffectiveNode.cumProb
             })
         });
         assert.equal(queue.length, 1);
-        assert.equal(queue[0].cumulativeProb, 0.04);
+        assert.equal(queue[0].cumProb, 0.04);
 
         const laterEffectiveNode = await persistCanonicalMaxCumulativeProbability({
             node: firstEffectiveNode,
@@ -779,22 +746,22 @@ describe("RM Reconciliation", () => {
         assert.equal(raisePendingCanonicalContinuationProbability({
             pendingByResponseSource: pending,
             responseSourceNodeId: setup.canonicalSource.id,
-            effectiveCumulativeProb: laterEffectiveNode.cumulativeProb
+            effectiveCumProb: laterEffectiveNode.cumProb
         }), true);
-        assert.equal((await prisma.repertoireNode.findUniqueOrThrow({ where: { id: setup.canonicalSource.id } })).cumulativeProb, 0.12);
+        assert.equal((await prisma.repertoireNode.findUniqueOrThrow({ where: { id: setup.canonicalSource.id } })).cumProb, 0.12);
         assert.equal(queue.length, 1);
-        assert.equal(queue[0].cumulativeProb, 0.12);
+        assert.equal(queue[0].cumProb, 0.12);
         assert.deepEqual(queue[0].history, [...setup.canonicalHistory, "c5"]);
     });
 
     it("keeps one already-queued canonical continuation at 0.12 over a later 0.04 route", async () => {
         const setup = await setupProbabilityTransposition(0.12, 0.04);
-        assert.notEqual(setup.transposingHistory.join(" "), setup.canonicalSource.pgn);
+        assert.notEqual(setup.transposingHistory.join(" "), setup.canonicalSource.displayPgn);
         const firstEffectiveNode = await persistCanonicalMaxCumulativeProbability({
             node: setup.canonicalSource,
             incomingPathProb: 0.12
         });
-        const reconciled = await reconcileProbabilityTransposition(setup, firstEffectiveNode.cumulativeProb);
+        const reconciled = await reconcileProbabilityTransposition(setup, firstEffectiveNode.cumProb);
         const queue: GeneratorQueueItem[] = [];
         const pending: PendingCanonicalContinuations = new Map();
         enqueueCanonicalContinuation({
@@ -805,13 +772,13 @@ describe("RM Reconciliation", () => {
                 destinationNode: {
                     id: reconciled.destinationNodeId!,
                     fullFen: reconciled.destinationFullFen,
-                    pgn: reconciled.destinationPgn
+                    displayPgn: reconciled.destinationPgn
                 },
-                cumulativeProb: firstEffectiveNode.cumulativeProb
+                cumProb: firstEffectiveNode.cumProb
             })
         });
         assert.equal(queue.length, 1);
-        assert.equal(queue[0].cumulativeProb, 0.12);
+        assert.equal(queue[0].cumProb, 0.12);
 
         const laterEffectiveNode = await persistCanonicalMaxCumulativeProbability({
             node: firstEffectiveNode,
@@ -820,11 +787,11 @@ describe("RM Reconciliation", () => {
         assert.equal(raisePendingCanonicalContinuationProbability({
             pendingByResponseSource: pending,
             responseSourceNodeId: setup.canonicalSource.id,
-            effectiveCumulativeProb: laterEffectiveNode.cumulativeProb
+            effectiveCumProb: laterEffectiveNode.cumProb
         }), true);
-        assert.equal((await prisma.repertoireNode.findUniqueOrThrow({ where: { id: setup.canonicalSource.id } })).cumulativeProb, 0.12);
+        assert.equal((await prisma.repertoireNode.findUniqueOrThrow({ where: { id: setup.canonicalSource.id } })).cumProb, 0.12);
         assert.equal(queue.length, 1);
-        assert.equal(queue[0].cumulativeProb, 0.12);
+        assert.equal(queue[0].cumProb, 0.12);
         assert.deepEqual(queue[0].history, [...setup.canonicalHistory, "c5"]);
     });
 
@@ -863,7 +830,7 @@ describe("RM Reconciliation", () => {
         const canonicalDestination = await createRepertoireNode(
             repertoire.id,
             destinationChess.fen(),
-            `${canonicalSource.pgn} c5`,
+            `${canonicalSource.displayPgn} c5`,
             1
         );
         const storedResponse = await createResponseMove({
@@ -878,7 +845,7 @@ describe("RM Reconciliation", () => {
             moveOrigin: "Human Move",
             deepVerified: false,
             localEvaluationProfile: null,
-            weightedCount: 20
+            weightedGames: 20
         });
         await prisma.repertoirePositionStat.create({
             data: { repertoireId: repertoire.id, nodeId: canonicalSource.id, targetMoveId: storedResponse.id }
@@ -891,7 +858,6 @@ describe("RM Reconciliation", () => {
         const selection = await evaluateCanonicalResponse({
             responseNode: canonicalSource,
             routePgn: transposingHistory.join(" "),
-            snapshotId: "test-snapshot",
             evaluator: async (fen, chess, moveNumber, previousMovesSan) => {
                 evaluatorCalls++;
                 evaluatorFen = fen;
@@ -911,6 +877,9 @@ describe("RM Reconciliation", () => {
                     selectedStats: { weightedGames: 40, blackScore: 0.5 },
                     candidateMoves: [],
                     enginePvs: [],
+                    openingMetadata: null,
+                    totalMastersGames: 0,
+                    totalEliteGames: 0,
                     evalSource: "Lichess Cloud Evaluation",
                     selectedEngineCp: -12,
                     selectedMate: null
@@ -927,7 +896,7 @@ describe("RM Reconciliation", () => {
         const reconciled = await reconcileExistingResponse({
             repertoireId: repertoire.id,
             sourceNodeId: canonicalSource.id,
-            cumulativeProb: 1,
+            cumProb: 1,
             expectedStoredResponse: {
                 id: storedResponse.id,
                 uci: "c7c5",
@@ -945,20 +914,20 @@ describe("RM Reconciliation", () => {
                 moveOrigin: selection.result.moveOrigin,
                 deepVerified: selection.result.deepVerified,
                 localEvaluationProfile: selection.result.localEvaluationProfile,
-                weightedCount: selection.result.selectedStats.weightedGames
+                weightedGames: selection.result.selectedStats.weightedGames
             }
         });
         const queued = buildCanonicalContinuationQueueItem({
             destinationNode: {
                 id: reconciled.destinationNodeId!,
                 fullFen: reconciled.destinationFullFen,
-                pgn: reconciled.destinationPgn
+                displayPgn: reconciled.destinationPgn
             },
-            cumulativeProb: 1
+            cumProb: 1
         });
         assert.equal(queued.nodeId, canonicalDestination.id);
         assert.deepEqual(queued.history, [...canonicalHistory, "c5"]);
         assert.notDeepEqual(queued.history, [...transposingHistory, "c5"]);
-        assert.equal(queued.history.join(" "), canonicalDestination.pgn);
+        assert.equal(queued.history.join(" "), canonicalDestination.displayPgn);
     });
 });

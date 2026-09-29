@@ -268,7 +268,19 @@ export function computeConfigHash(config: Config): string {
     return createHash('sha256').update(canonical).digest('hex');
 }
 
-// Keeps the historical request shape so existing Explorer caches stay valid.
+export type ExplorerDataset = "MASTERS" | "ELITE" | "AMATEUR";
+
+// DB.31: the dataset is part of the cache profile, so each dataset has its own.
+export function computeExplorerCacheProfile(dataset: ExplorerDataset, config: Config): string {
+    const requestShape = dataset === "MASTERS"
+        ? { dataset, source: "masters" }
+        : dataset === "ELITE"
+            ? { dataset, source: "lichess", speeds: config.explorerEliteSpeeds, ratings: config.explorerEliteRatings }
+            : { dataset, source: "lichess", speeds: config.explorerSpeeds, ratings: config.explorerRatings };
+    return createHash('sha256').update(canonicalStringify(requestShape)).digest('hex');
+}
+
+// The old all-datasets request shape. Only used to carry old Explorer caches over.
 export function computeExplorerRequestProfile(config: Config): string {
     const requestShape = {
         masters: { source: "masters" },

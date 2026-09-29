@@ -1,6 +1,8 @@
 import { Chess } from "chess.js";
 import {
   prisma,
+  readLocalEngineBaseline,
+  readLocalEngineCandidate,
   type ResponseEvaluationSource,
   type ResponseMoveOrigin,
   type ResponsePersistenceInput,
@@ -9,17 +11,18 @@ import {
 } from "../db/operations";
 import { parseFullFen, positionKeyFromFen } from "./fen";
 import { replaceResponseBranch } from "./rm-structural";
+import { computeLocalEngineEvaluationProfile, defaultConfig } from "./config";
 
 export type RecomputedResponse = Omit<ResponsePersistenceInput, "fromNodeId" | "toNodeId" | "uci" | "san"> & {
   selectedUci: string;
   selectedMoveSan: string;
-  weightedCount: number | null;
+  weightedGames: number | null;
 };
 
 export interface ReconcileExistingResponseInput {
   repertoireId: string;
   sourceNodeId: string;
-  cumulativeProb: number;
+  cumProb: number;
   expectedStoredResponse: {
     id: string;
     uci: string;
@@ -69,9 +72,8 @@ export async function reconcileExistingResponse(input: ReconcileExistingResponse
     moveOrigin: input.recomputed.moveOrigin,
     deepVerified: input.recomputed.deepVerified,
     localEvaluationProfile: input.recomputed.localEvaluationProfile,
-    weightedCount: input.recomputed.weightedCount,
-    stopReason: input.expectedStoredResponse.toNodeId === null ? "Repetition" : null,
-    routeHistory: input.expectedStoredResponse.toNodeId === null ? "stored-repetition-route" : null
+    weightedGames: input.recomputed.weightedGames,
+    stopReason: input.expectedStoredResponse.toNodeId === null ? "Repetition" : null
   });
 
   return prisma.$transaction(async tx => {
@@ -103,10 +105,9 @@ export async function reconcileExistingResponse(input: ReconcileExistingResponse
       selectionMethod: oldResponse.selectionMethod as ResponseSelectionMethod,
       moveOrigin: oldResponse.moveOrigin as ResponseMoveOrigin,
       deepVerified: oldResponse.deepVerified,
-      localEvaluationProfile: oldResponse.localEvaluationProfile,
-      weightedCount: oldResponse.weightedCount
+      localEvaluationProfile: oldResponse.deepVerified ? computeLocalEngineEvaluationProfile(defaultConfig) : null,
+      weightedGames: oldResponse.weightedGames
       ,stopReason: oldResponse.stopReason === "Repetition" || oldResponse.stopReason === "Transposition" ? oldResponse.stopReason : null
-      ,routeHistory: oldResponse.routeHistory
     });
 
     const storedMove = deriveMove(oldResponse.fromNode.fullFen, oldResponse.uci);
@@ -136,20 +137,12 @@ export async function reconcileExistingResponse(input: ReconcileExistingResponse
 
     if (oldResponse.uci === input.recomputed.selectedUci) {
       const finalDeepVerified = oldResponse.deepVerified || input.recomputed.deepVerified;
-      const finalProfile = oldResponse.deepVerified ? oldResponse.localEvaluationProfile : input.recomputed.localEvaluationProfile;
+      const finalProfile = oldResponse.deepVerified ? computeLocalEngineEvaluationProfile(defaultConfig) : input.recomputed.localEvaluationProfile;
       if (finalDeepVerified) {
         const profile = finalProfile!;
         const [baseline, candidate] = await Promise.all([
-          tx.localEngineBaseline.findUnique({
-            where: { fullFen_evaluationProfile: { fullFen: oldResponse.fromNode.fullFen, evaluationProfile: profile } }
-          }),
-          tx.localEngineCandidate.findUnique({
-            where: { fullFen_candidateUci_evaluationProfile: {
-              fullFen: oldResponse.fromNode.fullFen,
-              candidateUci: oldResponse.uci,
-              evaluationProfile: profile
-            } }
-          })
+          readLocalEngineBaseline(oldResponse.fromNode.fullFen, profile),
+          readLocalEngineCandidate(oldResponse.fromNode.fullFen, oldResponse.uci, profile)
         ]);
         if (!baseline || (baseline.bestUci !== oldResponse.uci && !candidate)) {
           throw new Error("Cannot preserve RESPONSE deep verification: compatible Local Deep evidence is missing");
@@ -171,16 +164,15 @@ export async function reconcileExistingResponse(input: ReconcileExistingResponse
           source: input.recomputed.source,
           selectionMethod: input.recomputed.selectionMethod,
           moveOrigin: input.recomputed.moveOrigin,
-          weightedCount: input.recomputed.weightedCount,
+          weightedGames: input.recomputed.weightedGames,
           mastersGames: input.recomputed.mastersGames ?? null,
           eliteGames: input.recomputed.eliteGames ?? null,
-          totalRelevantGames: input.recomputed.totalRelevantGames ?? null,
-          moveShare: input.recomputed.moveShare ?? null,
+          totalMastersGames: input.recomputed.totalMastersGames ?? null,
+          mastersMoveShare: input.recomputed.mastersMoveShare ?? null,
+          totalEliteGames: input.recomputed.totalEliteGames ?? null,
+          eliteMoveShare: input.recomputed.eliteMoveShare ?? null,
           engineRank: input.recomputed.engineRank ?? null,
-          deepVerified: finalDeepVerified,
-          localEvaluationProfile: finalProfile
-          ,routeProbability: input.cumulativeProb
-          ,trueProbability: input.cumulativeProb
+          deepVerified: finalDeepVerified
         }
       });
       return {
@@ -188,7 +180,7 @@ export async function reconcileExistingResponse(input: ReconcileExistingResponse
         responseId: oldResponse.id,
         destinationNodeId: oldResponse.toNodeId,
         destinationFullFen: oldResponse.toNode?.fullFen ?? storedMove.destinationFullFen,
-        destinationPgn: oldResponse.toNode?.pgn ?? (oldResponse.routeHistory ?? ""),
+        destinationPgn: oldResponse.toNode?.displayPgn ?? "",
         san: recomputedMove.san
       };
     }
@@ -206,13 +198,16 @@ export async function reconcileExistingResponse(input: ReconcileExistingResponse
       newMoveOrigin: input.recomputed.moveOrigin,
       newDeepVerified: input.recomputed.deepVerified,
       newLocalEvaluationProfile: input.recomputed.localEvaluationProfile,
-      newWeightedCount: input.recomputed.weightedCount,
+      newWeightedGames: input.recomputed.weightedGames,
       newMastersGames: input.recomputed.mastersGames,
       newEliteGames: input.recomputed.eliteGames,
-      newTotalRelevantGames: input.recomputed.totalRelevantGames,
-      newMoveShare: input.recomputed.moveShare,
+      newTotalMastersGames: input.recomputed.totalMastersGames,
+      newMastersMoveShare: input.recomputed.mastersMoveShare,
+      newTotalEliteGames: input.recomputed.totalEliteGames,
+      newEliteMoveShare: input.recomputed.eliteMoveShare,
       newEngineRank: input.recomputed.engineRank,
-      cumulativeProb: input.cumulativeProb
+      cumProb: input.cumProb
+
     });
     return {
       action: "REPLACED",

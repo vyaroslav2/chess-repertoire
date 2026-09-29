@@ -1,34 +1,20 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { Chess } from "chess.js";
 import { fetchWikibooksSnippet, type WikibooksResult } from "../api/wikibooks";
 import { parseFullFen, positionKeyFromFen } from "../core/fen";
 import { isValidUciMove } from "../core/uci";
+import type { ExplorerDataset } from "../core/config";
 
 export const prisma = new PrismaClient();
 
-export async function getOrCreatePosition(rawFen: string) {
-  const fullFen = parseFullFen(rawFen);
-  const positionKey = positionKeyFromFen(fullFen);
+type DbClient = PrismaClient | Prisma.TransactionClient;
 
-  return prisma.position.upsert({
-    where: { positionKey },
-    update: {},
-    create: { positionKey }
-  });
-}
-
-export async function getOrCreatePositionCache(fen: string, _legacyOpeningMetadata?: { eco: string, name: string }, _legacyHistory?: string[]) {
-  const normFen = positionKeyFromFen(parseFullFen(fen));
-  let pos = await prisma.positionCache.findUnique({ where: { fen: normFen } });
-  
-  if (!pos) { 
-    pos = await prisma.positionCache.create({ 
-      data: { 
-        fen: normFen
-      } 
-    }); 
-  }
-  return pos;
+/** DB.36: the first node to reach a positionKey owns it. Returns the owner's id. */
+export async function claimPosition(client: DbClient, repertoireId: string, positionKey: string, nodeId: string) {
+  const existing = await client.position.findUnique({ where: { repertoireId_positionKey: { repertoireId, positionKey } } });
+  if (existing) return existing.nodeId;
+  await client.position.create({ data: { repertoireId, positionKey, nodeId } });
+  return nodeId;
 }
 
 type WikibooksFetcher = (history: string[]) => Promise<WikibooksResult>;
@@ -96,6 +82,8 @@ export async function ensureRepertoireNodeWikibooks(
   return result;
 }
 
+// --- DB.31 Explorer cache ---
+
 export type ExplorerMoveRow = {
   uci: string;
   san: string;
@@ -103,6 +91,13 @@ export type ExplorerMoveRow = {
   whiteWins: number;
   draws: number;
   blackWins: number;
+};
+
+export type ExplorerCacheEntry = {
+  positionTotalGames: number;
+  eco: string | null;
+  openingName: string | null;
+  moves: ExplorerMoveRow[];
 };
 
 function isFiniteNonNegativeInteger(value: unknown): value is number {
@@ -137,68 +132,70 @@ function validateExplorerMoveRows(moves: ExplorerMoveRow[]): void {
   }
 }
 
-export async function saveHumanExplorerBucket(snapshotId: string, positionKey: string, databaseType: HumanDatabaseType, moves: ExplorerMoveRow[]) {
-  validateDatabaseType(databaseType);
-  validateExplorerMoveRows(moves);
+function validateOpeningPair(eco: string | null, openingName: string | null, label: string): void {
+  const hasEco = typeof eco === "string" && eco.trim() !== "";
+  const hasName = typeof openingName === "string" && openingName.trim() !== "";
+  if (hasEco !== hasName || (!hasEco && (eco !== null || openingName !== null))) {
+    throw new Error(`Invalid ${label}: eco and openingName must both be set or both be null`);
+  }
+}
 
-  return prisma.$transaction(async (tx) => {
-    await tx.explorerMoveCache.deleteMany({
-      where: { snapshotId, positionKey, databaseType }
-    });
+function validateCacheProfile(cacheProfile: string): void {
+  if (typeof cacheProfile !== "string" || cacheProfile.trim() === "" || cacheProfile.trim() !== cacheProfile) {
+    throw new Error("Invalid cache profile: must be non-empty and canonical");
+  }
+}
 
-    if (moves.length > 0) {
-      await tx.explorerMoveCache.createMany({
-        data: moves.map(m => ({
-          snapshotId,
-          positionKey,
-          databaseType,
-          ...m
-        }))
-      });
-    }
+export async function saveExplorerCache(positionKey: string, cacheProfile: string, entry: ExplorerCacheEntry) {
+  validateCacheProfile(cacheProfile);
+  validateExplorerMoveRows(entry.moves);
+  if (!isFiniteNonNegativeInteger(entry.positionTotalGames)) {
+    throw new Error("Invalid explorer bucket: positionTotalGames must be a finite non-negative integer");
+  }
+  validateOpeningPair(entry.eco, entry.openingName, "explorer opening");
 
-    await tx.humanExplorerFetch.upsert({
-      where: {
-        snapshotId_positionKey_databaseType: {
-          snapshotId,
-          positionKey,
-          databaseType
-        }
-      },
-      update: {},
-      create: {
-        snapshotId,
+  return prisma.$transaction(async tx => {
+    await tx.positionCache.deleteMany({ where: { positionKey, cacheProfile } });
+    return tx.positionCache.create({
+      data: {
         positionKey,
-        databaseType
+        cacheProfile,
+        positionTotalGames: entry.positionTotalGames,
+        eco: entry.eco,
+        openingName: entry.openingName,
+        moves: { create: entry.moves.map(move => ({ ...move })) }
       }
     });
   });
 }
 
-export type ReadHumanExplorerBucketResult =
+export type ReadExplorerCacheResult =
   | { status: "missing" }
-  | { status: "empty" }
-  | { status: "success", moves: (ExplorerMoveRow & { id: string })[] };
+  | { status: "empty"; positionTotalGames: number; eco: string | null; openingName: string | null }
+  | { status: "success"; positionTotalGames: number; eco: string | null; openingName: string | null; moves: (ExplorerMoveRow & { id: string })[] };
 
-export async function readHumanExplorerBucket(snapshotId: string, positionKey: string, databaseType: HumanDatabaseType): Promise<ReadHumanExplorerBucketResult> {
-  validateDatabaseType(databaseType);
-
-  const fetchMarker = await prisma.humanExplorerFetch.findUnique({
-    where: { snapshotId_positionKey_databaseType: { snapshotId, positionKey, databaseType } }
+export async function readExplorerCache(positionKey: string, cacheProfile: string): Promise<ReadExplorerCacheResult> {
+  validateCacheProfile(cacheProfile);
+  const row = await prisma.positionCache.findUnique({
+    where: { positionKey_cacheProfile: { positionKey, cacheProfile } },
+    include: { moves: true }
   });
-
-  if (!fetchMarker) return { status: "missing" };
-
-  const rows = await prisma.explorerMoveCache.findMany({
-    where: { snapshotId, positionKey, databaseType }
-  });
-
-  if (rows.length === 0) return { status: "empty" };
-
-  return { status: "success", moves: rows };
+  if (!row) return { status: "missing" };
+  const header = { positionTotalGames: row.positionTotalGames, eco: row.eco, openingName: row.openingName };
+  if (row.moves.length === 0) return { status: "empty", ...header };
+  return {
+    status: "success",
+    ...header,
+    moves: row.moves.map(({ id, uci, san, games, whiteWins, draws, blackWins }) => ({ id, uci, san, games, whiteWins, draws, blackWins }))
+  };
 }
 
+export type HumanDatabaseType = ExplorerDataset;
+
+// --- DB.32 EngineCache ---
+
 export type RemoteEngineSource = "LICHESS" | "CHESSDB";
+type EngineName = RemoteEngineSource | "LOCAL";
 
 export type RemoteEngineEvaluation = {
   uci: string;
@@ -273,6 +270,14 @@ function validateRemoteEngineResult(
   });
 }
 
+async function upsertEngineCache(client: DbClient, fullFen: string, engine: EngineName, engineProfile: string) {
+  return client.engineCache.upsert({
+    where: { fullFen_engine_engineProfile: { fullFen, engine, engineProfile } },
+    update: { fetchedAt: new Date() },
+    create: { fullFen, engineProfile, engine }
+  });
+}
+
 export async function saveRemoteEngineResult(
   fullFen: string,
   source: RemoteEngineSource,
@@ -282,26 +287,21 @@ export async function saveRemoteEngineResult(
   const validated = validateRemoteEngineResult(fullFen, source, evaluationProfile, evaluations);
 
   return prisma.$transaction(async tx => {
-    const fetch = await tx.remoteEngineFetch.upsert({
-      where: { fullFen_source_evaluationProfile: { fullFen, source, evaluationProfile } },
-      update: { fetchedAt: new Date() },
-      create: { fullFen, source, evaluationProfile }
-    });
-
-    await tx.remoteEngineEvalCache.deleteMany({ where: { fetchId: fetch.id } });
+    const cache = await upsertEngineCache(tx, fullFen, source, evaluationProfile);
+    await tx.engineCacheEvaluation.deleteMany({ where: { cacheId: cache.id } });
     if (validated.length > 0) {
-      await tx.remoteEngineEvalCache.createMany({
-        data: validated.map(evaluation => ({
-          fetchId: fetch.id,
+      await tx.engineCacheEvaluation.createMany({
+        data: validated.map((evaluation, index) => ({
+          cacheId: cache.id,
           uci: evaluation.uci,
           san: evaluation.san,
           cp: evaluation.cp,
-          mate: evaluation.mate
+          mate: evaluation.mate,
+          rank: index + 1
         }))
       });
     }
-
-    return fetch;
+    return cache;
   });
 }
 
@@ -316,10 +316,12 @@ export async function refreshRemoteEngineResult(
   return saveRemoteEngineResult(fullFen, source, evaluationProfile, evaluations);
 }
 
+type EngineCacheMarker = { id: string; fullFen: string; source: string; evaluationProfile: string; fetchedAt: Date };
+
 export type ReadRemoteEngineResult =
   | { status: "missing" }
-  | { status: "empty", fetch: { id: string; fullFen: string; source: string; evaluationProfile: string; fetchedAt: Date } }
-  | { status: "success", fetch: { id: string; fullFen: string; source: string; evaluationProfile: string; fetchedAt: Date }, evaluations: Array<RemoteEngineEvaluation & { id: string; fetchId: string; san: string | null }> };
+  | { status: "empty", fetch: EngineCacheMarker }
+  | { status: "success", fetch: EngineCacheMarker, evaluations: Array<RemoteEngineEvaluation & { id: string; fetchId: string; san: string | null; rank: number | null }> };
 
 export async function readRemoteEngineResult(
   fullFen: string,
@@ -333,15 +335,22 @@ export async function readRemoteEngineResult(
     throw new Error("evaluationProfile must be non-empty and canonical");
   }
 
-  const fetch = await prisma.remoteEngineFetch.findUnique({
-    where: { fullFen_source_evaluationProfile: { fullFen, source, evaluationProfile } },
+  const cache = await prisma.engineCache.findUnique({
+    where: { fullFen_engine_engineProfile: { fullFen, engine: source, engineProfile: evaluationProfile } },
     include: { evaluations: { orderBy: { uci: "asc" } } }
   });
-  if (!fetch) return { status: "missing" };
+  if (!cache) return { status: "missing" };
 
-  const { evaluations, ...fetchMarker } = fetch;
-  if (evaluations.length === 0) return { status: "empty", fetch: fetchMarker };
-  return { status: "success", fetch: fetchMarker, evaluations };
+  const fetch = { id: cache.id, fullFen: cache.fullFen, source: cache.engine, evaluationProfile: cache.engineProfile, fetchedAt: cache.fetchedAt };
+  if (cache.evaluations.length === 0) return { status: "empty", fetch };
+  return {
+    status: "success",
+    fetch,
+    evaluations: cache.evaluations.map(evaluation => ({
+      id: evaluation.id, fetchId: evaluation.cacheId, uci: evaluation.uci, san: evaluation.san,
+      cp: evaluation.cp, mate: evaluation.mate, rank: evaluation.rank
+    }))
+  };
 }
 
 export async function readRemoteEngineCandidate(
@@ -365,54 +374,6 @@ export type LocalEngineEvaluation = {
   cp: number | null;
   mate: number | null;
 };
-
-export const RESPONSE_EVALUATION_SOURCES = ["Lichess Cloud Evaluation", "ChessDB", "Local Deep Stockfish"] as const;
-export const RESPONSE_SELECTION_METHODS = ["Ordinary API", "Corrected after Deep Verification", "Local Engine Fallback", "Hardcoded Opening"] as const;
-export const RESPONSE_MOVE_ORIGINS = ["Human Move", "Engine Move", "Hardcoded Move"] as const;
-export type ResponseEvaluationSource = typeof RESPONSE_EVALUATION_SOURCES[number];
-export type ResponseSelectionMethod = typeof RESPONSE_SELECTION_METHODS[number];
-export type ResponseMoveOrigin = typeof RESPONSE_MOVE_ORIGINS[number];
-export type ResponsePersistenceInput = {
-  fromNodeId: string; toNodeId: string | null; uci: string; san?: string | null;
-  cp: number | null; mate: number | null; source: ResponseEvaluationSource;
-  selectionMethod: ResponseSelectionMethod; moveOrigin: ResponseMoveOrigin;
-  deepVerified: boolean; localEvaluationProfile: string | null; weightedCount?: number | null;
-  routeHistory?: string | null; stopReason?: "Repetition" | "Transposition" | null;
-  mastersGames?: number | null; eliteGames?: number | null; totalRelevantGames?: number | null;
-  moveShare?: number | null; engineRank?: number | null;
-};
-
-function isNonEmptyCanonicalString(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && value.trim() === value;
-}
-
-export function validateResponsePersistence(input: ResponsePersistenceInput): void {
-  if (!RESPONSE_EVALUATION_SOURCES.includes(input.source as ResponseEvaluationSource)) throw new Error("Invalid RESPONSE source");
-  if (!RESPONSE_SELECTION_METHODS.includes(input.selectionMethod as ResponseSelectionMethod)) throw new Error("Invalid RESPONSE selectionMethod");
-  if (!RESPONSE_MOVE_ORIGINS.includes(input.moveOrigin as ResponseMoveOrigin)) throw new Error("Invalid RESPONSE moveOrigin");
-  if (!isValidUciMove(input.uci)) throw new Error("Invalid RESPONSE UCI/LAN move");
-  const hasCp = typeof input.cp === "number" && Number.isFinite(input.cp);
-  const hasMate = typeof input.mate === "number" && Number.isInteger(input.mate) && input.mate !== 0;
-  if (!((hasCp && input.mate === null) || (input.cp === null && hasMate))) throw new Error("Invalid RESPONSE evaluation: exactly one of finite cp or non-zero integer mate is required");
-  if (typeof input.deepVerified !== "boolean") throw new Error("Invalid RESPONSE deepVerified value");
-  if (input.deepVerified && !isNonEmptyCanonicalString(input.localEvaluationProfile)) throw new Error("Invalid RESPONSE: deepVerified requires localEvaluationProfile");
-  if (input.localEvaluationProfile !== null && !isNonEmptyCanonicalString(input.localEvaluationProfile)) throw new Error("Invalid RESPONSE localEvaluationProfile");
-  if (input.weightedCount !== undefined && input.weightedCount !== null &&
-      (typeof input.weightedCount !== "number" || !Number.isFinite(input.weightedCount) || input.weightedCount < 0)) throw new Error("Invalid RESPONSE weightedCount");
-  for (const [label, value] of [["mastersGames", input.mastersGames], ["eliteGames", input.eliteGames], ["totalRelevantGames", input.totalRelevantGames], ["engineRank", input.engineRank]] as const) {
-    if (value !== undefined && value !== null && (!Number.isInteger(value) || value < 0)) throw new Error(`Invalid RESPONSE ${label}`);
-  }
-  if (input.moveShare !== undefined && input.moveShare !== null && (!Number.isFinite(input.moveShare) || input.moveShare < 0 || input.moveShare > 1)) {
-    throw new Error("Invalid RESPONSE moveShare");
-  }
-  const stopReason = input.stopReason ?? null;
-  if (stopReason === "Repetition") {
-    if (input.toNodeId !== null) throw new Error("Invalid RESPONSE repetition: toNodeId must be null");
-    if (!isNonEmptyCanonicalString(input.routeHistory)) throw new Error("Invalid RESPONSE repetition: routeHistory is required");
-  } else if (!isNonEmptyCanonicalString(input.toNodeId)) {
-    throw new Error("Invalid RESPONSE: non-repetition requires toNodeId");
-  }
-}
 
 function validateLocalEngineIdentity(fullFen: string, evaluationProfile: string): string {
   const canonicalFullFen = parseFullFen(fullFen);
@@ -467,6 +428,7 @@ function validateLocalEngineEvaluation(
   return { ...evaluation, san: parsedMove.san };
 }
 
+/** Local Stockfish runs with localStockfishMultiPv = 1: its best move is the evaluation ranked 1. */
 export async function saveLocalEngineBaseline(
   fullFen: string,
   evaluationProfile: string,
@@ -474,47 +436,32 @@ export async function saveLocalEngineBaseline(
 ) {
   const validated = validateLocalEngineEvaluation(fullFen, evaluationProfile, evaluation);
   return prisma.$transaction(async tx => {
-    const previous = await tx.localEngineBaseline.findUnique({ where: { fullFen_evaluationProfile: { fullFen, evaluationProfile } } });
-    const changed = previous !== null && (previous.bestUci !== validated.uci || previous.cp !== validated.cp || previous.mate !== validated.mate);
-    const saved = await tx.localEngineBaseline.upsert({
-    where: { fullFen_evaluationProfile: { fullFen, evaluationProfile } },
-    update: {
-      bestUci: validated.uci,
-      san: validated.san,
-      cp: validated.cp,
-      mate: validated.mate,
-      analysedAt: new Date()
-    },
-    create: {
-      fullFen,
-      evaluationProfile,
-      bestUci: validated.uci,
-      san: validated.san,
-      cp: validated.cp,
-      mate: validated.mate
-    }
+    const cache = await upsertEngineCache(tx, fullFen, "LOCAL", evaluationProfile);
+    await tx.engineCacheEvaluation.updateMany({ where: { cacheId: cache.id, rank: 1, uci: { not: validated.uci } }, data: { rank: null } });
+    const saved = await tx.engineCacheEvaluation.upsert({
+      where: { cacheId_uci: { cacheId: cache.id, uci: validated.uci } },
+      update: { san: validated.san, cp: validated.cp, mate: validated.mate, rank: 1 },
+      create: { cacheId: cache.id, uci: validated.uci, san: validated.san, cp: validated.cp, mate: validated.mate, rank: 1 }
     });
-    if (changed) await tx.repertoireMove.updateMany({
-      where: { playerTurn: "RESPONSE", deepVerified: true, localEvaluationProfile: evaluationProfile, fromNode: { fullFen } },
-      data: { deepVerified: false }
-    });
-    return saved;
+    return { fullFen, evaluationProfile, bestUci: saved.uci, san: saved.san, cp: saved.cp, mate: saved.mate };
   });
 }
 
 export async function readLocalEngineBaseline(fullFen: string, evaluationProfile: string) {
   validateLocalEngineIdentity(fullFen, evaluationProfile);
-  const row = await prisma.localEngineBaseline.findUnique({
-    where: { fullFen_evaluationProfile: { fullFen, evaluationProfile } }
+  const cache = await prisma.engineCache.findUnique({
+    where: { fullFen_engine_engineProfile: { fullFen, engine: "LOCAL", engineProfile: evaluationProfile } },
+    include: { evaluations: { where: { rank: 1 } } }
   });
+  const row = cache?.evaluations[0];
   if (!row) return null;
   const evaluation = validateLocalEngineEvaluation(fullFen, evaluationProfile, {
-    uci: row.bestUci,
+    uci: row.uci,
     san: row.san,
     cp: row.cp,
     mate: row.mate
   });
-  return { ...row, ...evaluation };
+  return { fullFen, evaluationProfile, bestUci: row.uci, ...evaluation };
 }
 
 export async function saveLocalEngineCandidate(
@@ -528,114 +475,192 @@ export async function saveLocalEngineCandidate(
   }
   const validated = validateLocalEngineEvaluation(fullFen, evaluationProfile, evaluation, candidateUci);
   return prisma.$transaction(async tx => {
-    const previous = await tx.localEngineCandidate.findUnique({ where: { fullFen_candidateUci_evaluationProfile: { fullFen, candidateUci, evaluationProfile } } });
-    const changed = previous !== null && (previous.cp !== validated.cp || previous.mate !== validated.mate);
-    const saved = await tx.localEngineCandidate.upsert({
-    where: { fullFen_candidateUci_evaluationProfile: { fullFen, candidateUci, evaluationProfile } },
-    update: {
-      san: validated.san,
-      cp: validated.cp,
-      mate: validated.mate,
-      analysedAt: new Date()
-    },
-    create: {
-      fullFen,
-      candidateUci,
-      evaluationProfile,
-      san: validated.san,
-      cp: validated.cp,
-      mate: validated.mate
-    }
+    const cache = await upsertEngineCache(tx, fullFen, "LOCAL", evaluationProfile);
+    const saved = await tx.engineCacheEvaluation.upsert({
+      where: { cacheId_uci: { cacheId: cache.id, uci: candidateUci } },
+      update: { san: validated.san, cp: validated.cp, mate: validated.mate },
+      create: { cacheId: cache.id, uci: candidateUci, san: validated.san, cp: validated.cp, mate: validated.mate, rank: null }
     });
-    if (changed) await tx.repertoireMove.updateMany({
-      where: { playerTurn: "RESPONSE", uci: candidateUci, deepVerified: true, localEvaluationProfile: evaluationProfile, fromNode: { fullFen } },
-      data: { deepVerified: false }
-    });
-    return saved;
+    return { fullFen, evaluationProfile, candidateUci: saved.uci, san: saved.san, cp: saved.cp, mate: saved.mate };
   });
 }
 
 export async function readLocalEngineCandidate(fullFen: string, candidateUci: string, evaluationProfile: string) {
   validateLocalEngineIdentity(fullFen, evaluationProfile);
   if (!isValidUciMove(candidateUci)) throw new Error("Invalid Local Engine candidate identity");
-  const row = await prisma.localEngineCandidate.findUnique({
-    where: { fullFen_candidateUci_evaluationProfile: { fullFen, candidateUci, evaluationProfile } }
+  const cache = await prisma.engineCache.findUnique({
+    where: { fullFen_engine_engineProfile: { fullFen, engine: "LOCAL", engineProfile: evaluationProfile } },
+    include: { evaluations: { where: { uci: candidateUci } } }
   });
+  const row = cache?.evaluations[0];
+
   if (!row) return null;
   const evaluation = validateLocalEngineEvaluation(fullFen, evaluationProfile, {
-    uci: row.candidateUci,
+    uci: row.uci,
     san: row.san,
     cp: row.cp,
     mate: row.mate
   }, candidateUci);
-  return { ...row, ...evaluation };
+  return { fullFen, evaluationProfile, candidateUci: row.uci, ...evaluation };
 }
+
+// --- DB.08 - DB.15 moves ---
+
+export const RESPONSE_EVALUATION_SOURCES = ["Lichess Cloud Evaluation", "ChessDB", "Local Deep Stockfish"] as const;
+export const RESPONSE_SELECTION_METHODS = ["Ordinary API", "Corrected after Deep Verification", "Local Engine Fallback", "Hardcoded Opening"] as const;
+export const RESPONSE_MOVE_ORIGINS = ["Human Move", "Engine Move", "Hardcoded Move"] as const;
+export type ResponseEvaluationSource = typeof RESPONSE_EVALUATION_SOURCES[number];
+export type ResponseSelectionMethod = typeof RESPONSE_SELECTION_METHODS[number];
+export type ResponseMoveOrigin = typeof RESPONSE_MOVE_ORIGINS[number];
+
+/** DB.13 the human evidence behind a Black move. */
+export type ResponseHumanEvidence = {
+  mastersGames?: number | null;
+  eliteGames?: number | null;
+  weightedGames?: number | null;
+  totalMastersGames?: number | null;
+  mastersMoveShare?: number | null;
+  totalEliteGames?: number | null;
+  eliteMoveShare?: number | null;
+};
+
+export type ResponsePersistenceInput = ResponseHumanEvidence & {
+  fromNodeId: string; toNodeId: string | null; uci: string; san?: string | null;
+  cp: number | null; mate: number | null; source: ResponseEvaluationSource;
+  selectionMethod: ResponseSelectionMethod; moveOrigin: ResponseMoveOrigin;
+  deepVerified: boolean;
+  /** The local profile the deepVerified evidence was read under. Checked, never stored (DB.14). */
+  localEvaluationProfile: string | null;
+  stopReason?: "Repetition" | "Transposition" | null;
+  engineRank?: number | null;
+};
+
+function isNonEmptyCanonicalString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.trim() === value;
+}
+
+export function validateResponsePersistence(input: ResponsePersistenceInput): void {
+  if (!RESPONSE_EVALUATION_SOURCES.includes(input.source as ResponseEvaluationSource)) throw new Error("Invalid RESPONSE source");
+  if (!RESPONSE_SELECTION_METHODS.includes(input.selectionMethod as ResponseSelectionMethod)) throw new Error("Invalid RESPONSE selectionMethod");
+  if (!RESPONSE_MOVE_ORIGINS.includes(input.moveOrigin as ResponseMoveOrigin)) throw new Error("Invalid RESPONSE moveOrigin");
+  if (!isValidUciMove(input.uci)) throw new Error("Invalid RESPONSE UCI/LAN move");
+  // DB.14 exactly one of cp or mate; DB.12 mate is never zero.
+  const hasCp = typeof input.cp === "number" && Number.isFinite(input.cp);
+  const hasMate = typeof input.mate === "number" && Number.isInteger(input.mate) && input.mate !== 0;
+  if (!((hasCp && input.mate === null) || (input.cp === null && hasMate))) throw new Error("Invalid RESPONSE evaluation: exactly one of finite cp or non-zero integer mate is required");
+  if (typeof input.deepVerified !== "boolean") throw new Error("Invalid RESPONSE deepVerified value");
+  if (input.deepVerified && !isNonEmptyCanonicalString(input.localEvaluationProfile)) throw new Error("Invalid RESPONSE: deepVerified requires localEvaluationProfile");
+  if (input.localEvaluationProfile !== null && !isNonEmptyCanonicalString(input.localEvaluationProfile)) throw new Error("Invalid RESPONSE localEvaluationProfile");
+  if (input.weightedGames !== undefined && input.weightedGames !== null &&
+      (typeof input.weightedGames !== "number" || !Number.isFinite(input.weightedGames) || input.weightedGames < 0)) throw new Error("Invalid RESPONSE weightedGames");
+  for (const [label, value] of [["mastersGames", input.mastersGames], ["eliteGames", input.eliteGames], ["totalMastersGames", input.totalMastersGames], ["totalEliteGames", input.totalEliteGames], ["engineRank", input.engineRank]] as const) {
+    if (value !== undefined && value !== null && (!Number.isInteger(value) || value < 0)) throw new Error(`Invalid RESPONSE ${label}`);
+  }
+  for (const [label, value] of [["mastersMoveShare", input.mastersMoveShare], ["eliteMoveShare", input.eliteMoveShare]] as const) {
+    if (value !== undefined && value !== null && (!Number.isFinite(value) || value < 0 || value > 1)) throw new Error(`Invalid RESPONSE ${label}`);
+  }
+  const stopReason = input.stopReason ?? null;
+  if (stopReason === "Repetition") {
+    if (input.toNodeId !== null) throw new Error("Invalid RESPONSE repetition: toNodeId must be null");
+  } else if (!isNonEmptyCanonicalString(input.toNodeId)) {
+    throw new Error("Invalid RESPONSE: non-repetition requires toNodeId");
+  }
+}
+
+/** DB.13: the share fields are always the games field over its total. */
+export function responseHumanEvidence(input: {
+  mastersGames: number | null;
+  eliteGames: number | null;
+  weightedGames: number | null;
+  totalMastersGames: number | null;
+  totalEliteGames: number | null;
+}): Required<ResponseHumanEvidence> {
+  const share = (games: number | null, total: number | null) =>
+    games !== null && total !== null && total > 0 ? games / total : null;
+  return {
+    ...input,
+    mastersMoveShare: share(input.mastersGames, input.totalMastersGames),
+    eliteMoveShare: share(input.eliteGames, input.totalEliteGames)
+  };
+}
+
+// --- DB.03 - DB.16 nodes ---
 
 export async function getRepertoireNode(repertoireId: string, history: string) {
   return prisma.repertoireNode.findFirst({ where: { repertoireId, history } });
+}
+
+export type OpeningMetadataState = {
+  status: "PRESENT" | "VALID_ABSENCE";
+  eco: string | null;
+  openingName: string | null;
+};
+
+/** DB.06: PRESENT carries both names; VALID_ABSENCE carries neither. */
+export function validateOpeningMetadataState(state: { status: string | null; eco: string | null; openingName: string | null }, label: string): asserts state is OpeningMetadataState {
+  if (state.status !== "PRESENT" && state.status !== "VALID_ABSENCE") throw new Error(`${label}: opening metadata status is missing`);
+  if (state.status === "PRESENT" && (!state.eco || !state.openingName)) throw new Error(`${label}: PRESENT opening metadata requires both eco and openingName`);
+  if (state.status === "VALID_ABSENCE" && (state.eco !== null || state.openingName !== null)) throw new Error(`${label}: VALID_ABSENCE opening metadata cannot contain eco or openingName`);
 }
 
 export async function createRepertoireNode(
   repertoireId: string,
   rawFen: string,
   history: string,
-  cumulativeProb: number,
+  routeProb: number,
   options: {
     displayPgn?: string;
-    humanDataSnapshotId?: string;
+    siblingIndex?: number | null;
     eco?: string | null;
     openingName?: string | null;
     openingMetadataStatus?: "PRESENT" | "VALID_ABSENCE";
-    openingMetadataSource?: "LICHESS_MASTERS";
   } = {}
 ) {
   const fullFen = parseFullFen(rawFen);
   const positionKey = positionKeyFromFen(fullFen);
-  const hasOpeningState = options.openingMetadataStatus !== undefined || options.openingMetadataSource !== undefined ||
+  const hasOpeningState = options.openingMetadataStatus !== undefined ||
     options.eco !== undefined || options.openingName !== undefined;
   if (hasOpeningState) {
-    if (options.openingMetadataSource !== "LICHESS_MASTERS" || !options.openingMetadataStatus) {
-      throw new Error("Opening metadata state requires source LICHESS_MASTERS");
-    }
-    if (options.openingMetadataStatus === "PRESENT" && (!options.eco || !options.openingName)) {
-      throw new Error("PRESENT opening metadata requires both ECO and opening name");
-    }
-    if (options.openingMetadataStatus === "VALID_ABSENCE" && (options.eco != null || options.openingName != null)) {
-      throw new Error("VALID_ABSENCE opening metadata cannot contain ECO or opening name");
-    }
+    validateOpeningMetadataState({
+      status: options.openingMetadataStatus ?? null,
+      eco: options.eco ?? null,
+      openingName: options.openingName ?? null
+    }, "Invalid RepertoireNode");
   }
 
-  await getOrCreatePosition(fullFen);
   const existingCanonical = await prisma.repertoireNode.findFirst({ where: { repertoireId, history } });
   if (existingCanonical) {
     if (hasOpeningState) {
       return prisma.repertoireNode.update({
         where: { id: existingCanonical.id },
         data: {
-          ...(options.eco !== undefined ? { eco: options.eco } : {}),
-          ...(options.openingName !== undefined ? { openingName: options.openingName } : {}),
-          openingMetadataStatus: options.openingMetadataStatus,
-          openingMetadataSource: options.openingMetadataSource
+          eco: options.eco ?? null,
+          openingName: options.openingName ?? null,
+          openingMetadataStatus: options.openingMetadataStatus
         }
       });
     }
     return existingCanonical;
   }
-  return prisma.repertoireNode.create({
-    data: {
-      repertoireId,
-      fullFen,
-      positionKey,
-      history,
-      displayPgn: options.displayPgn ?? history,
-      pgn: options.displayPgn ?? history,
-      eco: options.eco ?? null,
-      openingName: options.openingName ?? null,
-      openingMetadataStatus: options.openingMetadataStatus ?? null,
-      openingMetadataSource: options.openingMetadataSource ?? null,
-      cumulativeProb,
-      humanDataSnapshotId: options.humanDataSnapshotId ?? null
-    }
+  return prisma.$transaction(async tx => {
+    const node = await tx.repertoireNode.create({
+      data: {
+        repertoireId,
+        fullFen,
+        positionKey,
+        history,
+        displayPgn: options.displayPgn ?? history,
+        eco: options.eco ?? null,
+        openingName: options.openingName ?? null,
+        openingMetadataStatus: options.openingMetadataStatus ?? null,
+        // DB.04 / S2.06: at creation both are the probability arriving down this route.
+        routeProb,
+        cumProb: routeProb,
+        siblingIndex: options.siblingIndex ?? null
+      }
+    });
+    await claimPosition(tx, repertoireId, positionKey, node.id);
+    return node;
   });
 }
 
@@ -645,9 +670,7 @@ export async function createOpponentMove(data: {
   toNodeId: string,
   san: string,
   uci?: string,
-  prob?: number,
-  routeProbability?: number,
-  trueProbability?: number
+  moveProb?: number
 }) {
   const [fromNode, toNode] = await Promise.all([
     prisma.repertoireNode.findUnique({ where: { id: data.fromNodeId } }),
@@ -663,8 +686,10 @@ export async function createOpponentMove(data: {
   if (!move || (data.uci && move.lan !== data.uci) || move.san !== data.san) throw new Error("Invalid OPPONENT UCI/SAN state");
   const resultingFullFen = parseFullFen(chess.fen());
   if (resultingFullFen !== toNode.fullFen) throw new Error("Invalid OPPONENT destination: resulting FullFen does not match toNode.fullFen");
-  const routeProbability = data.routeProbability ?? data.trueProbability ?? null;
-  const complete = { ...data, routeProbability, trueProbability: routeProbability, repertoireId: fromNode.repertoireId, uci: move.lan, san: move.san, playerTurn: "OPPONENT", humanDataSnapshotId: fromNode.humanDataSnapshotId, weightedCount: null, cp: null, mate: null, source: null, selectionMethod: null, moveOrigin: null, deepVerified: false, localEvaluationProfile: null };
+  const complete = {
+    repertoireId: fromNode.repertoireId, fromNodeId: data.fromNodeId, toNodeId: data.toNodeId,
+    uci: move.lan, san: move.san, playerTurn: "OPPONENT", moveProb: data.moveProb ?? null
+  };
   return prisma.repertoireMove.upsert({
     where: {
       fromNodeId_uci: {
@@ -677,23 +702,31 @@ export async function createOpponentMove(data: {
   });
 }
 
+const NOT_REPETITION = { OR: [{ stopReason: null }, { stopReason: { not: "Repetition" } }] };
+
+/**
+ * What arrives at a node by every non-repetition route: each incoming White move
+ * carries its source's cumProb times moveProb; a Black move carries its source's cumProb.
+ */
+export async function sumIncomingRouteProb(client: DbClient, nodeId: string) {
+  const incoming = await client.repertoireMove.findMany({
+    where: { toNodeId: nodeId, ...NOT_REPETITION },
+    include: { fromNode: { select: { cumProb: true } } }
+  });
+  const sum = incoming.reduce((total, edge) => total + (edge.playerTurn === "OPPONENT"
+    ? edge.fromNode.cumProb * (edge.moveProb ?? 0)
+    : edge.fromNode.cumProb), 0);
+  return { sum, count: incoming.length };
+}
+
 /** Recompute every reachable route from canonical incoming-edge sums. */
 export async function propagateRepertoireProbabilities(repertoireId: string, startNodeId: string) {
   return prisma.$transaction(async tx => {
-    const incomingToStart = await tx.repertoireMove.aggregate({
-      where: { toNodeId: startNodeId, OR: [{ stopReason: null }, { stopReason: { not: "Repetition" } }] },
-      _sum: { routeProbability: true }
-    });
-    const incomingCountToStart = await tx.repertoireMove.count({
-      where: { toNodeId: startNodeId, OR: [{ stopReason: null }, { stopReason: { not: "Repetition" } }] }
-    });
-    if (incomingCountToStart > 0) {
+    const start = await sumIncomingRouteProb(tx, startNodeId);
+    if (start.count > 0) {
       await tx.repertoireNode.updateMany({
         where: { id: startNodeId, repertoireId },
-        data: {
-          cumulativeProb: incomingToStart._sum.routeProbability ?? 0,
-          isTransposition: incomingCountToStart > 1
-        }
+        data: { cumProb: start.sum }
       });
     }
     // This is the production form of the transposition cascade.  Keep it a
@@ -714,32 +747,26 @@ export async function propagateRepertoireProbabilities(repertoireId: string, sta
       for (const edge of outgoing) {
         if (edge.stopReason === "Repetition") continue;
         if (edge.toNodeId === null) throw new Error("Non-repetition repertoire move is missing its destination");
-        const routeProbability = edge.playerTurn === "OPPONENT"
-          ? source.cumulativeProb * (edge.prob ?? 0)
-          : source.cumulativeProb;
-        await tx.repertoireMove.update({
-          where: { id: edge.id },
-          data: { routeProbability, trueProbability: routeProbability }
-        });
-        const incoming = await tx.repertoireMove.aggregate({
-          where: { toNodeId: edge.toNodeId, OR: [{ stopReason: null }, { stopReason: { not: "Repetition" } }] },
-          _sum: { routeProbability: true }
-        });
-        const cumulativeProb = incoming._sum.routeProbability ?? 0;
-        const incomingCount = await tx.repertoireMove.count({
-          where: { toNodeId: edge.toNodeId, OR: [{ stopReason: null }, { stopReason: { not: "Repetition" } }] }
-        });
+        const { sum: cumProb } = await sumIncomingRouteProb(tx, edge.toNodeId);
         const destination = await tx.repertoireNode.findUnique({ where: { id: edge.toNodeId } });
-        if (destination && (destination.cumulativeProb !== cumulativeProb || destination.isTransposition !== (incomingCount > 1))) {
+        if (destination && destination.cumProb !== cumProb) {
           await tx.repertoireNode.update({
             where: { id: destination.id },
-            data: { cumulativeProb, isTransposition: incomingCount > 1 }
+            data: { cumProb }
           });
           pending.push(destination.id);
         }
       }
     }
   });
+}
+
+async function hasLocalDeepEvidence(fullFen: string, uci: string, evaluationProfile: string) {
+  const [baseline, candidate] = await Promise.all([
+    readLocalEngineBaseline(fullFen, evaluationProfile),
+    readLocalEngineCandidate(fullFen, uci, evaluationProfile)
+  ]);
+  return { baseline, candidate, ok: baseline !== null && (baseline.bestUci === uci || candidate !== null) };
 }
 
 export async function createResponseMove(input: ResponsePersistenceInput) {
@@ -750,12 +777,8 @@ export async function createResponseMove(input: ResponsePersistenceInput) {
   ]);
   if (!fromNode || (input.toNodeId !== null && !toNode)) throw new Error("RESPONSE source or destination node does not exist");
   if (toNode && fromNode.repertoireId !== toNode.repertoireId) throw new Error("RESPONSE cannot cross repertoires");
-  if (input.deepVerified) {
-    const [baseline, candidate] = await Promise.all([
-      prisma.localEngineBaseline.findUnique({ where: { fullFen_evaluationProfile: { fullFen: fromNode.fullFen, evaluationProfile: input.localEvaluationProfile! } } }),
-      prisma.localEngineCandidate.findUnique({ where: { fullFen_candidateUci_evaluationProfile: { fullFen: fromNode.fullFen, candidateUci: input.uci, evaluationProfile: input.localEvaluationProfile! } } })
-    ]);
-    if (!baseline || (baseline.bestUci !== input.uci && !candidate)) throw new Error("Invalid RESPONSE: compatible Local Deep evidence is missing");
+  if (input.deepVerified && !(await hasLocalDeepEvidence(fromNode.fullFen, input.uci, input.localEvaluationProfile!)).ok) {
+    throw new Error("Invalid RESPONSE: compatible Local Deep evidence is missing");
   }
   const chess = new Chess(fromNode.fullFen);
   let move;
@@ -775,18 +798,18 @@ export async function createResponseMove(input: ResponsePersistenceInput) {
   }
   const complete = {
     repertoireId: fromNode.repertoireId, fromNodeId: input.fromNodeId, toNodeId: input.toNodeId,
-    uci: input.uci, san: move.san, playerTurn: "RESPONSE", prob: null,
-    routeProbability: fromNode.cumulativeProb,
-    trueProbability: fromNode.cumulativeProb,
-    routeHistory: input.routeHistory ?? null, stopReason: input.stopReason ?? null, humanDataSnapshotId: fromNode.humanDataSnapshotId,
-    weightedCount: input.weightedCount ?? null, cp: input.cp, mate: input.mate, source: input.source,
+    uci: input.uci, san: move.san, playerTurn: "RESPONSE", moveProb: null,
+    stopReason: input.stopReason ?? null,
     mastersGames: input.mastersGames ?? null, eliteGames: input.eliteGames ?? null,
-    totalRelevantGames: input.totalRelevantGames ?? null, moveShare: input.moveShare ?? null,
-    engineRank: input.engineRank ?? null,
-    selectionMethod: input.selectionMethod, moveOrigin: input.moveOrigin, deepVerified: input.deepVerified,
-    localEvaluationProfile: input.localEvaluationProfile
+    weightedGames: input.weightedGames ?? null,
+    totalMastersGames: input.totalMastersGames ?? null, mastersMoveShare: input.mastersMoveShare ?? null,
+    totalEliteGames: input.totalEliteGames ?? null, eliteMoveShare: input.eliteMoveShare ?? null,
+    cp: input.cp, mate: input.mate, source: input.source,
+    selectionMethod: input.selectionMethod, moveOrigin: input.moveOrigin,
+    engineRank: input.engineRank ?? null, deepVerified: input.deepVerified
   };
   return prisma.$transaction(async tx => {
+    // DB.09: one RESPONSE per position.
     const existing = await tx.repertoireMove.findFirst({ where: { fromNodeId: input.fromNodeId, playerTurn: "RESPONSE" } });
     if (existing) return tx.repertoireMove.update({ where: { id: existing.id }, data: complete });
     return tx.repertoireMove.create({ data: complete });
@@ -801,50 +824,44 @@ export async function markResponseDeepVerified(input: {
   expectedBaseline: { uci: string; cp: number | null; mate: number | null };
   expectedCandidate: { uci: string; cp: number | null; mate: number | null };
 }) {
-  return prisma.$transaction(async tx => {
-    const response = await tx.repertoireMove.findUnique({
-      where: { id: input.responseId },
-      include: { fromNode: true }
-    });
-    if (!response || response.playerTurn !== "RESPONSE") throw new Error("DV pass persistence: RESPONSE no longer exists");
-    if (response.uci !== input.expectedUci || response.fromNode.fullFen !== input.expectedFullFen) {
-      throw new Error("DV pass persistence: RESPONSE changed after verification");
-    }
-    validateResponsePersistence({
-      fromNodeId: response.fromNodeId,
-      toNodeId: response.toNodeId,
-      uci: response.uci,
-      san: response.san,
-      cp: response.cp,
-      mate: response.mate,
-      source: response.source as ResponseEvaluationSource,
-      selectionMethod: response.selectionMethod as ResponseSelectionMethod,
-      moveOrigin: response.moveOrigin as ResponseMoveOrigin,
-      deepVerified: false,
-      localEvaluationProfile: response.localEvaluationProfile,
-      weightedCount: response.weightedCount
-    });
-    const baseline = await tx.localEngineBaseline.findUnique({
-      where: { fullFen_evaluationProfile: { fullFen: input.expectedFullFen, evaluationProfile: input.localEvaluationProfile } }
-    });
-    const candidate = await tx.localEngineCandidate.findUnique({
-      where: { fullFen_candidateUci_evaluationProfile: { fullFen: input.expectedFullFen, candidateUci: input.expectedUci, evaluationProfile: input.localEvaluationProfile } }
-    });
-    const baselineMatches = baseline !== null && baseline.bestUci === input.expectedBaseline.uci &&
-      baseline.cp === input.expectedBaseline.cp && baseline.mate === input.expectedBaseline.mate;
-    const candidateMatches = input.expectedBaseline.uci === input.expectedUci
-      ? input.expectedCandidate.uci === input.expectedUci && input.expectedCandidate.cp === input.expectedBaseline.cp && input.expectedCandidate.mate === input.expectedBaseline.mate
-      : candidate !== null && candidate.candidateUci === input.expectedCandidate.uci && candidate.cp === input.expectedCandidate.cp && candidate.mate === input.expectedCandidate.mate;
-    if (!baselineMatches || !candidateMatches || input.expectedCandidate.uci !== input.expectedUci) {
-      throw new Error("DV pass persistence: compatible Local Deep evidence is missing");
-    }
-    const update = await tx.repertoireMove.updateMany({
-      where: { id: input.responseId, uci: input.expectedUci, deepVerified: false },
-      data: { deepVerified: true, localEvaluationProfile: input.localEvaluationProfile }
-    });
-    if (update.count !== 1) throw new Error("DV pass persistence: RESPONSE changed concurrently");
-    return tx.repertoireMove.findUniqueOrThrow({ where: { id: input.responseId } });
+  const response = await prisma.repertoireMove.findUnique({
+    where: { id: input.responseId },
+    include: { fromNode: true }
   });
+  if (!response || response.playerTurn !== "RESPONSE") throw new Error("DV pass persistence: RESPONSE no longer exists");
+  if (response.uci !== input.expectedUci || response.fromNode.fullFen !== input.expectedFullFen) {
+    throw new Error("DV pass persistence: RESPONSE changed after verification");
+  }
+  validateResponsePersistence({
+    fromNodeId: response.fromNodeId,
+    toNodeId: response.toNodeId,
+    uci: response.uci,
+    san: response.san,
+    cp: response.cp,
+    mate: response.mate,
+    source: response.source as ResponseEvaluationSource,
+    selectionMethod: response.selectionMethod as ResponseSelectionMethod,
+    moveOrigin: response.moveOrigin as ResponseMoveOrigin,
+    deepVerified: false,
+    localEvaluationProfile: null,
+    weightedGames: response.weightedGames,
+    stopReason: response.stopReason as ResponsePersistenceInput["stopReason"]
+  });
+  const { baseline, candidate } = await hasLocalDeepEvidence(input.expectedFullFen, input.expectedUci, input.localEvaluationProfile);
+  const baselineMatches = baseline !== null && baseline.bestUci === input.expectedBaseline.uci &&
+    baseline.cp === input.expectedBaseline.cp && baseline.mate === input.expectedBaseline.mate;
+  const candidateMatches = input.expectedBaseline.uci === input.expectedUci
+    ? input.expectedCandidate.uci === input.expectedUci && input.expectedCandidate.cp === input.expectedBaseline.cp && input.expectedCandidate.mate === input.expectedBaseline.mate
+    : candidate !== null && candidate.candidateUci === input.expectedCandidate.uci && candidate.cp === input.expectedCandidate.cp && candidate.mate === input.expectedCandidate.mate;
+  if (!baselineMatches || !candidateMatches || input.expectedCandidate.uci !== input.expectedUci) {
+    throw new Error("DV pass persistence: compatible Local Deep evidence is missing");
+  }
+  const update = await prisma.repertoireMove.updateMany({
+    where: { id: input.responseId, uci: input.expectedUci, deepVerified: false },
+    data: { deepVerified: true }
+  });
+  if (update.count !== 1) throw new Error("DV pass persistence: RESPONSE changed concurrently");
+  return prisma.repertoireMove.findUniqueOrThrow({ where: { id: input.responseId } });
 }
 
 /** Compatibility API for existing OPPONENT callers only. */
@@ -852,82 +869,4 @@ export async function createRepertoireMove(data: Parameters<typeof createOpponen
   if (data.playerTurn !== "OPPONENT") throw new Error("Use createResponseMove for complete RESPONSE persistence");
   const { playerTurn: _playerTurn, ...opponent } = data;
   return createOpponentMove(opponent);
-}
-
-export async function getCompatibleHumanDataSnapshot(repertoireId: string, explorerRequestProfile: string) {
-  return prisma.humanDataSnapshot.findFirst({
-    where: {
-      repertoireId,
-      explorerRequestProfile
-    },
-    orderBy: {
-      startedAt: 'desc'
-    }
-  });
-}
-
-export async function getOrCreateHumanDataSnapshot(repertoireId: string, explorerRequestProfile: string) {
-  const existing = await getCompatibleHumanDataSnapshot(repertoireId, explorerRequestProfile);
-  if (existing) {
-    return existing;
-  }
-  return createHumanDataSnapshot(repertoireId, explorerRequestProfile);
-}
-
-export async function createHumanDataSnapshot(repertoireId: string, explorerRequestProfile: string) {
-  return prisma.humanDataSnapshot.create({
-    data: {
-      repertoireId,
-      explorerRequestProfile
-    }
-  });
-}
-
-export type HumanDatabaseType = "MASTERS" | "ELITE" | "AMATEUR";
-
-function validateDatabaseType(dbType: string): asserts dbType is HumanDatabaseType {
-  if (dbType !== "MASTERS" && dbType !== "ELITE" && dbType !== "AMATEUR") {
-    throw new Error(`Invalid human database type: ${dbType}`);
-  }
-}
-
-export async function checkHumanExplorerFetch(snapshotId: string, positionKey: string, databaseType: HumanDatabaseType) {
-  validateDatabaseType(databaseType);
-  return prisma.humanExplorerFetch.findUnique({
-    where: {
-      snapshotId_positionKey_databaseType: {
-        snapshotId,
-        positionKey,
-        databaseType
-      }
-    }
-  });
-}
-
-export async function recordHumanExplorerFetch(snapshotId: string, positionKey: string, databaseType: HumanDatabaseType) {
-  validateDatabaseType(databaseType);
-  return prisma.humanExplorerFetch.upsert({
-    where: {
-      snapshotId_positionKey_databaseType: {
-        snapshotId,
-        positionKey,
-        databaseType
-      }
-    },
-    update: {},
-    create: {
-      snapshotId,
-      positionKey,
-      databaseType
-    }
-  });
-}
-
-export async function getHumanExplorerFetchesForPosition(snapshotId: string, positionKey: string) {
-  return prisma.humanExplorerFetch.findMany({
-    where: {
-      snapshotId,
-      positionKey
-    }
-  });
 }

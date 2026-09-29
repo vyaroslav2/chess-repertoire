@@ -29,8 +29,8 @@ function mockLock(): LockHandle {
 test("canonical continuation worklist is LIFO", () => {
   const queue: GeneratorQueueItem[] = [];
   const pending: PendingCanonicalContinuations = new Map();
-  const first = { nodeId: "first", fen: "8/8/8/8/8/8/8/8 w - - 0 1", currentMoveNumber: 1, cumulativeProb: 0.1, history: [] };
-  const second = { nodeId: "second", fen: "8/8/8/8/8/8/8/8 w - - 0 1", currentMoveNumber: 1, cumulativeProb: 0.2, history: [] };
+  const first = { nodeId: "first", fen: "8/8/8/8/8/8/8/8 w - - 0 1", currentMoveNumber: 1, cumProb: 0.1, history: [] };
+  const second = { nodeId: "second", fen: "8/8/8/8/8/8/8/8 w - - 0 1", currentMoveNumber: 1, cumProb: 0.2, history: [] };
 
   enqueueCanonicalContinuation({ queue, pendingByResponseSource: pending, responseSourceNodeId: "response-1", item: first });
   enqueueCanonicalContinuation({ queue, pendingByResponseSource: pending, responseSourceNodeId: "response-2", item: second });

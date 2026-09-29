@@ -1,9 +1,9 @@
 import { evaluateBlackMove } from '../src/lib/core/evaluator';
 import { Chess } from 'chess.js';
 import { PrismaClient } from '@prisma/client';
-import { saveHumanExplorerBucket, getOrCreatePosition, getOrCreatePositionCache, getOrCreateHumanDataSnapshot } from '../src/lib/db/operations';
+import { saveExplorerCache } from '../src/lib/db/operations';
 import { parseFullFen, positionKeyFromFen } from '../src/lib/core/fen';
-import { computeExplorerRequestProfile, defaultConfig } from "../src/lib/core/config";
+import { computeExplorerCacheProfile, defaultConfig } from "../src/lib/core/config";
 
 // Ensure burner DB
 process.env.DATABASE_URL = "file:./burner.db";
@@ -36,20 +36,16 @@ async function runTest() {
     return originalFetch(input, init);
   };
 
-  // Ensure the PositionCache exists before saving foreign-keyed cache data
-  await getOrCreatePositionCache(fullFen);
-
   // Clean previous engine evals for this test FEN
 
   // Inject terrible human moves to prove they are ignored
-  await prisma.explorerMoveCache.deleteMany({ where: { positionKey: normFen } });
+  await prisma.positionCache.deleteMany({ where: { positionKey: normFen } });
   
   const fakeData = [
       { uci: "h7h6", san: "h6", games: 5000, whiteWins: 1000, draws: 1000, blackWins: 3000 },
       { uci: "g8f8", san: "Kf8", games: 2000, whiteWins: 500, draws: 500, blackWins: 1000 }
   ];
   
-  const reqProfile = computeExplorerRequestProfile(defaultConfig);
   const user = await prisma.user.upsert({
     where: { username: "mate-kill-test" },
     update: {},
@@ -59,18 +55,16 @@ async function runTest() {
   if (!repertoire) {
     repertoire = await prisma.repertoire.create({ data: { userId: user.id, title: "Mate Kill Test", color: "black" } });
   }
-  await getOrCreatePosition(fullFen);
-  const snapshot = await getOrCreateHumanDataSnapshot(repertoire.id, reqProfile);
-  const snapshotId = snapshot.id;
-
-  await saveHumanExplorerBucket(snapshotId, normFen, "MASTERS", fakeData);
-  await saveHumanExplorerBucket(snapshotId, normFen, "ELITE", fakeData);
-  await saveHumanExplorerBucket(snapshotId, normFen, "AMATEUR", fakeData);
+  for (const dataset of ["MASTERS", "ELITE", "AMATEUR"] as const) {
+    await saveExplorerCache(normFen, computeExplorerCacheProfile(dataset, defaultConfig), {
+      positionTotalGames: fakeData.reduce((sum, move) => sum + move.games, 0), eco: null, openingName: null, moves: fakeData
+    });
+  }
 
   console.log("\n=== Phase 3 & 4: Triggering Kill Mode & Deep Search ===");
 
   console.log("Calling evaluateBlackMove...");
-  const evalResult = await evaluateBlackMove(fen, chess, 10, [], snapshotId);
+  const evalResult = await evaluateBlackMove(fen, chess, 10, []);
   
   console.log("\n=== Phase 5: Strict Execution & Database Saving ===");
   console.log(`Pipeline selected move: ${evalResult.selectedMoveSan}`);
@@ -96,7 +90,7 @@ async function runTest() {
   }
 
   console.log("\n=== Teardown ===");
-  await prisma.explorerMoveCache.deleteMany({ where: { positionKey: normFen } });
+  await prisma.positionCache.deleteMany({ where: { positionKey: normFen } });
   await prisma.$disconnect();
   console.log("Done.");
 }

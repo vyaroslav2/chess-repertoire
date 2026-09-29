@@ -1,7 +1,7 @@
 import { fetchWithRetry } from './retry';
-import { readHumanExplorerBucket, saveHumanExplorerBucket, ExplorerMoveRow, HumanDatabaseType } from '../db/operations';
+import { readExplorerCache, saveExplorerCache, ExplorerMoveRow, HumanDatabaseType } from '../db/operations';
 import { parseFullFen, positionKeyFromFen } from '../core/fen';
-import { defaultConfig } from '../core/config';
+import { computeExplorerCacheProfile, defaultConfig } from '../core/config';
 import { Chess } from 'chess.js';
 
 type PublicExplorerMove = {
@@ -12,6 +12,8 @@ type PublicExplorerMove = {
   black: number;
   games: number;
 };
+
+export type ExplorerOpening = { eco: string; name: string };
 
 function toPublicMove(move: ExplorerMoveRow): PublicExplorerMove {
   return {
@@ -28,9 +30,23 @@ function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) && value >= 0;
 }
 
+function toOpening(eco: string | null, openingName: string | null): ExplorerOpening | null {
+  return eco !== null && openingName !== null ? { eco, name: openingName } : null;
+}
+
+function parseOpening(opening: unknown): ExplorerOpening | null {
+  if (opening === undefined || opening === null) return null;
+  if (typeof opening !== "object") throw new Error("Invalid source result: opening is not an object");
+  const record = opening as Record<string, unknown>;
+  if (typeof record.eco !== "string" || record.eco.trim() === "" ||
+      typeof record.name !== "string" || record.name.trim() === "") {
+    throw new Error("Invalid source result: opening ECO and name must both be non-empty strings");
+  }
+  return { eco: record.eco, name: record.name };
+}
+
 export async function fetchAllDatabases(
   fen: string,
-  snapshotId: string,
   requestedBuckets: readonly HumanDatabaseType[] = ["MASTERS", "ELITE", "AMATEUR"]
 ) {
   const fullFen = parseFullFen(fen);
@@ -41,11 +57,15 @@ export async function fetchAllDatabases(
     url: string,
     retryCount: number
   ) {
-    const cached = await readHumanExplorerBucket(snapshotId, posKey, dbType);
+    const cacheProfile = computeExplorerCacheProfile(dbType, defaultConfig);
+    const cached = await readExplorerCache(posKey, cacheProfile);
     if (cached.status === "success" || cached.status === "empty") {
       const moves = cached.status === "success" ? cached.moves.map(toPublicMove) : [];
       const totalGames = moves.reduce((sum, m) => sum + m.games, 0);
-      return { moves, totalGames, opening: null, retrieval: "CACHE" as const };
+      return {
+        moves, totalGames, positionTotalGames: cached.positionTotalGames,
+        opening: toOpening(cached.eco, cached.openingName), retrieval: "CACHE" as const
+      };
     }
 
     const data = await fetchWithRetry(url, retryCount, true, "explorer");
@@ -104,15 +124,26 @@ export async function fetchAllDatabases(
       });
     }
 
-    await saveHumanExplorerBucket(snapshotId, posKey, dbType, validMoves);
-
     const returnedMoves = validMoves.map(toPublicMove);
     const totalGames = returnedMoves.reduce((sum, m) => sum + m.games, 0);
-    return { moves: returnedMoves, totalGames, opening: data.opening || null, retrieval: "FRESH" as const };
+    // The position's own total, as Explorer reports it. EX.05 compares it with totalGames.
+    const positionTotalGames = isNonNegativeInteger(data.white) && isNonNegativeInteger(data.draws) && isNonNegativeInteger(data.black)
+      ? data.white + data.draws + data.black
+      : totalGames;
+    const opening = parseOpening(data.opening);
+
+    await saveExplorerCache(posKey, cacheProfile, {
+      positionTotalGames,
+      eco: opening?.eco ?? null,
+      openingName: opening?.name ?? null,
+      moves: validMoves
+    });
+
+    return { moves: returnedMoves, totalGames, positionTotalGames, opening, retrieval: "FRESH" as const };
   }
 
   const mastersUrl = `https://explorer.lichess.ovh/masters?fen=${encodeURIComponent(fullFen)}`;
-  const skippedBucket = () => ({ moves: [], totalGames: 0, opening: null, retrieval: "SKIPPED" as const });
+  const skippedBucket = () => ({ moves: [], totalGames: 0, positionTotalGames: 0, opening: null, retrieval: "SKIPPED" as const });
   const mRes = requestedBuckets.includes("MASTERS")
     ? await processBucket("MASTERS", mastersUrl, defaultConfig.api.lichessExplorer.retryAttempts)
     : skippedBucket();
@@ -134,23 +165,16 @@ export async function fetchAllDatabases(
   return [mRes, eRes, aRes];
 }
 
-export async function fetchMastersOpeningMetadata(fen: string) {
-  const fullFen = parseFullFen(fen);
-  const url = `https://explorer.lichess.ovh/masters?fen=${encodeURIComponent(fullFen)}`;
-  const data = await fetchWithRetry(url, defaultConfig.api.lichessExplorer.retryAttempts, true, "explorer");
-  if (!data || typeof data !== "object") {
-    throw new Error(`Required Lichess Explorer MASTERS metadata request failed for position ${positionKeyFromFen(fullFen)}`);
+/** DB.06 rule 1: Masters, then Elite, then Amateur, among the datasets that were fetched. */
+export function pickExplorerOpening(results: ReadonlyArray<{ opening: ExplorerOpening | null }>): ExplorerOpening | null {
+  for (const result of results) {
+    if (result.opening) return result.opening;
   }
-  if (!Array.isArray((data as Record<string, unknown>).moves)) {
-    throw new Error("Invalid Masters opening metadata response: moves is missing or not an array");
-  }
-  const opening = (data as Record<string, unknown>).opening;
-  if (opening === undefined || opening === null) return null;
-  if (typeof opening !== "object") throw new Error("Invalid Masters opening metadata: opening is not an object");
-  const record = opening as Record<string, unknown>;
-  if (typeof record.eco !== "string" || record.eco.trim() === "" ||
-      typeof record.name !== "string" || record.name.trim() === "") {
-    throw new Error("Invalid Masters opening metadata: ECO and name must both be non-empty strings");
-  }
-  return { eco: record.eco, name: record.name };
+  return null;
+}
+
+/** DB.06 rule 4: a position never sent to Explorer is fetched for the name only (Masters). */
+export async function fetchMastersOpeningMetadata(fen: string): Promise<ExplorerOpening | null> {
+  const [masters] = await fetchAllDatabases(fen, ["MASTERS"]);
+  return masters.opening;
 }

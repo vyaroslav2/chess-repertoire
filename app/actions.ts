@@ -59,27 +59,27 @@ export async function fetchDuePositions(repertoireId: string) {
     const histories = ["", ...historyUcis.map((_, index) => historyUcis.slice(0, index + 1).join(" "))];
     const historyNodes = await prisma.repertoireNode.findMany({
       where: { repertoireId, history: { in: histories } },
-      select: { history: true, eco: true, openingName: true, openingMetadataStatus: true, openingMetadataSource: true }
+      select: { history: true, eco: true, openingName: true, openingMetadataStatus: true }
     });
     const metadataByHistory = new Map(historyNodes.map(node => [node.history, node]));
     const openingByPly = histories.map(history => metadataByHistory.get(history) ?? null);
     if (stat.targetMove.toNodeId) {
       const destination = await prisma.repertoireNode.findUnique({
         where: { id: stat.targetMove.toNodeId },
-        select: { history: true, eco: true, openingName: true, openingMetadataStatus: true, openingMetadataSource: true }
+        select: { history: true, eco: true, openingName: true, openingMetadataStatus: true }
       });
       openingByPly.push(destination);
-    } else if (stat.targetMove.stopReason === "Repetition" && stat.targetMove.routeHistory) {
+    } else if (stat.targetMove.stopReason === "Repetition" && stat.targetMove.uci) {
+      const routeHistory = [stat.node.history, stat.targetMove.uci].filter(Boolean).join(" ");
       const terminal = await prisma.openingMetadataHistoryCache.findUnique({
-        where: { repertoireId_history: { repertoireId, history: stat.targetMove.routeHistory } },
-        select: { eco: true, openingName: true, status: true, source: true }
+        where: { repertoireId_history: { repertoireId, history: routeHistory } },
+        select: { eco: true, openingName: true, status: true }
       });
       openingByPly.push(terminal ? {
-        history: stat.targetMove.routeHistory,
+        history: routeHistory,
         eco: terminal.eco,
         openingName: terminal.openingName,
-        openingMetadataStatus: terminal.status,
-        openingMetadataSource: terminal.source
+        openingMetadataStatus: terminal.status
       } : null);
     }
     return { ...stat, lineMoves, openingByPly };
@@ -126,27 +126,27 @@ export async function fetchDemoPositions(repertoireId: string) {
     const histories = ["", ...historyUcis.map((_, index) => historyUcis.slice(0, index + 1).join(" "))];
     const historyNodes = await prisma.repertoireNode.findMany({
       where: { repertoireId, history: { in: histories } },
-      select: { history: true, eco: true, openingName: true, openingMetadataStatus: true, openingMetadataSource: true }
+      select: { history: true, eco: true, openingName: true, openingMetadataStatus: true }
     });
     const metadataByHistory = new Map(historyNodes.map(node => [node.history, node]));
     const openingByPly = histories.map(history => metadataByHistory.get(history) ?? null);
     if (stat.targetMove.toNodeId) {
       const destination = await prisma.repertoireNode.findUnique({
         where: { id: stat.targetMove.toNodeId },
-        select: { history: true, eco: true, openingName: true, openingMetadataStatus: true, openingMetadataSource: true }
+        select: { history: true, eco: true, openingName: true, openingMetadataStatus: true }
       });
       openingByPly.push(destination);
-    } else if (stat.targetMove.stopReason === "Repetition" && stat.targetMove.routeHistory) {
+    } else if (stat.targetMove.stopReason === "Repetition" && stat.targetMove.uci) {
+      const routeHistory = [branch.toNode.history, stat.targetMove.uci].filter(Boolean).join(" ");
       const terminal = await prisma.openingMetadataHistoryCache.findUnique({
-        where: { repertoireId_history: { repertoireId, history: stat.targetMove.routeHistory } },
-        select: { eco: true, openingName: true, status: true, source: true }
+        where: { repertoireId_history: { repertoireId, history: routeHistory } },
+        select: { eco: true, openingName: true, status: true }
       });
       openingByPly.push(terminal ? {
-        history: stat.targetMove.routeHistory,
+        history: routeHistory,
         eco: terminal.eco,
         openingName: terminal.openingName,
-        openingMetadataStatus: terminal.status,
-        openingMetadataSource: terminal.source
+        openingMetadataStatus: terminal.status
       } : null);
     }
 

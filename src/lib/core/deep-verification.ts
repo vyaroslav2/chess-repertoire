@@ -1,12 +1,12 @@
 import { parseFullFen } from "./fen";
 import { buildBlackHumanShortlist, type ExplorerMoveInput } from "./black-human-shortlist";
-import { computeExplorerRequestProfile, defaultConfig } from "./config";
+import { computeExplorerCacheProfile, defaultConfig } from "./config";
 import { getCpTolerance } from "./verifier";
 import { verifyLocalCandidate, type LocalCandidateVerification } from "./local-engine";
 import {
   markResponseDeepVerified,
   prisma,
-  readHumanExplorerBucket,
+  readExplorerCache,
   validateResponsePersistence,
   type ResponseEvaluationSource,
   type ResponseMoveOrigin,
@@ -48,8 +48,8 @@ export function responseMoveNumber(fullFen: string): number {
   return fullmove;
 }
 
-function toExplorerInput(rows: Awaited<ReturnType<typeof readHumanExplorerBucket>>): ExplorerMoveInput[] {
-  if (rows.status === "missing") throw new Error("DV correction requires complete current HumanDataSnapshot cache");
+function toExplorerInput(rows: Awaited<ReturnType<typeof readExplorerCache>>): ExplorerMoveInput[] {
+  if (rows.status === "missing") throw new Error("DV correction requires the current Explorer cache");
   if (rows.status === "empty") return [];
   return rows.moves.map(move => ({
     uci: move.uci, san: move.san, games: move.games,
@@ -81,7 +81,7 @@ export async function runDeepVerification(
     include: { fromNode: true }
   });
   responses.sort((a, b) => responseMoveNumber(a.fromNode.fullFen) - responseMoveNumber(b.fromNode.fullFen) ||
-    a.fromNode.pgn.localeCompare(b.fromNode.pgn) || (a.uci ?? "").localeCompare(b.uci ?? ""));
+    a.fromNode.displayPgn.localeCompare(b.fromNode.displayPgn) || (a.uci ?? "").localeCompare(b.uci ?? ""));
 
   let verifiedCount = 0;
   for (const response of responses) {
@@ -90,7 +90,7 @@ export async function runDeepVerification(
       fromNodeId: response.fromNodeId, toNodeId: response.toNodeId, uci: response.uci as string, san: response.san,
       cp: response.cp, mate: response.mate, source: response.source as ResponseEvaluationSource,
       selectionMethod: response.selectionMethod as ResponseSelectionMethod, moveOrigin: response.moveOrigin as ResponseMoveOrigin,
-      deepVerified: false, localEvaluationProfile: response.localEvaluationProfile, weightedCount: response.weightedCount
+      deepVerified: false, localEvaluationProfile: null, weightedGames: response.weightedGames
     });
     const fullFen = parseFullFen(response.fromNode.fullFen);
     if (fullFen !== response.fromNode.fullFen) throw new Error("DV RESPONSE source FullFen is not canonical");
@@ -107,14 +107,9 @@ export async function runDeepVerification(
       continue;
     }
 
-    const profile = computeExplorerRequestProfile(defaultConfig);
-    const snapshot = await prisma.humanDataSnapshot.findFirst({
-      where: { repertoireId, explorerRequestProfile: profile }, orderBy: { startedAt: "desc" }
-    });
-    if (!snapshot) throw new Error("DV correction requires the repertoire's current compatible HumanDataSnapshot");
     const [mastersBucket, eliteBucket] = await Promise.all([
-      readHumanExplorerBucket(snapshot.id, response.fromNode.positionKey, "MASTERS"),
-      readHumanExplorerBucket(snapshot.id, response.fromNode.positionKey, "ELITE")
+      readExplorerCache(response.fromNode.positionKey, computeExplorerCacheProfile("MASTERS", defaultConfig)),
+      readExplorerCache(response.fromNode.positionKey, computeExplorerCacheProfile("ELITE", defaultConfig))
     ]);
     const shortlist = buildBlackHumanShortlist(toExplorerInput(mastersBucket), toExplorerInput(eliteBucket), defaultConfig);
     let proposal: ProposedDeepCorrection | null = null;

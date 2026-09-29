@@ -27,122 +27,74 @@ model Repertoire {
   stats                RepertoirePositionStat[]
   nodes                RepertoireNode[]
   moves                RepertoireMove[]
-  humanSnapshots       HumanDataSnapshot[]
+  positions            Position[]
   wikibooksCache       WikibooksHistoryCache[]
   openingMetadataCache OpeningMetadataHistoryCache[]
 }
 
-// --- PERMANENT CHESS IDENTITY ---
+// --- THE CACHES (DB.30: they survive the wipe) ---
 
-model Position {
-  positionKey       String               @id
-  nodes             RepertoireNode[]
-  humanFetches      HumanExplorerFetch[]
-  ExplorerMoveCache ExplorerMoveCache[]
-}
-
-// --- TEMPORARY SNAPSHOTS ---
-
-model HumanDataSnapshot {
-  id                     String   @id @default(uuid())
-  repertoireId           String
-  startedAt              DateTime @default(now())
-  explorerRequestProfile String
-
-  repertoire        Repertoire           @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
-  fetches           HumanExplorerFetch[]
-  ExplorerMoveCache ExplorerMoveCache[]
-  nodes             RepertoireNode[]
-  moves             RepertoireMove[]
-}
-
-model HumanExplorerFetch {
-  id           String @id @default(uuid())
-  snapshotId   String
-  positionKey  String
-  databaseType String // "MASTERS" | "ELITE" | "AMATEUR"
-
-  snapshot HumanDataSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
-  position Position          @relation(fields: [positionKey], references: [positionKey], onDelete: Restrict)
-
-  @@unique([snapshotId, positionKey, databaseType])
-}
-
-// --- THE CACHE LAYER ---
-
+// DB.31, EX.01: Explorer data, one row per position per dataset cache profile.
+// The dataset is part of the profile. No move rows means the position was
+// fetched and has no games (State B).
 model PositionCache {
-  fen String @id // Legacy position-level cache identity only
+  id                 String   @id @default(uuid())
+  positionKey        String
+  cacheProfile       String
+  positionTotalGames Int
+  eco                String?
+  openingName        String?
+  fetchedAt          DateTime @default(now())
+
+  moves PositionCacheMove[]
+
+  @@unique([positionKey, cacheProfile])
 }
 
-model ExplorerMoveCache {
-  id           String @id @default(uuid())
-  snapshotId   String
-  positionKey  String
-  databaseType String // "MASTERS" | "ELITE" | "AMATEUR"
-  uci          String
-  san          String
-  games        Int
-  whiteWins    Float
-  draws        Float
-  blackWins    Float
+model PositionCacheMove {
+  id        String @id @default(uuid())
+  cacheId   String
+  uci       String
+  san       String
+  games     Int
+  whiteWins Int
+  draws     Int
+  blackWins Int
 
-  snapshot HumanDataSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
-  position Position          @relation(fields: [positionKey], references: [positionKey], onDelete: Restrict)
+  cache PositionCache @relation(fields: [cacheId], references: [id], onDelete: Cascade)
 
-  @@unique([snapshotId, positionKey, databaseType, uci])
-  @@index([snapshotId, positionKey, databaseType])
+  @@unique([cacheId, uci])
 }
 
-model RemoteEngineFetch {
-  id                String                  @id @default(uuid())
-  fullFen           String
-  source            String // "LICHESS" or "CHESSDB"
-  evaluationProfile String
-  fetchedAt         DateTime                @default(now())
-  evaluations       RemoteEngineEvalCache[]
+// DB.32: engine evaluations, against the exact fullFen and that engine's own
+// profile. Lichess, ChessDB and local Stockfish each keep their own rows.
+model EngineCache {
+  id            String   @id @default(uuid())
+  fullFen       String
+  engineProfile String
+  engine        String // "LICHESS" | "CHESSDB" | "LOCAL"
+  fetchedAt     DateTime @default(now())
 
-  @@unique([fullFen, source, evaluationProfile])
+  evaluations EngineCacheEvaluation[]
+
+  @@unique([fullFen, engine, engineProfile])
 }
 
-model RemoteEngineEvalCache {
+model EngineCacheEvaluation {
   id      String  @id @default(uuid())
-  fetchId String
+  cacheId String
   uci     String
   san     String?
   cp      Float?
   mate    Int?
+  rank    Int? // place in the engine's list; local Stockfish: 1 for its best move, otherwise null
 
-  fetch RemoteEngineFetch @relation(fields: [fetchId], references: [id], onDelete: Cascade)
+  cache EngineCache @relation(fields: [cacheId], references: [id], onDelete: Cascade)
 
-  @@unique([fetchId, uci])
+  @@unique([cacheId, uci])
 }
 
-model LocalEngineBaseline {
-  id                String   @id @default(uuid())
-  fullFen           String
-  evaluationProfile String
-  bestUci           String
-  san               String?
-  cp                Float?
-  mate              Int?
-  analysedAt        DateTime @default(now())
-
-  @@unique([fullFen, evaluationProfile])
-}
-
-model LocalEngineCandidate {
-  id                String   @id @default(uuid())
-  fullFen           String
-  candidateUci      String
-  evaluationProfile String
-  san               String?
-  cp                Float?
-  mate              Int?
-  analysedAt        DateTime @default(now())
-
-  @@unique([fullFen, candidateUci, evaluationProfile])
-}
-
+// DB.34 #deferred
 model WikibooksHistoryCache {
   id           String   @id @default(uuid())
   repertoireId String
@@ -156,12 +108,12 @@ model WikibooksHistoryCache {
   @@unique([repertoireId, history])
 }
 
+// DB.33: the result of DB.06, per route.
 model OpeningMetadataHistoryCache {
   id           String   @id @default(uuid())
   repertoireId String
   history      String
   status       String // "PRESENT" or "VALID_ABSENCE"
-  source       String // "LICHESS_MASTERS"
   eco          String?
   openingName  String?
   createdAt    DateTime @default(now())
@@ -172,29 +124,55 @@ model OpeningMetadataHistoryCache {
   @@unique([repertoireId, history])
 }
 
-// --- THE ALGORITHM LAYER ---
+// --- THE TREE (DB.02: wiped and rebuilt on every run) ---
+
+// DB.36: not a cache. positionKey --> the node that owns that position.
+model Position {
+  repertoireId String
+  positionKey  String
+  nodeId       String @unique
+
+  repertoire Repertoire     @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
+  node       RepertoireNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@id([repertoireId, positionKey])
+}
 
 model RepertoireNode {
-  id                    String  @id @default(uuid()) // Unique ID for this specific path
-  repertoireId          String
-  fullFen               String // Canonical exact state
-  positionKey           String // FK to permanent Position
-  history               String  @default("") // Canonical UCI/LAN move sequence
-  displayPgn            String  @default("") // Derived SAN display history
-  pgn                   String  @default("") // Legacy SAN display alias during migration
+  id           String @id @default(uuid())
+  repertoireId String
+
+  // DB.03 identity
+  positionKey String
+  fullFen     String
+  history     String @default("") // UCI
+  displayPgn  String @default("") // SAN
+
+  // DB.04 probability
+  routeProb          Float
+  cumProb            Float
+  rareDropped        Float @default(0)
+  unaccountedDropped Float @default(0)
+
+  // DB.05 transposition marker: set on a pointer, null on an owner
+  transposesTo String?
+
+  // DB.06 opening metadata
   eco                   String?
   openingName           String?
   openingMetadataStatus String? // "PRESENT" or "VALID_ABSENCE"
-  openingMetadataSource String? // "LICHESS_MASTERS"
-  cumulativeProb        Float   @default(0)
-  isTransposition       Boolean @default(false)
-  humanDataSnapshotId   String?
-  wikibooksChecked      Boolean @default(false)
-  wikiText              String?
 
-  position          Position           @relation(fields: [positionKey], references: [positionKey], onDelete: Restrict)
-  repertoire        Repertoire         @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
-  humanDataSnapshot HumanDataSnapshot? @relation(fields: [humanDataSnapshotId], references: [id], onDelete: Restrict)
+  // DB.07 #deferred
+  wikibooksChecked Boolean @default(false)
+  wikiText         String?
+
+  // DB.16 ordering
+  siblingIndex Int?
+
+  repertoire Repertoire       @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
+  owner      RepertoireNode?  @relation("Transposition", fields: [transposesTo], references: [id], onDelete: SetNull)
+  pointers   RepertoireNode[] @relation("Transposition")
+  ownedPosition Position?
 
   incomingMoves RepertoireMove[]         @relation("IncomingMoves")
   outgoingMoves RepertoireMove[]         @relation("OutgoingMoves")
@@ -211,36 +189,36 @@ model RepertoireMove {
   toNodeId     String?
   san          String
   uci          String?
-  playerTurn   String // "OPPONENT" or "RESPONSE"
+  playerTurn   String // DB.08: "OPPONENT" (White) or "RESPONSE" (Black)
 
-  // Opponent specific fields
-  prob                Float?
-  routeProbability    Float?
-  trueProbability     Float? // Legacy alias; new writes use routeProbability
-  routeHistory        String?
-  stopReason          String?
-  humanDataSnapshotId String?
+  // DB.10 White move fields
+  moveProb Float?
 
-  // Response specific fields
-  weightedCount          Float?
-  mastersGames           Int?
-  eliteGames             Int?
-  totalRelevantGames     Int?
-  moveShare              Float?
-  engineRank             Int?
-  cp                     Float?
-  mate                   Int?
-  source                 String?
-  selectionMethod        String?
-  moveOrigin             String?
-  deepVerified           Boolean @default(false)
-  localEvaluationProfile String?
+  // DB.20
+  stopReason String?
 
-  fromNode          RepertoireNode           @relation("OutgoingMoves", fields: [fromNodeId], references: [id], onDelete: Cascade)
-  toNode            RepertoireNode?          @relation("IncomingMoves", fields: [toNodeId], references: [id], onDelete: Cascade)
-  repertoire        Repertoire               @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
-  humanDataSnapshot HumanDataSnapshot?       @relation(fields: [humanDataSnapshotId], references: [id], onDelete: Restrict)
-  stats             RepertoirePositionStat[]
+  // DB.13 Black move fields: the human evidence
+  mastersGames      Int?
+  eliteGames        Int?
+  weightedGames     Float?
+  totalMastersGames Int?
+  mastersMoveShare  Float?
+  totalEliteGames   Int?
+  eliteMoveShare    Float?
+
+  // DB.14 Black move fields: the engine evidence
+  cp              Float?
+  mate            Int?
+  source          String?
+  selectionMethod String?
+  moveOrigin      String?
+  engineRank      Int?
+  deepVerified    Boolean @default(false)
+
+  fromNode   RepertoireNode           @relation("OutgoingMoves", fields: [fromNodeId], references: [id], onDelete: Cascade)
+  toNode     RepertoireNode?          @relation("IncomingMoves", fields: [toNodeId], references: [id], onDelete: Cascade)
+  repertoire Repertoire               @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
+  stats      RepertoirePositionStat[]
 
   @@unique([fromNodeId, uci])
 }

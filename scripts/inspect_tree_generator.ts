@@ -13,13 +13,14 @@ import { fetchAllDatabases, fetchMastersOpeningMetadata } from "../src/lib/api/l
 import {
   ensureRepertoireNodeWikibooks,
   prisma,
-  readHumanExplorerBucket,
+  readExplorerCache,
   readRemoteEngineResult,
   type HumanDatabaseType,
   type RemoteEngineEvaluation
 } from "../src/lib/db/operations";
 import { buildBlackHumanShortlist } from "../src/lib/core/black-human-shortlist";
 import {
+  computeExplorerCacheProfile,
   computeRemoteEngineEvaluationProfile,
   computeLocalEngineEvaluationProfile,
   defaultConfig,
@@ -174,21 +175,20 @@ function logExplorerRows(label: string, data: ExplorerBucket): void {
 
 async function diagnosticFetchAllDatabases(
   fen: string,
-  snapshotId: string,
   requestedBuckets: readonly HumanDatabaseType[] = ["MASTERS", "ELITE", "AMATEUR"]
 ) {
   const started = Date.now();
   const fullFen = parseFullFen(fen);
   const positionKey = positionKeyFromFen(fullFen);
   console.log(`\n[HUMAN EXPLORER INPUT] Full FEN: ${fullFen}`);
-  console.log(`[HUMAN EXPLORER CACHE KEY] snapshot=${snapshotId}; position=${positionKey}`);
+  console.log(`[HUMAN EXPLORER CACHE KEY] position=${positionKey}`);
   for (const databaseType of requestedBuckets) {
-    const cached = await readHumanExplorerBucket(snapshotId, positionKey, databaseType);
+    const cached = await readExplorerCache(positionKey, computeExplorerCacheProfile(databaseType, defaultConfig));
     const status = cached.status === "empty" ? "VALID_ABSENCE" : cached.status === "success" ? "PRESENT" : "UNCHECKED";
     console.log(`[CACHE ${databaseType}] retrieval=${cached.status === "missing" ? "MISS" : "HIT"}; status=${status}`);
   }
 
-  const result = await fetchAllDatabases(fullFen, snapshotId, requestedBuckets) as ExplorerResultSet;
+  const result = await fetchAllDatabases(fullFen, requestedBuckets) as ExplorerResultSet;
   logExplorerRows("AMATEUR RAW DATA — LICHESS OPENING EXPLORER", result[2]);
 
   const moveNumber = fullmoveNumber(fullFen);
@@ -286,22 +286,24 @@ async function diagnosticEvaluateBlackMove(
   fen: string,
   chess: Chess,
   moveNumber: number,
-  previousMovesSan: string[],
-  snapshotId: string
+  previousMovesSan: string[]
 ): Promise<SelectedResponseResult> {
   const started = Date.now();
   const fullFen = parseFullFen(fen);
-  const [masters, elite] = await fetchAllDatabases(fullFen, snapshotId) as ExplorerResultSet;
+  const [masters, elite] = await fetchAllDatabases(fullFen) as ExplorerResultSet;
   const candidates = buildBlackHumanShortlist(masters.moves, elite.moves, defaultConfig);
   const lichessProfile = computeRemoteEngineEvaluationProfile("LICHESS", defaultConfig);
   const chessDbProfile = computeRemoteEngineEvaluationProfile("CHESSDB", defaultConfig);
   const lichessBefore = await readRemoteEngineResult(fullFen, "LICHESS", lichessProfile);
   const chessDbBefore = await readRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile);
   const localProfile = computeLocalEngineEvaluationProfile(defaultConfig);
-  const [localBaselineBefore, localCandidatesBefore] = await Promise.all([
-    prisma.localEngineBaseline.findUnique({ where: { fullFen_evaluationProfile: { fullFen, evaluationProfile: localProfile } } }),
-    prisma.localEngineCandidate.findMany({ where: { fullFen, evaluationProfile: localProfile } })
-  ]);
+  const readLocalEvaluations = () => prisma.engineCacheEvaluation.findMany({
+    where: { cache: { fullFen, engineProfile: localProfile, engine: "LOCAL" } },
+    orderBy: { uci: "asc" }
+  });
+  const localBefore = await readLocalEvaluations();
+  const localBaselineBefore = localBefore.find(evaluation => evaluation.rank === 1) ?? null;
+  const localCandidatesBefore = localBefore.filter(evaluation => evaluation.rank !== 1);
 
   console.log(`\n[BLACK RESPONSE INPUT] history=${previousMovesSan.join(" ")}; Full FEN=${fullFen}`);
   logExplorerRows("BLACK MASTERS RAW DATA — LICHESS OPENING EXPLORER", masters);
@@ -328,22 +330,21 @@ async function diagnosticEvaluateBlackMove(
   }
   if (candidates.length === 0) console.log("  No human response survived the weighted-games threshold; local fallback will be required.");
 
-  const result = await evaluateBlackMove(fullFen, chess, moveNumber, previousMovesSan, snapshotId);
+  const result = await evaluateBlackMove(fullFen, chess, moveNumber, previousMovesSan);
   const lichessAfter = await readRemoteEngineResult(fullFen, "LICHESS", lichessProfile);
   const chessDbAfter = await readRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile);
-  const [localBaselineAfter, localCandidatesAfter] = await Promise.all([
-    prisma.localEngineBaseline.findUnique({ where: { fullFen_evaluationProfile: { fullFen, evaluationProfile: localProfile } } }),
-    prisma.localEngineCandidate.findMany({ where: { fullFen, evaluationProfile: localProfile }, orderBy: { candidateUci: "asc" } })
-  ]);
+  const localAfter = await readLocalEvaluations();
+  const localBaselineAfter = localAfter.find(evaluation => evaluation.rank === 1) ?? null;
+  const localCandidatesAfter = localAfter.filter(evaluation => evaluation.rank !== 1);
   logRemoteSnapshot("LICHESS", lichessAfter);
   logRemoteSnapshot("CHESSDB", chessDbAfter);
   console.log(`\n[LOCAL ENGINE SNAPSHOT] profile=${localProfile}`);
   console.log(localBaselineAfter
-    ? `  baseline ${localBaselineAfter.san ?? "?"} (${localBaselineAfter.bestUci}): ${evaluationText(localBaselineAfter)}${localBaselineBefore ? " [CACHE HIT]" : " [CALCULATED THIS CALL]"}`
+    ? `  baseline ${localBaselineAfter.san ?? "?"} (${localBaselineAfter.uci}): ${evaluationText(localBaselineAfter)}${localBaselineBefore ? " [CACHE HIT]" : " [CALCULATED THIS CALL]"}`
     : "  No local baseline was needed.");
   for (const candidate of localCandidatesAfter) {
-    const wasCached = localCandidatesBefore.some(before => before.candidateUci === candidate.candidateUci);
-    console.log(`  exact candidate ${candidate.san ?? "?"} (${candidate.candidateUci}): ${evaluationText(candidate)}${wasCached ? " [CACHE HIT]" : " [CALCULATED THIS CALL]"}`);
+    const wasCached = localCandidatesBefore.some(before => before.uci === candidate.uci);
+    console.log(`  exact candidate ${candidate.san ?? "?"} (${candidate.uci}): ${evaluationText(candidate)}${wasCached ? " [CACHE HIT]" : " [CALCULATED THIS CALL]"}`);
   }
   const localWasUsed = result.source === "Local Deep Stockfish" || result.deepVerified;
   console.log(`[LOCAL ENGINE USAGE] used=${localWasUsed ? "yes" : "no"}; ${localWasUsed ? "local fallback or verification contributed to this decision." : "cached local entries were not used because remote evidence or an opening rule decided this response."}`);
@@ -382,13 +383,13 @@ async function diagnosticEvaluateBlackMove(
   console.log(`  source=${result.source}; evaluation=${evaluationText(result)}; selection method=${result.selectionMethod}; origin=${result.moveOrigin}; deep verified=${result.deepVerified}`);
   console.log(`  human statistics=${result.selectedStats ? pretty(result.selectedStats) : "none (engine-origin fallback)"}`);
   console.log(`[BLACK RESPONSE COMPLETE] ${elapsed(started)}`);
-  return { ...result, openingMetadata: masters.opening, openingMetadataRetrieval: masters.retrieval };
+  return result;
 }
 
 async function diagnosticWikibooks(nodeId: string) {
   const before = await prisma.repertoireNode.findUniqueOrThrow({
     where: { id: nodeId },
-    select: { history: true, wikibooksChecked: true, wikiText: true, eco: true, openingName: true, openingMetadataStatus: true, openingMetadataSource: true }
+    select: { history: true, wikibooksChecked: true, wikiText: true, eco: true, openingName: true, openingMetadataStatus: true }
   });
   const started = Date.now();
   const result = await ensureRepertoireNodeWikibooks(nodeId);
@@ -396,7 +397,8 @@ async function diagnosticWikibooks(nodeId: string) {
     where: { id: nodeId },
     select: { wikibooksChecked: true, wikiText: true }
   });
-  console.log(`\n[OPENING METADATA] history=${before.history || "(root)"}; retrieval=CACHE; cache=exact-history node; source=${before.openingMetadataSource === "LICHESS_MASTERS" ? "Lichess Opening Explorer — Masters metadata" : "unavailable"}; status=${before.openingMetadataStatus ?? "UNCHECKED"}; ECO=${before.eco ?? "unavailable"}; name=${before.openingName ?? "unavailable"}`);
+  console.log(`\n[OPENING METADATA] history=${before.history || "(root)"}; retrieval=CACHE; cache=exact-history node; source=Lichess Opening Explorer; status=
+${before.openingMetadataStatus ?? "UNCHECKED"}; ECO=${before.eco ?? "unavailable"}; name=${before.openingName ?? "unavailable"}`);
   console.log(`[WIKIBOOKS] history=${before.history || "(root)"}; retrieval=${before.wikibooksChecked ? "CACHE" : "FRESH"}; cache=exact-history node; status=${after.wikiText === null ? "VALID_ABSENCE" : "PRESENT"}; source=Wikibooks; characters=${after.wikiText?.length ?? "unavailable"}; elapsed=${elapsed(started)}`);
   return result;
 }

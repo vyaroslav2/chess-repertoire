@@ -109,7 +109,7 @@ test("history-specific RepertoireNode Wikibooks cache", async t => {
     );
     const saved = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: canonical.id } });
     assert.equal(truncatedRouteFetches, 0);
-    assert.equal(saved.pgn, "Nf3 Nf6 Nc3");
+    assert.equal(saved.displayPgn, "Nf3 Nf6 Nc3");
     assert.equal(saved.wikiText, "Canonical history text");
   });
 

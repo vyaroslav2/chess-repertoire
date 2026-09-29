@@ -14,7 +14,7 @@ import {
   type TrustedLocalEvaluation
 } from './local-engine';
 import { verifyLocalOrdinaryCp } from './verifier';
-import { readLocalEngineBaseline, saveLocalEngineBaseline, saveLocalEngineCandidate } from '../db/operations';
+import { readLocalEngineBaseline, readLocalEngineCandidate, saveLocalEngineBaseline, saveLocalEngineCandidate } from '../db/operations';
 
 const prisma = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
 const blackFen = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1';
@@ -48,8 +48,7 @@ function engineFactory(
 }
 
 test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
-  await prisma.localEngineCandidate.deleteMany();
-  await prisma.localEngineBaseline.deleteMany();
+  await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
 
   await t.test('baseline uses exact FullFen, configured deep depth, MultiPV 1, and cleans up', async () => {
     const calls: Array<{ kind: string; value?: unknown }> = [];
@@ -100,7 +99,7 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
   });
 
   await t.test('missing and unknown score units hard-error and are never persisted', async () => {
-    await prisma.localEngineBaseline.deleteMany();
+    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
     const invalidStreams = [
       [{ depth: 24, score: { value: 20 }, pv: 'e7e5' }],
       [{ depth: 24, score: { unit: 'wdl', value: 20 }, pv: 'e7e5' }]
@@ -111,7 +110,7 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
       const runner: LocalSearchRunner = async (fen, settings) =>
         runTrustedLocalSearch(fen, settings, undefined, engineFactory(info, []));
       await assert.rejects(getOrCreateLocalBaseline(blackFen, defaultConfig, runner), /score unit/);
-      assert.equal(await prisma.localEngineBaseline.count(), 0);
+      assert.equal(await prisma.engineCacheEvaluation.count({ where: { rank: 1, cache: { engine: "LOCAL" } } }), 0);
     }
   });
 
@@ -158,8 +157,8 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
     assert.equal(withoutDepth.cp, -30);
   });
 
-  await t.test('favourable shallow history cannot replace the deepest LocalEngineBaseline', async () => {
-    await prisma.localEngineBaseline.deleteMany();
+  await t.test('DB.32 favourable shallow history cannot replace the deepest local baseline', async () => {
+    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
     const runner: LocalSearchRunner = async (fen, settings) => runTrustedLocalSearch(
       fen,
       settings,
@@ -172,18 +171,16 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
     );
 
     const result = await getOrCreateLocalBaseline(blackFen, defaultConfig, runner);
-    const stored = await prisma.localEngineBaseline.findUnique({
-      where: { fullFen_evaluationProfile: { fullFen: blackFen, evaluationProfile: profile } }
-    });
+    const stored = await readLocalEngineBaseline(blackFen, profile);
     assert.equal(result.evaluation.uci, 'e7e5');
     assert.equal(result.evaluation.cp, -25);
     assert.equal(stored?.bestUci, 'e7e5');
     assert.equal(stored?.cp, -25);
-    await prisma.localEngineBaseline.delete({ where: { id: stored!.id } });
+    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
   });
 
   await t.test('mixed depth metadata falls back to the final sequential LocalEngineBaseline update', async () => {
-    await prisma.localEngineBaseline.deleteMany();
+    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
     const runner: LocalSearchRunner = async (fen, settings) => runTrustedLocalSearch(
       fen,
       settings,
@@ -196,14 +193,12 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
     );
 
     const result = await getOrCreateLocalBaseline(blackFen, defaultConfig, runner);
-    const stored = await prisma.localEngineBaseline.findUnique({
-      where: { fullFen_evaluationProfile: { fullFen: blackFen, evaluationProfile: profile } }
-    });
+    const stored = await readLocalEngineBaseline(blackFen, profile);
     assert.equal(result.evaluation.uci, 'e7e5');
     assert.equal(result.evaluation.cp, -25);
     assert.equal(stored?.bestUci, 'e7e5');
     assert.equal(stored?.cp, -25);
-    await prisma.localEngineBaseline.delete({ where: { id: stored!.id } });
+    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
   });
 
   await t.test('constrained search uses identical settings and enforces expected root', async () => {
@@ -259,16 +254,17 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
 
     const candidate1 = await getOrCreateLocalCandidate(blackFen, 'c7c6', defaultConfig, runner);
     const candidate2 = await getOrCreateLocalCandidate(blackFen, 'c7c6', defaultConfig, runner);
-    await getOrCreateLocalCandidate(blackFen, 'e7e5', defaultConfig, runner);
+    // DB.32: one EngineCache row per fullFen + profile, so the baseline's own move is already there.
+    const baselineMove = await getOrCreateLocalCandidate(blackFen, 'e7e5', defaultConfig, runner);
     await getOrCreateLocalCandidate(blackFen, 'c7c6', configWithDepth(25), runner);
     assert.equal(candidate1.reused, false);
     assert.equal(candidate2.reused, true);
-    assert.equal(calls, 6);
+    assert.equal(baselineMove.reused, true);
+    assert.equal(calls, 5);
   });
 
   await t.test('baseline-best candidate skips constrained search', async () => {
-    await prisma.localEngineCandidate.deleteMany();
-    await prisma.localEngineBaseline.deleteMany();
+    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
     const requested: Array<string | undefined> = [];
     const runner: LocalSearchRunner = async (_fen, _settings, expected) => {
       requested.push(expected);
@@ -278,12 +274,11 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
     assert.equal(result.decision, 'ACCEPT');
     assert.equal(result.candidateWasBaselineBest, true);
     assert.deepEqual(requested, [undefined]);
-    assert.equal(await prisma.localEngineCandidate.count(), 0);
+    assert.equal(await prisma.engineCacheEvaluation.count({ where: { rank: null, cache: { engine: "LOCAL" } } }), 0);
   });
 
   await t.test('different target runs comparable constrained search and strict cp maths', async () => {
-    await prisma.localEngineCandidate.deleteMany();
-    await prisma.localEngineBaseline.deleteMany();
+    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
     const calls: Array<{ expected: string | undefined; depth: number; multiPv: number }> = [];
     const runner: LocalSearchRunner = async (_fen, settings, expected) => {
       calls.push({ expected, ...settings });
@@ -301,29 +296,23 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
   });
 
   await t.test('mate never enters ordinary local cp verification', async () => {
-    await prisma.localEngineCandidate.deleteMany();
-    await prisma.localEngineBaseline.deleteMany();
+    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
     const runner: LocalSearchRunner = async (_fen, _settings, expected) =>
       expected ? cpEval(expected, 'c6', 0) : mateEval('e7e5', 'e5', -3);
     await assert.rejects(verifyLocalCandidate(blackFen, 'c7c6', 95, defaultConfig, runner), /mate comparison/);
   });
 
   await t.test('invalid replacement preserves trusted evidence and malformed evidence is not persisted', async () => {
-    await prisma.localEngineBaseline.deleteMany();
-    await prisma.localEngineCandidate.deleteMany();
+    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
     await saveLocalEngineBaseline(blackFen, profile, cpEval('e7e5', 'e5', -20));
     const before = await readLocalEngineBaseline(blackFen, profile);
     await assert.rejects(saveLocalEngineBaseline(blackFen, profile, { uci: 'e7e5', cp: Number.NaN, mate: null }));
     await assert.rejects(saveLocalEngineBaseline(blackFen, profile, { uci: 'e7e5', cp: 0, mate: 2 }));
     assert.deepEqual(await readLocalEngineBaseline(blackFen, profile), before);
     await saveLocalEngineCandidate(blackFen, 'c7c6', profile, cpEval('c7c6', 'c6', 12));
-    const candidateBefore = await prisma.localEngineCandidate.findUnique({
-      where: { fullFen_candidateUci_evaluationProfile: { fullFen: blackFen, candidateUci: 'c7c6', evaluationProfile: profile } }
-    });
+    const candidateBefore = await readLocalEngineCandidate(blackFen, 'c7c6', profile);
     await assert.rejects(saveLocalEngineCandidate(blackFen, 'c7c6', profile, { uci: 'e7e5', cp: 0, mate: null }));
-    const candidateAfter = await prisma.localEngineCandidate.findUnique({
-      where: { fullFen_candidateUci_evaluationProfile: { fullFen: blackFen, candidateUci: 'c7c6', evaluationProfile: profile } }
-    });
+    const candidateAfter = await readLocalEngineCandidate(blackFen, 'c7c6', profile);
     assert.deepEqual(candidateAfter, candidateBefore);
   });
 

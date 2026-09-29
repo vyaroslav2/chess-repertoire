@@ -2,21 +2,22 @@ import test from 'node:test';
 import assert from 'node:assert';
 import { PrismaClient } from '@prisma/client';
 import { parseFullFen, positionKeyFromFen } from './fen';
-import type { HumanDatabaseType } from '../db/operations';
 
 // Test DB path is expected to be managed externally via scripts/run_db_tests.ts
 const prisma = new PrismaClient({
     datasourceUrl: process.env.DATABASE_URL
 });
 
-test('Slice 3 Database Architecture Tests', async (t) => {
-    // Dynamic import ensures the module's PrismaClient evaluates process.env.DATABASE_URL *after* we've set it to test.db.
-    const { getOrCreatePosition, createRepertoireNode, getOrCreatePositionCache, prisma: opsPrisma } = await import('../db/operations');
+const START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+const AFTER_E4 = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
+const AFTER_E4_E5 = "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2";
 
-    // 10. freshly pushed schema is usable
-    await t.test('10. freshly pushed schema is usable', async () => {
-        // The fresh creation of the disposable db is verified externally via the setup shell commands.
-        // Here we just verify the resulting schema is usable and responds.
+test('DB record shapes', async (t) => {
+    // Dynamic import ensures the module's PrismaClient evaluates process.env.DATABASE_URL *after* we've set it to test.db.
+    const ops = await import('../db/operations');
+    const { createRepertoireNode, prisma: opsPrisma } = ops;
+
+    await t.test('freshly pushed schema is usable', async () => {
         const count = await prisma.user.count();
         assert.ok(typeof count === 'number');
     });
@@ -24,293 +25,266 @@ test('Slice 3 Database Architecture Tests', async (t) => {
     // Clean test database safely
     await prisma.repertoirePositionStat.deleteMany();
     await prisma.repertoireMove.deleteMany();
+    await prisma.position.deleteMany();
     await prisma.repertoireNode.deleteMany();
     await prisma.positionCache.deleteMany();
+    await prisma.engineCache.deleteMany();
+    await prisma.openingMetadataHistoryCache.deleteMany();
+    await prisma.wikibooksHistoryCache.deleteMany();
     await prisma.repertoire.deleteMany();
-    await prisma.position.deleteMany();
     await prisma.user.deleteMany();
 
     const user = await prisma.user.create({ data: { username: "test_db_user" } });
+    const newRepertoire = (title: string) => prisma.repertoire.create({ data: { title, color: "black", userId: user.id } });
 
-    await t.test('1. same PositionKey creates/reuses one Position', async () => {
-        const fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-        const pos1 = await getOrCreatePosition(fen);
-        const pos2 = await getOrCreatePosition(fen);
-        assert.strictEqual(pos1.positionKey, pos2.positionKey);
-        const count = await prisma.position.count();
-        assert.strictEqual(count, 1);
-    });
-
-    await t.test('2. two FullFens differing only in counters reuse the same Position', async () => {
-        const fen1 = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 5 10";
-        const fen2 = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-        const pos1 = await getOrCreatePosition(fen1);
-        const pos2 = await getOrCreatePosition(fen2);
-        assert.strictEqual(pos1.positionKey, pos2.positionKey);
-        const count = await prisma.position.count();
-        assert.strictEqual(count, 1); // Still 1 because they share positionKey
-    });
-
-    await t.test('3. RepertoireNode stores canonical fullFen and derived positionKey', async () => {
-        const rep = await prisma.repertoire.create({
-            data: { title: "Test Rep", color: "white", userId: user.id }
-        });
-        const fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-        const node = await createRepertoireNode(rep.id, fen, "", 1.0);
-        const fullFen = parseFullFen(fen);
-        const positionKey = positionKeyFromFen(fullFen);
-        assert.strictEqual(node.fullFen, fullFen);
-        assert.strictEqual(node.positionKey, positionKey);
-        const pos = await prisma.position.findUnique({ where: { positionKey } });
-        assert.ok(pos);
-    });
-
-    await t.test('4. FullFen/PositionKey consistency cannot be violated through the node-creation API', async () => {
-        const rep = await prisma.repertoire.create({
-            data: { title: "API Test Rep", color: "white", userId: user.id }
-        });
-
-        const rawFen = "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2";
-        const expectedFullFen = parseFullFen(rawFen);
-        const expectedPosKey = positionKeyFromFen(expectedFullFen);
-
-        const node = await createRepertoireNode(rep.id, rawFen, "", 1.0);
-
-        // Assert that the node correctly stored the derived keys
-        assert.strictEqual(node.fullFen, expectedFullFen);
-        assert.strictEqual(node.positionKey, expectedPosKey);
-
-        // Assert that the global Position row actually exists and uses that exact key
-        const pos = await prisma.position.findUnique({
-            where: { positionKey: expectedPosKey }
-        });
-        assert.ok(pos, "Position row should exist with the derived positionKey");
-        assert.strictEqual(pos.positionKey, expectedPosKey);
-    });
-
-    await t.test('5. two repertoires can independently reference the same global Position', async () => {
-        const rep1 = await prisma.repertoire.create({ data: { title: "Rep1", color: "white", userId: user.id } });
-        const rep2 = await prisma.repertoire.create({ data: { title: "Rep2", color: "black", userId: user.id } });
-        const fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
-        const node1 = await createRepertoireNode(rep1.id, fen, "1. e4", 1.0);
-        const node2 = await createRepertoireNode(rep2.id, fen, "1. e4", 1.0);
-        assert.strictEqual(node1.positionKey, node2.positionKey);
-        const posCount = await prisma.position.count({ where: { positionKey: node1.positionKey } });
-        assert.strictEqual(posCount, 1);
-    });
-
-    await t.test('6. deleting one repertoire deletes its nodes but leaves Position intact', async () => {
-        const rep1 = await prisma.repertoire.create({ data: { title: "Rep to Delete", color: "white", userId: user.id } });
-        const fen = "rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq c6 0 2";
-        const node = await createRepertoireNode(rep1.id, fen, "1. e4 c5", 1.0);
-        const positionKey = node.positionKey;
-        const posBefore = await prisma.position.findUnique({ where: { positionKey } });
-        assert.ok(posBefore);
-        await prisma.repertoire.delete({ where: { id: rep1.id } });
-        const nodeAfter = await prisma.repertoireNode.findUnique({ where: { id: node.id } });
-        assert.ok(!nodeAfter); // Node is deleted
-        const posAfter = await prisma.position.findUnique({ where: { positionKey } });
-        assert.ok(posAfter); // Position is NOT deleted
-    });
-
-    await t.test('7. deleting PositionCache does not affect RepertoireNode', async () => {
-        const rep = await prisma.repertoire.create({ data: { title: "Cache Test Rep", color: "white", userId: user.id } });
-        const fen = "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2";
-        const cache = await getOrCreatePositionCache(fen);
-        assert.ok(cache);
-        const node = await createRepertoireNode(rep.id, fen, "1. e4 e5", 1.0);
-        assert.ok(node);
-        await prisma.positionCache.delete({ where: { fen: cache.fen } });
-        const nodeAfter = await prisma.repertoireNode.findUnique({ where: { id: node.id } });
-        assert.ok(nodeAfter); // Node survives cache deletion
-        const posAfter = await prisma.position.findUnique({ where: { positionKey: node.positionKey } });
-        assert.ok(posAfter); // Permanent position survives cache deletion
-    });
-
-    await t.test('8. Wikibooks ownership is history-specific on RepertoireNode', async () => {
-        const positionKeys = Object.keys(prisma.position.fields);
-        assert.ok(!positionKeys.includes('eco'));
-        assert.ok(!positionKeys.includes('openingName'));
-        assert.ok(!positionKeys.includes('wikiText'));
-        const cacheKeys = Object.keys(prisma.positionCache.fields);
-        assert.ok(!cacheKeys.includes('eco'));
-        assert.ok(!cacheKeys.includes('openingName'));
-        assert.ok(!cacheKeys.includes('wikiText'));
+    await t.test('DB.01 the tree is built from two record types, nodes and moves', () => {
         const nodeKeys = Object.keys(prisma.repertoireNode.fields);
-        assert.ok(nodeKeys.includes('wikibooksChecked'));
-        assert.ok(nodeKeys.includes('wikiText'));
+        for (const field of ['positionKey', 'fullFen', 'history', 'displayPgn', 'routeProb', 'cumProb', 'rareDropped',
+            'unaccountedDropped', 'transposesTo', 'eco', 'openingName', 'openingMetadataStatus', 'wikiText', 'wikibooksChecked', 'siblingIndex']) {
+            assert.ok(nodeKeys.includes(field), `node is missing ${field}`);
+        }
+        for (const legacy of ['cumulativeProb', 'isTransposition', 'pgn', 'openingMetadataSource', 'humanDataSnapshotId']) {
+            assert.ok(!nodeKeys.includes(legacy), `node still has ${legacy}`);
+        }
+        const moveKeys = Object.keys(prisma.repertoireMove.fields);
+        for (const field of ['fromNodeId', 'toNodeId', 'san', 'uci', 'playerTurn', 'moveProb', 'stopReason',
+            'mastersGames', 'eliteGames', 'weightedGames', 'totalMastersGames', 'mastersMoveShare', 'totalEliteGames', 'eliteMoveShare',
+            'cp', 'mate', 'source', 'selectionMethod', 'moveOrigin', 'engineRank', 'deepVerified']) {
+            assert.ok(moveKeys.includes(field), `move is missing ${field}`);
+        }
+        for (const legacy of ['prob', 'routeProbability', 'trueProbability', 'routeHistory', 'humanDataSnapshotId',
+            'weightedCount', 'totalRelevantGames', 'moveShare', 'localEvaluationProfile']) {
+            assert.ok(!moveKeys.includes(legacy), `move still has ${legacy}`);
+        }
     });
 
-    await t.test('8a. later authoritative opening metadata replaces metadata on its history', async () => {
-        const fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
-        const rep = await prisma.repertoire.create({ data: { title: "Metadata", color: "black", userId: user.id } });
-        const original = await createRepertoireNode(rep.id, fen, "e2e4", 1, { displayPgn: "e4", eco: "A00", openingName: "Old opening metadata" });
-        const updated = await createRepertoireNode(rep.id, fen, "e2e4", 1, { displayPgn: "e4", eco: "B00", openingName: "King's Pawn Opening" });
+    await t.test('DB.03 a node stores the exact fullFen and the positionKey derived from it', async () => {
+        const rep = await newRepertoire("DB.03");
+        const rawFen = "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2";
+        const node = await createRepertoireNode(rep.id, rawFen, "e2e4 e7e5", 1.0, { displayPgn: "e4 e5" });
+        assert.strictEqual(node.fullFen, parseFullFen(rawFen));
+        assert.strictEqual(node.positionKey, positionKeyFromFen(parseFullFen(rawFen)));
+        assert.strictEqual(node.history, "e2e4 e7e5");
+        assert.strictEqual(node.displayPgn, "e4 e5");
+    });
 
+    await t.test('DB.04 a new node has routeProb equal to cumProb and nothing dropped', async () => {
+        const rep = await newRepertoire("DB.04");
+        const node = await createRepertoireNode(rep.id, AFTER_E4, "e2e4", 0.4, { displayPgn: "e4" });
+        assert.strictEqual(node.routeProb, 0.4);
+        assert.strictEqual(node.cumProb, 0.4);
+        assert.strictEqual(node.rareDropped, 0);
+        assert.strictEqual(node.unaccountedDropped, 0);
+    });
+
+    await t.test('DB.05 transposesTo points a pointer at its owner; the owner keeps null', async () => {
+        const rep = await newRepertoire("DB.05");
+        const owner = await createRepertoireNode(rep.id, AFTER_E4_E5, "e2e4 e7e5", 0.5);
+        const pointer = await createRepertoireNode(rep.id, AFTER_E4_E5, "e2e3 e7e5 e3e4", 0.1);
+        await prisma.repertoireNode.update({ where: { id: pointer.id }, data: { transposesTo: owner.id } });
+        const [ownerAfter, pointerAfter] = await Promise.all([
+            prisma.repertoireNode.findUniqueOrThrow({ where: { id: owner.id }, include: { pointers: true } }),
+            prisma.repertoireNode.findUniqueOrThrow({ where: { id: pointer.id } })
+        ]);
+        assert.strictEqual(ownerAfter.transposesTo, null);
+        assert.deepStrictEqual(ownerAfter.pointers.map(node => node.id), [pointer.id]);
+        assert.strictEqual(pointerAfter.transposesTo, owner.id);
+    });
+
+    await t.test('DB.06 a node never holds a half-filled opening pair', async () => {
+        const rep = await newRepertoire("DB.06");
+        await assert.rejects(createRepertoireNode(rep.id, START, "", 1, { openingMetadataStatus: "PRESENT", eco: "B00", openingName: null }), /PRESENT/);
+        await assert.rejects(createRepertoireNode(rep.id, START, "", 1, { openingMetadataStatus: "VALID_ABSENCE", eco: "B00", openingName: "King's Pawn" }), /VALID_ABSENCE/);
+        await assert.rejects(createRepertoireNode(rep.id, START, "", 1, { eco: "B00", openingName: "King's Pawn" }), /status is missing/);
+        const node = await createRepertoireNode(rep.id, START, "", 1, { openingMetadataStatus: "VALID_ABSENCE" });
+        assert.strictEqual(node.openingMetadataStatus, "VALID_ABSENCE");
+    });
+
+    await t.test('DB.06 later opening metadata replaces metadata on the same route', async () => {
+        const rep = await newRepertoire("DB.06 replace");
+        const original = await createRepertoireNode(rep.id, AFTER_E4, "e2e4", 1, { displayPgn: "e4", openingMetadataStatus: "PRESENT", eco: "A00", openingName: "Old opening" });
+        const updated = await createRepertoireNode(rep.id, AFTER_E4, "e2e4", 1, { displayPgn: "e4", openingMetadataStatus: "PRESENT", eco: "B00", openingName: "King's Pawn Opening" });
         assert.strictEqual(updated.id, original.id);
         assert.strictEqual(updated.eco, "B00");
         assert.strictEqual(updated.openingName, "King's Pawn Opening");
     });
 
-    await t.test('9. new Repertoire defaults to generationStatus = IDLE and completedConfigHash = null', async () => {
-        const rep = await prisma.repertoire.create({
-            data: { title: "Default Rep", color: "white", userId: user.id }
+    await t.test('DB.07 Wikibooks text lives on the node, with a looked-up flag', () => {
+        const nodeKeys = Object.keys(prisma.repertoireNode.fields);
+        assert.ok(nodeKeys.includes('wikibooksChecked'));
+        assert.ok(nodeKeys.includes('wikiText'));
+    });
+
+    await t.test('DB.16 a node stores its siblingIndex', async () => {
+        const rep = await newRepertoire("DB.16");
+        const node = await createRepertoireNode(rep.id, AFTER_E4, "e2e4", 0.6, { siblingIndex: 2 });
+        assert.strictEqual(node.siblingIndex, 2);
+    });
+
+    await t.test('DB.36 Position maps a positionKey to the first node that reaches it', async () => {
+        const rep = await newRepertoire("DB.36");
+        const first = await createRepertoireNode(rep.id, AFTER_E4_E5, "e2e4 e7e5", 0.5);
+        // Same position, different clocks: a separate node, but the same positionKey.
+        const second = await createRepertoireNode(rep.id, "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 2 4", "g1f3 g8f6 f3g1 f6g8 e2e4 e7e5", 0.1);
+        assert.notStrictEqual(first.id, second.id);
+        assert.strictEqual(first.positionKey, second.positionKey);
+        const row = await prisma.position.findUniqueOrThrow({ where: { repertoireId_positionKey: { repertoireId: rep.id, positionKey: first.positionKey } } });
+        assert.strictEqual(row.nodeId, first.id);
+        assert.strictEqual(await ops.claimPosition(prisma, rep.id, first.positionKey, second.id), first.id);
+    });
+
+    await t.test('DB.36 each repertoire has its own Position table', async () => {
+        const rep1 = await newRepertoire("DB.36 a");
+        const rep2 = await newRepertoire("DB.36 b");
+        const node1 = await createRepertoireNode(rep1.id, AFTER_E4, "e2e4", 1.0);
+        const node2 = await createRepertoireNode(rep2.id, AFTER_E4, "e2e4", 1.0);
+        const rows = await prisma.position.findMany({ where: { positionKey: node1.positionKey, repertoireId: { in: [rep1.id, rep2.id] } } });
+        assert.deepStrictEqual(rows.map(row => row.nodeId).sort(), [node1.id, node2.id].sort());
+    });
+
+    await t.test('DB.02 DB.30 DB.36 wiping the tree removes nodes, moves and Position; caches survive', async () => {
+        const rep = await newRepertoire("DB.02");
+        const root = await createRepertoireNode(rep.id, START, "", 1.0);
+        const child = await createRepertoireNode(rep.id, AFTER_E4, "e2e4", 1.0, { displayPgn: "e4" });
+        await ops.createOpponentMove({ repertoireId: rep.id, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", moveProb: 1 });
+        await ops.saveExplorerCache(root.positionKey, "db02-profile", { positionTotalGames: 0, eco: null, openingName: null, moves: [] });
+        await ops.saveRemoteEngineResult(parseFullFen(AFTER_E4), "LICHESS", "db02-engine", []);
+        await prisma.openingMetadataHistoryCache.create({ data: { repertoireId: rep.id, history: "e2e4", status: "VALID_ABSENCE" } });
+        await prisma.wikibooksHistoryCache.create({ data: { repertoireId: rep.id, history: "e2e4", wikiText: null } });
+
+        await prisma.repertoireNode.deleteMany({ where: { repertoireId: rep.id } });
+
+        assert.strictEqual(await prisma.repertoireNode.count({ where: { repertoireId: rep.id } }), 0);
+        assert.strictEqual(await prisma.repertoireMove.count({ where: { repertoireId: rep.id } }), 0);
+        assert.strictEqual(await prisma.position.count({ where: { repertoireId: rep.id } }), 0);
+        assert.ok(await prisma.positionCache.findUnique({ where: { positionKey_cacheProfile: { positionKey: root.positionKey, cacheProfile: "db02-profile" } } }));
+        assert.ok(await prisma.engineCache.findUnique({ where: { fullFen_engine_engineProfile: { fullFen: parseFullFen(AFTER_E4), engine: "LICHESS", engineProfile: "db02-engine" } } }));
+        assert.strictEqual(await prisma.openingMetadataHistoryCache.count({ where: { repertoireId: rep.id } }), 1);
+        assert.strictEqual(await prisma.wikibooksHistoryCache.count({ where: { repertoireId: rep.id } }), 1);
+    });
+
+    await t.test('DB.31 Explorer data is keyed by positionKey + cache profile and keeps eco and openingName', async () => {
+        const positionKey = positionKeyFromFen(parseFullFen(START));
+        await ops.saveExplorerCache(positionKey, "masters-profile", {
+            positionTotalGames: 10, eco: "A00", openingName: "Start",
+            moves: [{ uci: "e2e4", san: "e4", games: 10, whiteWins: 4, draws: 3, blackWins: 3 }]
         });
+        const masters = await ops.readExplorerCache(positionKey, "masters-profile");
+        assert.strictEqual(masters.status, "success");
+        if (masters.status !== "success") return;
+        assert.strictEqual(masters.positionTotalGames, 10);
+        assert.strictEqual(masters.eco, "A00");
+        assert.strictEqual(masters.openingName, "Start");
+        assert.deepStrictEqual(masters.moves.map(move => move.uci), ["e2e4"]);
+        assert.deepStrictEqual(await ops.readExplorerCache(positionKey, "elite-profile"), { status: "missing" });
+    });
+
+    await t.test('DB.31 a position fetched with no games is stored as an empty result', async () => {
+        const positionKey = positionKeyFromFen(parseFullFen(AFTER_E4));
+        await ops.saveExplorerCache(positionKey, "empty-profile", { positionTotalGames: 0, eco: null, openingName: null, moves: [] });
+        assert.deepStrictEqual(await ops.readExplorerCache(positionKey, "empty-profile"),
+            { status: "empty", positionTotalGames: 0, eco: null, openingName: null });
+    });
+
+    await t.test('DB.31 an Explorer row never holds half an opening name', async () => {
+        const positionKey = positionKeyFromFen(parseFullFen(AFTER_E4));
+        await assert.rejects(ops.saveExplorerCache(positionKey, "half-profile", { positionTotalGames: 0, eco: "B00", openingName: null, moves: [] }), /both be set/);
+    });
+
+    await t.test('DB.32 engine evaluations are keyed by the exact fullFen, not positionKey', async () => {
+        const fenA = parseFullFen(AFTER_E4);
+        const fenB = parseFullFen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 4 3");
+        assert.strictEqual(positionKeyFromFen(fenA), positionKeyFromFen(fenB));
+        await ops.saveRemoteEngineResult(fenA, "LICHESS", "db32-profile", [{ uci: "e7e5", cp: 20, mate: null }]);
+        assert.strictEqual((await ops.readRemoteEngineResult(fenA, "LICHESS", "db32-profile")).status, "success");
+        assert.strictEqual((await ops.readRemoteEngineResult(fenB, "LICHESS", "db32-profile")).status, "missing");
+    });
+
+    await t.test('DB.32 each engine keeps its own rows', async () => {
+        const fen = parseFullFen(AFTER_E4);
+        await ops.saveRemoteEngineResult(fen, "CHESSDB", "db32-chessdb", [{ uci: "c7c5", cp: 30, mate: null }]);
+        await ops.saveLocalEngineBaseline(fen, "db32-local", { uci: "e7e5", cp: 25, mate: null });
+        const rows = await prisma.engineCache.findMany({ where: { fullFen: fen, engineProfile: { in: ["db32-chessdb", "db32-local"] } } });
+        assert.deepStrictEqual(rows.map(row => row.engine).sort(), ["CHESSDB", "LOCAL"]);
+        assert.strictEqual((await ops.readLocalEngineBaseline(fen, "db32-local"))?.bestUci, "e7e5");
+        assert.strictEqual((await ops.readRemoteEngineResult(fen, "LICHESS", "db32-local")).status, "missing");
+    });
+
+    await t.test('DB.33 opening metadata is stored per route: repertoire + history', async () => {
+        const rep = await newRepertoire("DB.33");
+        await prisma.openingMetadataHistoryCache.create({ data: { repertoireId: rep.id, history: "e2e4", status: "PRESENT", eco: "B00", openingName: "King's Pawn" } });
+        await assert.rejects(prisma.openingMetadataHistoryCache.create({ data: { repertoireId: rep.id, history: "e2e4", status: "VALID_ABSENCE" } }));
+        await prisma.openingMetadataHistoryCache.create({ data: { repertoireId: rep.id, history: "d2d4", status: "VALID_ABSENCE" } });
+        assert.strictEqual(await prisma.openingMetadataHistoryCache.count({ where: { repertoireId: rep.id } }), 2);
+    });
+
+    const responseInput = (fromNodeId: string, toNodeId: string) => ({
+        fromNodeId, toNodeId, uci: "e7e5", cp: 20 as number | null, mate: null as number | null,
+        source: "Lichess Cloud Evaluation" as const, selectionMethod: "Ordinary API" as const, moveOrigin: "Human Move" as const,
+        deepVerified: false, localEvaluationProfile: null
+    });
+
+    await t.test('DB.08 DB.09 a Black position carries exactly one RESPONSE', async () => {
+        const rep = await newRepertoire("DB.09");
+        const from = await createRepertoireNode(rep.id, AFTER_E4, "e2e4", 1.0);
+        const to = await createRepertoireNode(rep.id, AFTER_E4_E5, "e2e4 e7e5", 1.0);
+        await ops.createResponseMove(responseInput(from.id, to.id));
+        await ops.createResponseMove({ ...responseInput(from.id, to.id), cp: 15 });
+        const responses = await prisma.repertoireMove.findMany({ where: { fromNodeId: from.id, playerTurn: "RESPONSE" } });
+        assert.strictEqual(responses.length, 1);
+        assert.strictEqual(responses[0].cp, 15);
+        assert.strictEqual(responses[0].san, "e5");
+    });
+
+    await t.test('DB.10 a White move stores its moveProb', async () => {
+        const rep = await newRepertoire("DB.10");
+        const root = await createRepertoireNode(rep.id, START, "", 1.0);
+        const child = await createRepertoireNode(rep.id, AFTER_E4, "e2e4", 0.45);
+        const move = await ops.createOpponentMove({ repertoireId: rep.id, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", moveProb: 0.45 });
+        assert.strictEqual(move.playerTurn, "OPPONENT");
+        assert.strictEqual(move.moveProb, 0.45);
+    });
+
+    await t.test('DB.12 mate = 0 is invalid', () => {
+        assert.throws(() => ops.validateResponsePersistence({ ...responseInput("a", "b"), cp: null, mate: 0 }), /non-zero integer mate/);
+        assert.doesNotThrow(() => ops.validateResponsePersistence({ ...responseInput("a", "b"), cp: null, mate: -3 }));
+    });
+
+    await t.test('DB.14 a Black move has exactly one of cp or mate', () => {
+        assert.throws(() => ops.validateResponsePersistence({ ...responseInput("a", "b"), cp: 10, mate: 2 }), /exactly one/);
+        assert.throws(() => ops.validateResponsePersistence({ ...responseInput("a", "b"), cp: null, mate: null }), /exactly one/);
+    });
+
+    await t.test('DB.13 the move shares are games over their totals', () => {
+        const evidence = ops.responseHumanEvidence({ mastersGames: 30, eliteGames: 5, weightedGames: 155, totalMastersGames: 120, totalEliteGames: 0 });
+        assert.strictEqual(evidence.mastersMoveShare, 0.25);
+        assert.strictEqual(evidence.eliteMoveShare, null);
+        assert.strictEqual(evidence.weightedGames, 155);
+    });
+
+    await t.test('DB.13 DB.14 a RESPONSE stores the human and engine evidence', async () => {
+        const rep = await newRepertoire("DB.13");
+        const from = await createRepertoireNode(rep.id, AFTER_E4, "e2e4", 1.0);
+        const to = await createRepertoireNode(rep.id, AFTER_E4_E5, "e2e4 e7e5", 1.0);
+        const evidence = ops.responseHumanEvidence({ mastersGames: 40, eliteGames: 60, weightedGames: 260, totalMastersGames: 100, totalEliteGames: 200 });
+        const move = await ops.createResponseMove({ ...responseInput(from.id, to.id), ...evidence, engineRank: 1 });
+        assert.strictEqual(move.mastersGames, 40);
+        assert.strictEqual(move.eliteGames, 60);
+        assert.strictEqual(move.weightedGames, 260);
+        assert.strictEqual(move.totalMastersGames, 100);
+        assert.strictEqual(move.mastersMoveShare, 0.4);
+        assert.strictEqual(move.totalEliteGames, 200);
+        assert.strictEqual(move.eliteMoveShare, 0.3);
+        assert.strictEqual(move.source, "Lichess Cloud Evaluation");
+        assert.strictEqual(move.moveOrigin, "Human Move");
+        assert.strictEqual(move.engineRank, 1);
+        assert.strictEqual(move.deepVerified, false);
+    });
+
+    await t.test('new Repertoire defaults to generationStatus = IDLE and completedConfigHash = null', async () => {
+        const rep = await newRepertoire("Default Rep");
         assert.strictEqual(rep.generationStatus, "IDLE");
         assert.strictEqual(rep.completedConfigHash, null);
-    });
-
-    await t.test('11. snapshot belongs to one repertoire (and reusing works)', async () => {
-        const { getCompatibleHumanDataSnapshot, createHumanDataSnapshot, getOrCreateHumanDataSnapshot } = await import('../db/operations');
-        const rep1 = await prisma.repertoire.create({ data: { title: "S1", color: "white", userId: user.id } });
-        const rep2 = await prisma.repertoire.create({ data: { title: "S2", color: "black", userId: user.id } });
-        const profile = "test_profile_A";
-
-        // normal get-or-create API
-        const snap1 = await getOrCreateHumanDataSnapshot(rep1.id, profile);
-        const snap2 = await getOrCreateHumanDataSnapshot(rep1.id, profile);
-        assert.strictEqual(snap1.id, snap2.id, "Two ordinary get-or-create calls return the same snapshot");
-
-        // different repertoire + same profile does not share snapshot
-        const fetched2 = await getCompatibleHumanDataSnapshot(rep2.id, profile);
-        assert.ok(!fetched2);
-
-        // different request profile is incompatible
-        const fetched3 = await getCompatibleHumanDataSnapshot(rep1.id, "test_profile_B");
-        assert.ok(!fetched3);
-    });
-
-    await t.test('12. snapshot age behavior (younger/older than 7 days)', async () => {
-        const { getCompatibleHumanDataSnapshot, createHumanDataSnapshot } = await import('../db/operations');
-        const rep = await prisma.repertoire.create({ data: { title: "Age Test", color: "white", userId: user.id } });
-        const profile = "age_profile";
-
-        // Create a snapshot and manually backdate it to 8 days ago
-        const snap = await createHumanDataSnapshot(rep.id, profile);
-        const eightDaysAgo = new Date();
-        eightDaysAgo.setDate(eightDaysAgo.getDate() - 8);
-        await prisma.humanDataSnapshot.update({
-            where: { id: snap.id },
-            data: { startedAt: eightDaysAgo }
-        });
-
-        // younger and older than 7 days are both still reused automatically
-        const fetched = await getCompatibleHumanDataSnapshot(rep.id, profile);
-        assert.strictEqual(fetched?.id, snap.id);
-    });
-
-    await t.test('13. HumanExplorerFetch uniqueness and independent markers', async () => {
-        const { createHumanDataSnapshot, recordHumanExplorerFetch, checkHumanExplorerFetch, getOrCreatePosition } = await import('../db/operations');
-        const rep = await prisma.repertoire.create({ data: { title: "Fetch Test", color: "white", userId: user.id } });
-        const snap = await createHumanDataSnapshot(rep.id, "fetch_profile");
-        const fullFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-        const pos = await getOrCreatePosition(fullFen);
-        const posKey = pos.positionKey;
-
-        // one Position can have independent MASTERS / ELITE / AMATEUR markers
-        await recordHumanExplorerFetch(snap.id, posKey, "MASTERS");
-        await recordHumanExplorerFetch(snap.id, posKey, "ELITE");
-
-        const mFetch = await checkHumanExplorerFetch(snap.id, posKey, "MASTERS");
-        const eFetch = await checkHumanExplorerFetch(snap.id, posKey, "ELITE");
-        const aFetch = await checkHumanExplorerFetch(snap.id, posKey, "AMATEUR");
-
-        assert.ok(mFetch);
-        assert.ok(eFetch);
-        assert.ok(!aFetch);
-
-        // HumanExplorerFetch uniqueness: snapshot + Position + databaseType
-        // Upserting the same one shouldn't duplicate
-        await recordHumanExplorerFetch(snap.id, posKey, "MASTERS");
-        const count = await prisma.humanExplorerFetch.count({
-            where: { snapshotId: snap.id, positionKey: posKey, databaseType: "MASTERS" }
-        });
-        assert.strictEqual(count, 1);
-        // Ensure invalid databaseType throws hard error
-        let rejected = false;
-        try {
-            await recordHumanExplorerFetch(snap.id, posKey, "INVALID" as unknown as HumanDatabaseType);
-        } catch (e) {
-            rejected = true;
-        }
-        assert.ok(rejected, "INVALID database type must be rejected");
-    });
-
-    await t.test('14. successful-empty state is represented by fetch marker with zero rows', async () => {
-        const { createHumanDataSnapshot, recordHumanExplorerFetch, getOrCreatePosition } = await import('../db/operations');
-        const rep = await prisma.repertoire.create({ data: { title: "Empty Test", color: "white", userId: user.id } });
-        const snap = await createHumanDataSnapshot(rep.id, "empty_profile");
-        const fullFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-        const pos = await getOrCreatePosition(fullFen);
-        const posKey = pos.positionKey;
-
-        const beforeCount = await prisma.explorerMoveCache.count({
-            where: { snapshotId: snap.id, positionKey: posKey, databaseType: "MASTERS" }
-        });
-
-        // We just record the fetch. We do not insert any _EMPTY_ ExplorerMoveCache.
-        const fetch = await recordHumanExplorerFetch(snap.id, posKey, "MASTERS");
-        assert.ok(fetch);
-
-        const afterCount = await prisma.explorerMoveCache.count({
-            where: { snapshotId: snap.id, positionKey: posKey, databaseType: "MASTERS" }
-        });
-        assert.strictEqual(beforeCount, afterCount, "Recording successful fetch marker must not implicitly insert move cache rows");
-
-        const emptyRow = await prisma.explorerMoveCache.findFirst({
-            where: { snapshotId: snap.id, positionKey: posKey, databaseType: "MASTERS", san: "_EMPTY_" }
-        });
-        assert.ok(!emptyRow, "Recording successful fetch marker must not insert _EMPTY_ string markers");
-    });
-
-    await t.test('15. a snapshot referenced by generated history cannot be deleted', async () => {
-        const { createHumanDataSnapshot, recordHumanExplorerFetch, createRepertoireNode } = await import('../db/operations');
-        const rep = await prisma.repertoire.create({ data: { title: "Delete Test", color: "white", userId: user.id } });
-        const snap = await createHumanDataSnapshot(rep.id, "del_profile");
-        const rawFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-        const node = await createRepertoireNode(rep.id, rawFen, "", 1.0, { humanDataSnapshotId: snap.id });
-
-        await recordHumanExplorerFetch(snap.id, node.positionKey, "MASTERS");
-        await assert.rejects(
-            prisma.humanDataSnapshot.delete({ where: { id: snap.id } }),
-            /Foreign key constraint violated/
-        );
-        const fetchCount = await prisma.humanExplorerFetch.count({ where: { snapshotId: snap.id } });
-        assert.strictEqual(fetchCount, 1);
-        const nodeAfter = await prisma.repertoireNode.findUnique({ where: { id: node.id } });
-        assert.ok(nodeAfter);
-        const posAfter = await prisma.position.findUnique({ where: { positionKey: node.positionKey } });
-        assert.ok(posAfter);
-    });
-
-    await t.test('16. fetch marker relates to permanent Position, not PositionCache', async () => {
-        const { createHumanDataSnapshot, recordHumanExplorerFetch, getOrCreatePosition } = await import('../db/operations');
-        const rep = await prisma.repertoire.create({ data: { title: "Rel Test", color: "white", userId: user.id } });
-        const snap = await createHumanDataSnapshot(rep.id, "rel_profile");
-        const fullFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-        const pos = await getOrCreatePosition(fullFen);
-        const posKey = pos.positionKey;
-
-        const fetch = await recordHumanExplorerFetch(snap.id, posKey, "MASTERS");
-        assert.ok(fetch);
-        // Verify it relates to that Position
-        const fetchRow = await prisma.humanExplorerFetch.findUnique({
-            where: { id: fetch.id },
-            include: { position: true }
-        });
-        assert.strictEqual(fetchRow?.position.positionKey, posKey);
-
-        // Verify no PositionCache is required (we didn't create one)
-        const cacheRow = await prisma.positionCache.findUnique({ where: { fen: posKey } });
-        assert.ok(!cacheRow);
-        // Deleting Position while referenced should be restricted
-        let restricted = false;
-        try {
-            await prisma.position.delete({ where: { positionKey: posKey } });
-        } catch (e) {
-            restricted = true; // Should throw because of Restrict relation
-        }
-        assert.ok(restricted, "Deleting Position while referenced by fetch marker must be restricted");
     });
 
     // Cleanup and disconnect both connections
