@@ -1,6 +1,6 @@
 import type { Prisma, RepertoireMove } from "@prisma/client";
 import { Chess } from "chess.js";
-import { claimPosition, prisma, sumIncomingRouteProb } from "../db/operations";
+import { NOT_TOO_RARE_NODE, claimPosition, prisma, sumIncomingRouteProb } from "../db/operations";
 import { parseFullFen, positionKeyFromFen } from "./fen";
 import { isValidUciMove } from "./uci";
 import { deleteOwnedBranches } from "./rm-structural";
@@ -9,6 +9,7 @@ export type OpponentCandidateInput = {
   san: string;
   uci?: string;
   probability: number;
+  dropped?: boolean;
 };
 
 export type CanonicalOpponentCandidate = {
@@ -17,6 +18,7 @@ export type CanonicalOpponentCandidate = {
   moveProb: number;
   routeProb: number;
   siblingIndex: number;
+  dropped: boolean;
   destinationFullFen: string;
   destinationPositionKey: string;
   destinationPgn: string;
@@ -38,6 +40,7 @@ export type ExpectedOpponentSource = {
   fullFen: string;
   positionKey: string;
   displayPgn: string;
+  routeProb: number;
   cumProb: number;
 };
 
@@ -101,12 +104,14 @@ export function canonicalizeOpponentCandidates(input: {
   sourceFullFen: string;
   sourcePgn: string;
   sourceHistory?: string;
+  sourceRouteProb: number;
   sourceCumProb: number;
   candidates: OpponentCandidateInput[];
 }): CanonicalOpponentCandidate[] {
   const canonicalSource = parseFullFen(input.sourceFullFen);
   if (canonicalSource !== input.sourceFullFen) throw new Error("Invalid OPPONENT source: FullFen is not canonical");
   validateCanonicalPgn(input.sourcePgn, "OPPONENT source");
+  validateProbability(input.sourceRouteProb, "source route probability", false);
   validateProbability(input.sourceCumProb, "source cumulative probability", false);
 
   const seenUcis = new Set<string>();
@@ -136,9 +141,11 @@ export function canonicalizeOpponentCandidates(input: {
       uci: move.lan,
       san: move.san,
       moveProb: candidate.probability,
-      routeProb: input.sourceCumProb * candidate.probability,
-      // DB.16: candidates arrive most popular first.
-      siblingIndex,
+      // HM.06: routeProb = parent.routeProb * moveProb.
+      routeProb: input.sourceRouteProb * candidate.probability,
+      // HM.05 / DB.16: candidates arrive most popular first; the index starts at 1.
+      siblingIndex: siblingIndex + 1,
+      dropped: candidate.dropped ?? false,
       destinationFullFen,
       destinationPositionKey: positionKeyFromFen(destinationFullFen),
       destinationPgn: `${input.sourcePgn ? `${input.sourcePgn} ` : ""}${move.san}`,
@@ -154,6 +161,7 @@ function assertSourceState(source: ExpectedOpponentSource): void {
     throw new Error("Invalid OPPONENT source: PositionKey does not match FullFen");
   }
   validateCanonicalPgn(source.displayPgn, "OPPONENT source");
+  validateProbability(source.routeProb, "source route probability", false);
   validateProbability(source.cumProb, "source cumulative probability", false);
 }
 
@@ -173,7 +181,7 @@ async function validateStoredOpponentEdge(
   if (edge.stopReason === "Repetition") {
     if (edge.toNodeId !== null) throw new Error("Malformed stored OPPONENT repetition: destination must be null");
     const ancestor = await tx.repertoireNode.findFirst({
-      where: { repertoireId: source.repertoireId, positionKey: derived.destinationPositionKey }
+      where: { repertoireId: source.repertoireId, positionKey: derived.destinationPositionKey, ...NOT_TOO_RARE_NODE }
     });
     if (!ancestor || !isAncestorHistory(ancestor.displayPgn, source.displayPgn)) {
       throw new Error("Malformed stored OPPONENT repetition: resulting position is not an ancestor");
@@ -252,7 +260,7 @@ export async function reconcileOpponentBranches(input: {
     const derived = applyOpponentMove(input.expectedSource.fullFen, candidate.uci);
     validateProbability(candidate.moveProb, "candidate moveProb", true);
     validateProbability(candidate.routeProb, "candidate routeProb", false);
-    if (candidate.routeProb !== input.expectedSource.cumProb * candidate.moveProb ||
+    if (candidate.routeProb !== input.expectedSource.routeProb * candidate.moveProb ||
         candidate.san !== derived.san || candidate.destinationFullFen !== derived.destinationFullFen ||
         candidate.destinationPositionKey !== derived.destinationPositionKey ||
         candidate.destinationPgn !== `${input.expectedSource.displayPgn ? `${input.expectedSource.displayPgn} ` : ""}${derived.san}`) {
@@ -268,7 +276,8 @@ export async function reconcileOpponentBranches(input: {
       throw new Error("Stale OPPONENT source: repertoire ownership changed");
     }
     if (source.fullFen !== input.expectedSource.fullFen || source.positionKey !== input.expectedSource.positionKey ||
-        source.displayPgn !== input.expectedSource.displayPgn || source.cumProb !== input.expectedSource.cumProb) {
+        source.displayPgn !== input.expectedSource.displayPgn || source.routeProb !== input.expectedSource.routeProb ||
+        source.cumProb !== input.expectedSource.cumProb) {
       throw new Error("Stale OPPONENT source: canonical state changed");
     }
     assertSourceState(source);
@@ -319,8 +328,70 @@ export async function reconcileOpponentBranches(input: {
     };
     for (const candidate of [...input.recomputedCandidates].sort((a, b) => a.uci.localeCompare(b.uci))) {
       const stored = storedByUci.get(candidate.uci);
+      if (stored && (stored.stopReason === "Too rare") !== candidate.dropped) {
+        throw new Error(`Stored OPPONENT ${candidate.uci} changed between dropped and kept and requires branch rebuild`);
+      }
+      if (candidate.dropped) {
+        // HM.04: a dropped move still gets its own node. Its cumProb is held at 0 and
+        // what arrives is held in rareDropped (HM.23). It never owns a position.
+        const arrivingProb = source.cumProb * candidate.moveProb;
+        if (stored) {
+          const updated = await tx.repertoireMove.update({
+            where: { id: stored.id },
+            data: { san: candidate.san, moveProb: candidate.moveProb }
+          });
+          await tx.repertoireNode.update({ where: { id: stored.toNodeId! }, data: { cumProb: 0, rareDropped: arrivingProb } });
+          branches.push({
+            ...candidate,
+            action: "RETAINED",
+            edgeId: updated.id,
+            destinationNodeId: stored.toNodeId,
+            destinationCanonicalPgn: candidate.destinationPgn,
+            destinationCanonicalFullFen: candidate.destinationFullFen,
+            effectiveCumProb: 0,
+            isTransposition: false
+          });
+          continue;
+        }
+        const droppedNode = await tx.repertoireNode.create({
+          data: {
+            repertoireId: input.repertoireId,
+            fullFen: candidate.destinationFullFen,
+            positionKey: candidate.destinationPositionKey,
+            history: candidate.destinationHistory,
+            displayPgn: candidate.destinationPgn,
+            routeProb: candidate.routeProb,
+            cumProb: 0,
+            rareDropped: arrivingProb,
+            siblingIndex: candidate.siblingIndex
+          }
+        });
+        const created = await tx.repertoireMove.create({
+          data: {
+            repertoireId: source.repertoireId,
+            fromNodeId: source.id,
+            toNodeId: droppedNode.id,
+            uci: candidate.uci,
+            san: candidate.san,
+            playerTurn: "OPPONENT",
+            moveProb: candidate.moveProb,
+            stopReason: "Too rare"
+          }
+        });
+        branches.push({
+          ...candidate,
+          action: "ADDED",
+          edgeId: created.id,
+          destinationNodeId: droppedNode.id,
+          destinationCanonicalPgn: droppedNode.displayPgn,
+          destinationCanonicalFullFen: droppedNode.fullFen,
+          effectiveCumProb: 0,
+          isTransposition: false
+        });
+        continue;
+      }
       const repeatedAncestor = await tx.repertoireNode.findFirst({
-        where: { repertoireId: input.repertoireId, positionKey: candidate.destinationPositionKey }
+        where: { repertoireId: input.repertoireId, positionKey: candidate.destinationPositionKey, ...NOT_TOO_RARE_NODE }
       });
       const candidateIsRepetition = repeatedAncestor !== null && isAncestorHistory(repeatedAncestor.displayPgn, source.displayPgn);
       if (stored) {
@@ -380,7 +451,7 @@ export async function reconcileOpponentBranches(input: {
         // A PositionKey intentionally normalizes the counters.  It is useful
         // for detecting a transposition, but cannot select an edge target:
         // chess moves must land on the exact FullFen they produced.
-        where: { repertoireId: input.repertoireId, fullFen: candidate.destinationFullFen },
+        where: { repertoireId: input.repertoireId, fullFen: candidate.destinationFullFen, ...NOT_TOO_RARE_NODE },
         orderBy: { displayPgn: "asc" },
         take: 2
       });

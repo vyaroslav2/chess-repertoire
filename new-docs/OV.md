@@ -11,7 +11,7 @@ OV is the map. It says what the generator is, what one run does, in what order, 
 OV.01 The generator builds one opening repertoire tree for one side. The side is Black; White is the opponent.
 
 OV.02 The two sides are treated differently, and this asymmetry is the whole design:
-* **White** — every move popular enough to be worth meeting is kept. One position, many White moves ([[HM]]).
+* **White** — every move popular enough to pass the threshold goes on to the checks. One position, many White moves ([[HM]]).
 * **Black** — exactly one move is chosen, the move that goes into the repertoire. One position, one Black move ([[EW]]).
 
 OV.03 A run reads from two kinds of source and writes to one place. It reads human game statistics (Lichess Explorer) and engine evaluations (Lichess Cloud Eval, ChessDB, local Stockfish); it writes [[node|nodes]] and moves into the database ([[DB]]). Everything fetched is cached and never fetched twice ([[DB|DB.30]]).
@@ -35,7 +35,7 @@ OV.05
 | [[EW]]                        | The engine waterfall and Black's single response                                   |
 | [[AR]]                        | API requests: lanes, gaps, retry once, giving up                                   |
 | [[RE.excalidraw\|RE]]         | The checks that run after Black's response: game over, depth budget                |
-| [[HM.excalidraw\|HM diagram]] | The checks on each kept White move: too rare, game over, repetition, transposition |
+| [[HM.excalidraw\|HM diagram]] | The checks on each returned White move: too rare, game over, repetition, transposition |
 | [[DB]]                        | What a record contains                                                             |
 | [[TGL]]                       | What the run log prints                                                            |
 | [[generation-config]]         | Every tunable setting                                                              |
@@ -53,7 +53,7 @@ OV.08 **Loop.** Take a position off the queue. It is always a position with Whit
 
 OV.09 **Ask what White plays here.** Look up the position in the Explorer cache; fetch it from Lichess only if it has never been fetched under this [[cache-profile|cache profile]] ([[EX]]). No games at all means this route ends here.
 
-OV.10 **Keep the White moves worth meeting.** Work out each move's share of games, drop the rare ones into `rareDropped`, and keep the rest ([[HM]]). Each kept move produces a child position with Black to move.
+OV.10 **Filter White's moves by popularity.** Work out each returned move's share of games. Every returned move produces a child node with Black to play. Drop the rare ones into `rareDropped`; the rest go on to the checks ([[HM]]).
 
 OV.11 **Place the child.** If that position has already been reached by an earlier route, the earlier route owns it: mark the child as a pointer and cascade its probability through to the owner ([[TR.excalidraw|TR]]). No second Black answer is needed there, so the route ends.
 

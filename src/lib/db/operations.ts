@@ -611,6 +611,7 @@ export async function createRepertoireNode(
   options: {
     displayPgn?: string;
     siblingIndex?: number | null;
+    cumProb?: number;
     eco?: string | null;
     openingName?: string | null;
     openingMetadataStatus?: "PRESENT" | "VALID_ABSENCE";
@@ -653,9 +654,10 @@ export async function createRepertoireNode(
         eco: options.eco ?? null,
         openingName: options.openingName ?? null,
         openingMetadataStatus: options.openingMetadataStatus ?? null,
-        // DB.04 / S2.06: at creation both are the probability arriving down this route.
+        // DB.04 / S2.06: at creation both are the probability arriving down this route,
+        // unless a cascade has already raised what arrives (HM.06: routeProb never includes it).
         routeProb,
-        cumProb: routeProb,
+        cumProb: options.cumProb ?? routeProb,
         siblingIndex: options.siblingIndex ?? null
       }
     });
@@ -704,9 +706,13 @@ export async function createOpponentMove(data: {
 
 const NOT_REPETITION = { OR: [{ stopReason: null }, { stopReason: { not: "Repetition" } }] };
 
+/** HM.04: a dropped move's node is only an ending, never a route owner or ancestor. */
+export const NOT_TOO_RARE_NODE = { incomingMoves: { none: { stopReason: "Too rare" } } };
+
 /**
  * What arrives at a node by every non-repetition route: each incoming White move
  * carries its source's cumProb times moveProb; a Black move carries its source's cumProb.
+ * `tooRare` marks a dropped move's node, which holds what arrives in rareDropped (HM.23).
  */
 export async function sumIncomingRouteProb(client: DbClient, nodeId: string) {
   const incoming = await client.repertoireMove.findMany({
@@ -716,7 +722,7 @@ export async function sumIncomingRouteProb(client: DbClient, nodeId: string) {
   const sum = incoming.reduce((total, edge) => total + (edge.playerTurn === "OPPONENT"
     ? edge.fromNode.cumProb * (edge.moveProb ?? 0)
     : edge.fromNode.cumProb), 0);
-  return { sum, count: incoming.length };
+  return { sum, count: incoming.length, tooRare: incoming.some(edge => edge.stopReason === "Too rare") };
 }
 
 /** Recompute every reachable route from canonical incoming-edge sums. */
@@ -726,8 +732,10 @@ export async function propagateRepertoireProbabilities(repertoireId: string, sta
     if (start.count > 0) {
       await tx.repertoireNode.updateMany({
         where: { id: startNodeId, repertoireId },
-        data: { cumProb: start.sum }
+        // HM.04: a dropped move's node keeps cumProb at 0; what arrives goes to rareDropped.
+        data: start.tooRare ? { cumProb: 0, rareDropped: start.sum } : { cumProb: start.sum }
       });
+      if (start.tooRare) return;
     }
     // This is the production form of the transposition cascade.  Keep it a
     // stack so the generator and the probability propagation agree on which
@@ -747,8 +755,15 @@ export async function propagateRepertoireProbabilities(repertoireId: string, sta
       for (const edge of outgoing) {
         if (edge.stopReason === "Repetition") continue;
         if (edge.toNodeId === null) throw new Error("Non-repetition repertoire move is missing its destination");
-        const { sum: cumProb } = await sumIncomingRouteProb(tx, edge.toNodeId);
+        const { sum: cumProb, tooRare } = await sumIncomingRouteProb(tx, edge.toNodeId);
         const destination = await tx.repertoireNode.findUnique({ where: { id: edge.toNodeId } });
+        if (destination && tooRare) {
+          // HM.04: a cascade that reaches a dropped move adds to its rareDropped, and stops there.
+          if (destination.rareDropped !== cumProb) {
+            await tx.repertoireNode.update({ where: { id: destination.id }, data: { rareDropped: cumProb } });
+          }
+          continue;
+        }
         if (destination && destination.cumProb !== cumProb) {
           await tx.repertoireNode.update({
             where: { id: destination.id },

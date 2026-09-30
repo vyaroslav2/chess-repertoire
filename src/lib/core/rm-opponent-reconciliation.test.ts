@@ -55,6 +55,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     fullFen: string;
     positionKey: string;
     displayPgn: string;
+    routeProb: number;
     cumProb: number;
   }): ExpectedOpponentSource {
     return {
@@ -63,6 +64,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
       fullFen: node.fullFen,
       positionKey: node.positionKey,
       displayPgn: node.displayPgn,
+      routeProb: node.routeProb,
       cumProb: node.cumProb
     };
   }
@@ -71,6 +73,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     return canonicalizeOpponentCandidates({
       sourceFullFen: source.fullFen,
       sourcePgn: source.displayPgn,
+      sourceRouteProb: source.routeProb,
       sourceCumProb: source.cumProb,
       candidates: rows
     });

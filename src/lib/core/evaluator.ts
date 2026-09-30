@@ -71,13 +71,15 @@ export function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: numbe
     };
 }
 
+// HM.04: every returned move is kept in the list; `include` false marks a dropped move.
+// HM.05: most popular first, ties alphabetically by SAN.
 export function selectWhiteCandidates(currentMoveNumber: number, amateurList: any[], totalAmateurGames: number) {
   return amateurList
     .map(move => ({
       san: move.san,
       ...shouldIncludeWhiteMove(move.san, currentMoveNumber, amateurList, totalAmateurGames)
     }))
-    .filter(move => move.include);
+    .sort((a, b) => b.probability - a.probability || a.san.localeCompare(b.san));
 }
 
 import { fetchAllDatabases, pickExplorerOpening, type ExplorerOpening } from "../api/lichess";

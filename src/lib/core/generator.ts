@@ -514,6 +514,7 @@ export async function generateRepertoire(
     await ensureNodeOpeningMetadata(canonicalSourceNode.id, rebuildOpeningMetadataCache, pickExplorerOpening([masters, amateur]), fetchOpeningMetadata);
     
     // EX.05: moveProb is a share of the position's total, so the games with no move are not handed to the children.
+    // HM.04 / HM.05: every returned move, most popular first; a dropped move has include = false.
     const whiteCandidates = selectWhiteCandidates(
       node.currentMoveNumber,
       amateur.moves || [],
@@ -525,10 +526,12 @@ export async function generateRepertoire(
       sourceFullFen: canonicalSourceNode.fullFen,
       sourcePgn: canonicalSourceNode.displayPgn,
       sourceHistory: canonicalSourceNode.history,
+      sourceRouteProb: canonicalSourceNode.routeProb,
       sourceCumProb: canonicalSourceNode.cumProb,
       candidates: whiteCandidates.map(candidate => ({
         san: candidate.san,
-        probability: candidate.probability
+        probability: candidate.probability,
+        dropped: !candidate.include
       }))
     });
     const expectedOpponentSource: ExpectedOpponentSource = {
@@ -537,6 +540,7 @@ export async function generateRepertoire(
       fullFen: canonicalSourceNode.fullFen,
       positionKey: canonicalSourceNode.positionKey,
       displayPgn: canonicalSourceNode.displayPgn,
+      routeProb: canonicalSourceNode.routeProb,
       cumProb: canonicalSourceNode.cumProb
     };
     const expectedStoredOpponentEdges = await readExpectedOpponentEdges(canonicalSourceNode.id);
@@ -582,27 +586,34 @@ export async function generateRepertoire(
       });
     }
 
-    if (whiteCandidates.length === 0) {
+    const passedWhiteMoveCount = whiteCandidates.filter(candidate => candidate.include).length;
+    if (passedWhiteMoveCount === 0) {
         const tempChess = new Chess(node.fen);
         if (!tempChess.isGameOver() && rawAmateurMoveCount === 0) {
             console.log("No opponent moves found."); // EX.06
             totalMissingWhiteMoves++;
         } else if (!tempChess.isGameOver()) {
-            console.log(`[PRUNED — BELOW AMATEUR THRESHOLD] Amateur Explorer returned ${rawAmateurMoveCount} move(s), but none met the configured popularity threshold.`);
+            console.warn("[WARNING] All opponent moves were filtered away."); // HM.08
         }
     } else {
-        console.log(`Found ${whiteCandidates.length} White moves to process.`);
+        console.log(`Found ${passedWhiteMoveCount} White moves to process.`);
     }
-    totalWhiteMovesFound += whiteCandidates.length;
-    if (whiteCandidates.length === 0) {
+    totalWhiteMovesFound += passedWhiteMoveCount;
+    if (passedWhiteMoveCount === 0) {
       console.log(`[QUEUE] Nothing enqueued: no retained White moves; waiting=${queue.length}`);
     }
 
-    for (let candidateIndex = 0; candidateIndex < whiteCandidates.length; candidateIndex++) {
+    // HM.06: the least popular move is handled first, so it is pushed first and taken last (S3.09).
+    for (let candidateIndex = whiteCandidates.length - 1; candidateIndex >= 0; candidateIndex--) {
       const whiteMove = whiteCandidates[candidateIndex];
       const canonicalWhiteMove = canonicalOpponentCandidates[candidateIndex];
       const reconciledOpponent = reconciledOpponentByUci.get(canonicalWhiteMove.uci);
       if (!reconciledOpponent) throw new Error(`Reconciled OPPONENT branch ${canonicalWhiteMove.uci} is missing`);
+      if (canonicalWhiteMove.dropped) {
+        // HM.04: a dropped move keeps its node but gets no Black reply. DB.06 rule 4 names it.
+        await ensureNodeOpeningMetadata(reconciledOpponent.destinationNodeId!, rebuildOpeningMetadataCache, "NOT_FETCHED", fetchOpeningMetadata);
+        continue;
+      }
       console.log(`\nEvaluating White Move: ${whiteMove.san} (Reason: ${whiteMove.reason}, Prob: ${whiteMove.probability ? (whiteMove.probability*100).toFixed(1) : 0}%)`);
       const resultingProbability = canonicalWhiteMove.routeProb;
       const resultingBand = getProbabilityBand(resultingProbability, runtime.config);
@@ -765,9 +776,11 @@ export async function generateRepertoire(
           const responseIsRepetition = posAfterBlackNode !== null &&
             (posAfterBlackNode.history === "" || posAfterWhiteNode.history.startsWith(`${posAfterBlackNode.history} `));
           if (!posAfterBlackNode) {
-              posAfterBlackNode = await createRepertoireNode(repertoire.id, selectedDestinationFen, blackHistory, effectiveCanonicalProb, {
+              // HM.06: routeProb follows the route only (x 100% for Black's reply); cumProb carries any cascade.
+              posAfterBlackNode = await createRepertoireNode(repertoire.id, selectedDestinationFen, blackHistory, posAfterWhiteNode.routeProb, {
                 displayPgn: blackPgn,
-                siblingIndex: 0
+                siblingIndex: 0,
+                cumProb: effectiveCanonicalProb
               });
           } else if (!responseIsRepetition) {
               await prisma.repertoireNode.update({

@@ -46,7 +46,7 @@ By the end of a run every node carries a status. A missing status, or a half-fil
 
 DB.07 **Wikibooks text.** `wikiText`, plus a flag recording that the lookup happened, so "looked up, nothing there" is told apart from "never looked up". #deferred
 
-DB.16 **Ordering.** `siblingIndex` — where this node sits among its siblings, most popular first ([[HM|HM.05]]). A stored display order, not the order the queue is walked in ([[S3|S3.09]]).
+DB.16 **Ordering.** `siblingIndex` — where this node sits among its siblings, most popular first ([[HM|HM.05]]). Every returned White move is numbered, dropped moves included. A stored display order, not the order the queue is walked in ([[S3|S3.09]]).
 
 ### What a move holds
 
