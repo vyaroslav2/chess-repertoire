@@ -27,10 +27,10 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
         const urlStr = url.toString();
         // Masters has the move e5
         if (urlStr.includes('explorer.lichess.ovh/masters')) {
-          return new Response(JSON.stringify({ moves: [{ san: 'Nbd7', uci: 'b8d7', white: 100, draws: 100, black: 100 }] }));
+          return new Response(JSON.stringify({ white: 100, draws: 100, black: 100, moves: [{ san: 'Nbd7', uci: 'b8d7', white: 100, draws: 100, black: 100 }] }));
         }
         if (urlStr.includes('explorer.lichess.ovh/lichess')) {
-          return new Response(JSON.stringify({ moves: [] }));
+          return new Response(JSON.stringify({ white: 0, draws: 0, black: 0, moves: [] }));
         }
         if (urlStr.includes('lichess.org/api/cloud-eval')) {
           return new Response(JSON.stringify({ pvs: [{ moves: 'b8d7', mate: -3 }] }));
@@ -79,10 +79,10 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
       global.fetch = async (url: any) => {
         const urlStr = url.toString();
         if (urlStr.includes('explorer.lichess.ovh/masters')) {
-          return new Response(JSON.stringify({ moves: [{ san: 'Nbd7', uci: 'b8d7', white: 100, draws: 100, black: 100 }] }));
+          return new Response(JSON.stringify({ white: 100, draws: 100, black: 100, moves: [{ san: 'Nbd7', uci: 'b8d7', white: 100, draws: 100, black: 100 }] }));
         }
         if (urlStr.includes('explorer.lichess.ovh/lichess')) {
-          return new Response(JSON.stringify({ moves: [] }));
+          return new Response(JSON.stringify({ white: 0, draws: 0, black: 0, moves: [] }));
         }
         if (urlStr.includes('lichess.org/api/cloud-eval')) {
           // Lichess gives empty response (inconclusive)
@@ -128,10 +128,10 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
       global.fetch = async (url: any) => {
         const urlStr = url.toString();
         if (urlStr.includes('explorer.lichess.ovh/masters')) {
-          return new Response(JSON.stringify({ moves: [{ san: 'Nbd7', uci: 'b8d7', white: 100, draws: 100, black: 100 }] }));
+          return new Response(JSON.stringify({ white: 100, draws: 100, black: 100, moves: [{ san: 'Nbd7', uci: 'b8d7', white: 100, draws: 100, black: 100 }] }));
         }
         if (urlStr.includes('explorer.lichess.ovh/lichess')) {
-          return new Response(JSON.stringify({ moves: [] }));
+          return new Response(JSON.stringify({ white: 0, draws: 0, black: 0, moves: [] }));
         }
         if (urlStr.includes('lichess.org/api/cloud-eval')) {
           return new Response(JSON.stringify({ pvs: [] }));
@@ -174,7 +174,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
       global.fetch = async (url: any) => {
         const urlStr = url.toString();
         if (urlStr.includes('explorer.lichess.ovh')) {
-          return new Response(JSON.stringify({ moves: [] }));
+          return new Response(JSON.stringify({ white: 0, draws: 0, black: 0, moves: [] }));
         }
         if (urlStr.includes('lichess.org/api/cloud-eval')) {
           return new Response(JSON.stringify({ pvs: [{ moves: 'c7c6', cp: 42 }] }));
@@ -212,10 +212,10 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
       global.fetch = async (url: any) => {
         const urlStr = url.toString();
         if (urlStr.includes('explorer.lichess.ovh/masters')) {
-          return new Response(JSON.stringify({ moves: [{ san: 'Nbd7', uci: 'b8d7', white: 100, draws: 100, black: 100 }] }));
+          return new Response(JSON.stringify({ white: 100, draws: 100, black: 100, moves: [{ san: 'Nbd7', uci: 'b8d7', white: 100, draws: 100, black: 100 }] }));
         }
         if (urlStr.includes('explorer.lichess.ovh/lichess')) {
-          return new Response(JSON.stringify({ moves: [] }));
+          return new Response(JSON.stringify({ white: 0, draws: 0, black: 0, moves: [] }));
         }
         if (urlStr.includes('lichess.org/api/cloud-eval')) {
           return new Response(JSON.stringify({ pvs: [{ moves: 'invalid_move_format', cp: 100 }] }));
@@ -254,7 +254,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
       global.fetch = async (url: any) => {
         const urlStr = url.toString();
         if (urlStr.includes('explorer.lichess.ovh')) {
-          return new Response(JSON.stringify({ moves: [] }));
+          return new Response(JSON.stringify({ white: 0, draws: 0, black: 0, moves: [] }));
         }
         if (urlStr.includes('lichess.org/api/cloud-eval')) {
           // Lichess returns terrible evaluation for c6 (+500) while e5 is good (0)
@@ -290,7 +290,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
       global.fetch = async (url: any) => {
         const urlStr = url.toString();
         if (urlStr.includes('explorer.lichess.ovh')) {
-          return new Response(JSON.stringify({ moves: [] }));
+          return new Response(JSON.stringify({ white: 0, draws: 0, black: 0, moves: [] }));
         }
         if (urlStr.includes('lichess.org/api/cloud-eval')) {
           return new Response(JSON.stringify({ pvs: [{ moves: 'e7e5', cp: 0 }] })); // c6 is missing
@@ -343,7 +343,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
       global.fetch = async (url: any) => {
         const urlStr = url.toString();
         if (urlStr.includes('explorer.lichess.ovh')) {
-          return new Response(JSON.stringify({ moves: [] }));
+          return new Response(JSON.stringify({ white: 0, draws: 0, black: 0, moves: [] }));
         }
         if (urlStr.includes('lichess.org/api/cloud-eval')) {
           return new Response(JSON.stringify({ pvs: [{ moves: 'e7e5', cp: 0 }] })); // c6 is missing
@@ -395,7 +395,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
     try {
       global.fetch = async (url: any) => {
         const urlStr = url.toString();
-        if (urlStr.includes('explorer.lichess.ovh')) return new Response(JSON.stringify({ moves: [] }));
+        if (urlStr.includes('explorer.lichess.ovh')) return new Response(JSON.stringify({ white: 0, draws: 0, black: 0, moves: [] }));
         if (urlStr.includes('lichess.org/api/cloud-eval')) return new Response(JSON.stringify({ pvs: [{ moves: 'e7e5', cp: 0 }] }));
         if (urlStr.includes('chessdb.cn')) return new Response("move:e7e5,score:0");
         return new Response(JSON.stringify({}));
@@ -445,7 +445,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
         const urlStr = url.toString();
         // Return 0 moves for human shortlist
         if (urlStr.includes('explorer.lichess.ovh/masters') || urlStr.includes('explorer.lichess.ovh/lichess')) {
-          return new Response(JSON.stringify({ moves: [] }));
+          return new Response(JSON.stringify({ white: 0, draws: 0, black: 0, moves: [] }));
         }
         if (urlStr.includes('lichess.org/api/cloud-eval')) {
           return new Response(JSON.stringify({ pvs: [] }));
@@ -496,7 +496,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
       global.fetch = async (url: any) => {
         const urlStr = url.toString();
         if (urlStr.includes('explorer.lichess.ovh')) {
-          return new Response(JSON.stringify({ moves: [] }));
+          return new Response(JSON.stringify({ white: 0, draws: 0, black: 0, moves: [] }));
         }
         if (urlStr.includes('lichess.org/api/cloud-eval')) {
           return new Response(JSON.stringify({ pvs: [{ moves: 'g8f6', cp: 0 }, { moves: 'd7d5', cp: 500 }] }));
@@ -527,7 +527,7 @@ test('Slice 11 Evaluator Waterfall Tests', async (t) => {
 
     try {
       global.fetch = async (url: any) => {
-        return new Response(JSON.stringify({ moves: [], pvs: [] }));
+        return new Response(JSON.stringify({ white: 0, draws: 0, black: 0, moves: [], pvs: [] }));
       };
       
       const nodeUci = require('node-uci');

@@ -45,6 +45,26 @@ function parseOpening(opening: unknown): ExplorerOpening | null {
   return { eco: record.eco, name: record.name };
 }
 
+/**
+ * EX.05: the games of all returned moves against the position's own total.
+ * Returns the share of games with no move. Only the Amateur shortfall is recorded
+ * as unaccountedDropped; for Masters and Elite the warning is all.
+ */
+export function checkExplorerGameCounts(
+  dbType: HumanDatabaseType,
+  totalGames: number,
+  positionTotalGames: number
+): number {
+  if (totalGames > positionTotalGames) {
+    throw new Error(`Explorer ${dbType} move counts (${totalGames} games) are more than the position's total games (${positionTotalGames}).`);
+  }
+  if (totalGames === positionTotalGames) return 0;
+  const missing = positionTotalGames - totalGames;
+  const missingShare = missing / positionTotalGames;
+  console.log(`[WARNING] Explorer move counts do not add up to the position's total games. Missing: ${missing} games (${(missingShare * 100).toFixed(2)}%).`);
+  return dbType === "AMATEUR" ? missingShare : 0;
+}
+
 export async function fetchAllDatabases(
   fen: string,
   requestedBuckets: readonly HumanDatabaseType[] = ["MASTERS", "ELITE", "AMATEUR"]
@@ -61,8 +81,9 @@ export async function fetchAllDatabases(
     if (cached.status === "success" || cached.status === "empty") {
       const moves = cached.status === "success" ? cached.moves.map(toPublicMove) : [];
       const totalGames = moves.reduce((sum, m) => sum + m.games, 0);
+      const unaccountedShare = checkExplorerGameCounts(dbType, totalGames, cached.positionTotalGames);
       return {
-        moves, totalGames, positionTotalGames: cached.positionTotalGames,
+        moves, totalGames, positionTotalGames: cached.positionTotalGames, unaccountedShare,
         opening: toOpening(cached.eco, cached.openingName), retrieval: "CACHE" as const
       };
     }
@@ -128,10 +149,12 @@ export async function fetchAllDatabases(
     const returnedMoves = validMoves.map(toPublicMove);
     const totalGames = returnedMoves.reduce((sum, m) => sum + m.games, 0);
     // The position's own total, as Explorer reports it. EX.05 compares it with totalGames.
-    const positionTotalGames = isNonNegativeInteger(data.white) && isNonNegativeInteger(data.draws) && isNonNegativeInteger(data.black)
-      ? data.white + data.draws + data.black
-      : totalGames;
+    if (!isNonNegativeInteger(data.white) || !isNonNegativeInteger(data.draws) || !isNonNegativeInteger(data.black)) {
+      throw new Error("Invalid source result: position statistic counts are missing or invalid");
+    }
+    const positionTotalGames = data.white + data.draws + data.black;
     const opening = parseOpening(data.opening);
+    const unaccountedShare = checkExplorerGameCounts(dbType, totalGames, positionTotalGames);
 
     await saveExplorerCache(posKey, cacheProfile, {
       positionTotalGames,
@@ -139,12 +162,16 @@ export async function fetchAllDatabases(
       openingName: opening?.name ?? null,
       moves: validMoves
     });
+    // EX.05: the fetch ran, so the row must be there now.
+    if ((await readExplorerCache(posKey, cacheProfile)).status === "missing") {
+      throw new Error(`Explorer ${dbType} cache row is missing after the fetch for position ${posKey}`);
+    }
 
-    return { moves: returnedMoves, totalGames, positionTotalGames, opening, retrieval: "FRESH" as const };
+    return { moves: returnedMoves, totalGames, positionTotalGames, unaccountedShare, opening, retrieval: "FRESH" as const };
   }
 
   const mastersUrl = `https://explorer.lichess.ovh/masters?fen=${encodeURIComponent(fullFen)}`;
-  const skippedBucket = () => ({ moves: [], totalGames: 0, positionTotalGames: 0, opening: null, retrieval: "SKIPPED" as const });
+  const skippedBucket = () => ({ moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0, opening: null, retrieval: "SKIPPED" as const });
   const mRes = requestedBuckets.includes("MASTERS")
     ? await processBucket("MASTERS", mastersUrl)
     : skippedBucket();

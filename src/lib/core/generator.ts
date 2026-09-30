@@ -513,10 +513,11 @@ export async function generateRepertoire(
     const [masters, , amateur] = await fetchDatabases(canonicalSourceNode.fullFen, ["MASTERS", "AMATEUR"]);
     await ensureNodeOpeningMetadata(canonicalSourceNode.id, rebuildOpeningMetadataCache, pickExplorerOpening([masters, amateur]), fetchOpeningMetadata);
     
+    // EX.05: moveProb is a share of the position's total, so the games with no move are not handed to the children.
     const whiteCandidates = selectWhiteCandidates(
       node.currentMoveNumber,
       amateur.moves || [],
-      amateur.totalGames || 0
+      amateur.positionTotalGames || 0
     );
     const rawAmateurMoveCount = new Set((amateur.moves || []).map(move => move.uci || move.san)).size;
 
@@ -573,11 +574,18 @@ export async function generateRepertoire(
         await propagateRepertoireProbabilities(repertoire.id, branch.destinationNodeId);
       }
     }
+    // EX.05: the Amateur shortfall stays on this node, since the missing games have no child to hold them.
+    if (rawAmateurMoveCount > 0) {
+      await prisma.repertoireNode.update({
+        where: { id: canonicalSourceNode.id },
+        data: { unaccountedDropped: canonicalSourceNode.cumProb * amateur.unaccountedShare }
+      });
+    }
 
     if (whiteCandidates.length === 0) {
         const tempChess = new Chess(node.fen);
         if (!tempChess.isGameOver() && rawAmateurMoveCount === 0) {
-            console.log(`[MISSING WHITE MOVES] Amateur Explorer successfully returned zero moves for ${pgnString || "(root)"}. Stopping branch because White selection is Amateur-only.`);
+            console.log("No opponent moves found."); // EX.06
             totalMissingWhiteMoves++;
         } else if (!tempChess.isGameOver()) {
             console.log(`[PRUNED — BELOW AMATEUR THRESHOLD] Amateur Explorer returned ${rawAmateurMoveCount} move(s), but none met the configured popularity threshold.`);

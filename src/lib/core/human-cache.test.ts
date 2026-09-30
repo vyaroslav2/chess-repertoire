@@ -136,7 +136,8 @@ test('DB.31 Explorer cache', async (t) => {
     await testMalformedResponse({ moves: [{ san: "e4", white: -1, draws: 5, black: 2 }] }, "negative statistic");
     await testMalformedResponse({ moves: [{ san: "e4", white: 10.5, draws: 5, black: 2 }] }, "non-integer statistic");
     await testMalformedResponse({ moves: [{ san: "e4", white: 10, draws: 5, black: 2 }, { san: "invalid_move", white: 1, draws: 1, black: 1 }] }, "one bad SAN among valid moves");
-    await testMalformedResponse({ moves: [], opening: { eco: "A00" } }, "opening without a name");
+    await testMalformedResponse({ white: 0, draws: 0, black: 0, moves: [], opening: { eco: "A00" } }, "opening without a name");
+    await testMalformedResponse({ moves: [] }, "missing position totals");
 
     // Public shape on fresh fetch and cache hit
     await prisma.positionCache.deleteMany();
@@ -144,6 +145,7 @@ test('DB.31 Explorer cache', async (t) => {
     global.fetch = async () => {
       shapeFetchCalls++;
       return new Response(JSON.stringify({
+        white: 10, draws: 5, black: 2,
         moves: [{ san: "e4", white: 10, draws: 5, black: 2 }]
       }));
     };
@@ -172,7 +174,7 @@ test('DB.31 Explorer cache', async (t) => {
 
     // Only an explicit moves: [] is a successful empty source result.
     await prisma.positionCache.deleteMany();
-    global.fetch = async () => new Response(JSON.stringify({ moves: [] }));
+    global.fetch = async () => new Response(JSON.stringify({ white: 0, draws: 0, black: 0, moves: [] }));
     const emptyResults = await fetchAllDatabases(fen);
     assert.ok(emptyResults.every(result => result.moves.length === 0));
     assert.strictEqual((await read(posKey, "MASTERS")).status, "empty");
@@ -182,13 +184,14 @@ test('DB.31 Explorer cache', async (t) => {
       fetchCalls.push(url.toString());
       if (url.toString().includes("masters")) {
         return new Response(JSON.stringify({
+          white: 11, draws: 6, black: 3,
           moves: [
             { san: "e4", white: 10, draws: 5, black: 2 },
             { san: "invalid_move", white: 1, draws: 1, black: 1 }
           ]
         }));
       }
-      return new Response(JSON.stringify({ moves: [] }));
+      return new Response(JSON.stringify({ white: 0, draws: 0, black: 0, moves: [] }));
     };
     const fen6 = "rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq c6 0 2"; // e4 c5
     await assert.rejects(fetchAllDatabases(fen6));
@@ -197,9 +200,9 @@ test('DB.31 Explorer cache', async (t) => {
 
     // A failed required source throws rather than becoming empty.
     global.fetch = async (url: any) => {
-      if (url.toString().includes("masters")) return new Response(JSON.stringify({ moves: [] }));
+      if (url.toString().includes("masters")) return new Response(JSON.stringify({ white: 0, draws: 0, black: 0, moves: [] }));
       if (url.toString().includes("ratings=2500")) return new Response("Error", { status: 404 }); // Elite
-      return new Response(JSON.stringify({ moves: [] }));
+      return new Response(JSON.stringify({ white: 0, draws: 0, black: 0, moves: [] }));
     };
     const fen3 = "rnbqkbnr/pppp1ppp/8/4p3/8/5N2/PPPPPPPP/RNBQKB1R b KQkq - 1 2";
     const posKey3 = positionKeyFromFen(parseFullFen(fen3));
@@ -211,7 +214,7 @@ test('DB.31 Explorer cache', async (t) => {
     await prisma.positionCache.deleteMany();
     global.fetch = async (url: any) => {
       if (url.toString().includes("ratings=1600")) return new Response("Error", { status: 404 });
-      return new Response(JSON.stringify({ moves: [] }));
+      return new Response(JSON.stringify({ white: 0, draws: 0, black: 0, moves: [] }));
     };
     await assert.rejects(fetchAllDatabases(fen3), /Explorer returned HTTP 404\./);
     assert.strictEqual((await read(posKey3, "MASTERS")).status, "empty", "Masters successful empty response remains cached");
@@ -221,7 +224,7 @@ test('DB.31 Explorer cache', async (t) => {
     // When Masters and Elite are cached but Amateur is missing, only Amateur is fetched.
     global.fetch = async (url: any) => {
       fetchCalls.push(url.toString());
-      return new Response(JSON.stringify({ moves: [{ san: "Nc6", white: 1, draws: 1, black: 1 }] }));
+      return new Response(JSON.stringify({ white: 1, draws: 1, black: 1, moves: [{ san: "Nc6", white: 1, draws: 1, black: 1 }] }));
     };
     fetchCalls = [];
     await fetchAllDatabases(fen3);
@@ -231,7 +234,7 @@ test('DB.31 Explorer cache', async (t) => {
     // Promotion SAN converts to UCI with the promotion piece, from the exact FullFen.
     const fen4 = "4k3/3P4/8/8/8/8/8/4K3 w - - 0 1";
     const posKey4 = positionKeyFromFen(parseFullFen(fen4));
-    global.fetch = async () => new Response(JSON.stringify({ moves: [{ san: "d8=Q+", white: 1, draws: 0, black: 0 }] }));
+    global.fetch = async () => new Response(JSON.stringify({ white: 1, draws: 0, black: 0, moves: [{ san: "d8=Q+", white: 1, draws: 0, black: 0 }] }));
     await fetchAllDatabases(fen4);
     const mRes4 = await read(posKey4, "MASTERS");
     if (mRes4.status !== "success") return assert.fail("Should be success");

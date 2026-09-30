@@ -428,7 +428,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
       fetchDatabases: (async () => [
         { moves: [], totalGames: 0, opening: undefined },
         { moves: [], totalGames: 0 },
-        { moves: humanRows, totalGames: 100 }
+        { moves: humanRows, totalGames: 90, positionTotalGames: 100, unaccountedShare: 0.1 }
       ]) as any,
       fetchOpeningMetadata: async () => null,
       responseEvaluator: responseEvaluator as any,
@@ -510,10 +510,10 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     });
 
     const mockDatabases = async (fen: string) => {
-      if (fen === root.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [{ san: "Nc3", uci: "b1c3", games: 50 }, { san: "Nf3", uci: "g1f3", games: 50 }], totalGames: 100 }] as any;
-      if (fen === nodeB.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [{ san: "Nf3", uci: "g1f3", games: 100 }], totalGames: 100 }] as any;
-      if (fen === nodeA.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [], totalGames: 0 }] as any;
-      return [{ moves: [] }, { moves: [] }, { moves: [], totalGames: 0 }] as any;
+      if (fen === root.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [{ san: "Nc3", uci: "b1c3", games: 50 }, { san: "Nf3", uci: "g1f3", games: 50 }], totalGames: 100, positionTotalGames: 100, unaccountedShare: 0 }] as any;
+      if (fen === nodeB.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [{ san: "Nf3", uci: "g1f3", games: 100 }], totalGames: 100, positionTotalGames: 100, unaccountedShare: 0 }] as any;
+      if (fen === nodeA.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0 }] as any;
+      return [{ moves: [] }, { moves: [] }, { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0 }] as any;
     };
 
     let reprocessedB = false;
@@ -581,10 +581,10 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     });
 
     const mockDatabases = async (fen: string) => {
-      if (fen === root.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [{ san: "Nf3", uci: "g1f3", games: 50 }, { san: "Nc3", uci: "b1c3", games: 50 }], totalGames: 100 }] as any;
-      if (fen === nodeB.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [{ san: "Nf3", uci: "g1f3", games: 100 }], totalGames: 100 }] as any;
-      if (fen === nodeA.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [], totalGames: 0 }] as any;
-      return [{ moves: [] }, { moves: [] }, { moves: [], totalGames: 0 }] as any;
+      if (fen === root.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [{ san: "Nf3", uci: "g1f3", games: 50 }, { san: "Nc3", uci: "b1c3", games: 50 }], totalGames: 100, positionTotalGames: 100, unaccountedShare: 0 }] as any;
+      if (fen === nodeB.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [{ san: "Nf3", uci: "g1f3", games: 100 }], totalGames: 100, positionTotalGames: 100, unaccountedShare: 0 }] as any;
+      if (fen === nodeA.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0 }] as any;
+      return [{ moves: [] }, { moves: [] }, { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0 }] as any;
     };
 
     let reprocessedB = false;

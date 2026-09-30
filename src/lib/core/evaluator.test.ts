@@ -31,7 +31,7 @@ test('Slice 10 Evaluator Tests', async (t) => {
         const urlStr = url.toString();
         // 1. Mock Human Explorer (Empty list so it falls back to Lichess fallback, but returns pvs)
         if (urlStr.includes('explorer.lichess.ovh/masters') || urlStr.includes('explorer.lichess.ovh/lichess')) {
-          return new Response(JSON.stringify({ moves: [] }));
+          return new Response(JSON.stringify({ white: 0, draws: 0, black: 0, moves: [] }));
         }
         
         if (urlStr.includes('lichess.org/api/cloud-eval')) {

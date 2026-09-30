@@ -531,7 +531,7 @@ function installBlockFormatter(write: (...args: unknown[]) => void): () => void 
       write(`[LIVE COUNTER] Depth-limited stops: +1 => ${liveCounters.depthLimitedStops} total.`);
       return;
     }
-    if (normalized.startsWith("[MISSING WHITE MOVES]")) {
+    if (normalized === "No opponent moves found.") {
       liveCounters.missingWhite++;
       write(normalized);
       write(`[LIVE COUNTER] Missing White moves: +1 => ${liveCounters.missingWhite} total.`);
