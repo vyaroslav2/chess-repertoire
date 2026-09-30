@@ -36,14 +36,17 @@ EX.05 **Store & Return Result**:
 * Every Explorer response carries `eco` and an `openingName` for the position. They are cached with it ([[DB|DB.31]]). Which name a node gets is [[DB|DB.06]]. Not a separate pipeline.
 * #note Wikibooks logic is preserved but the documentation for it is deferred. #deferred
 * If the fetch ran and the `PositionCache` row is still missing afterwards, that is a critical error `-->` exit, with the usual cleanup.
+* `positionTotalGames` is the position's `white` + `draws` + `black` from the response. A response without them is malformed ([[AR|AR.10]]): without them the games of the moves cannot be compared with the position's total.
 * Add up the games of all returned moves and compare with `positionTotalGames`:
 	* Equal `-->` carry on.
-	* Less `-->` log `"[WARNING] Explorer move counts do not add up to the position's total games. Missing: [n] games ([p]%)."`. The missing share goes to `unaccountedDropped`. Only the Amateur shortfall is recorded as `unaccountedDropped`. For Masters and Elite, log the warning only.
-	* More `-->` hard error `-->` exit.
+	* Less `-->` log `"[WARNING] Explorer move counts do not add up to the position's total games. Missing: [n] games ([p]%)."`. The missing share goes to `unaccountedDropped`. Only the Amateur shortfall is recorded as `unaccountedDropped`, and only when Amateur returned at least one move; with none, the route ends (EX.06) and the node's `cumProb` is already counted as an ending. For Masters and Elite, log the warning only.
+	* More `-->` hard error `-->` exit: `"Explorer move counts are more than the position's total games. Dataset: [dataset]. Moves: [m] games. Position: [n] games."`
 
 EX.06 **Return to caller**: Return the move data for each requested dataset, empty or not, to the caller. The caller decides what an empty result means:
 * [[HM|HM.02]]: no Amateur moves `-->` end the route, log the stop reason `"No opponent moves found."`, proceed to [[S3|S3.01]].
 * [[EW|EW.02]]: handled there.
+
+EX.07 **Every result is checked, cached or fresh.** The EX.05 game count check runs on every result EX returns, not only after a fetch. The tree is rebuilt on every run, so each run must record `unaccountedDropped` again. The cache holds the counts, not the node values. So the warning is printed on every run that reaches the position.
 
 [^1]: see [[generation-config]]
 

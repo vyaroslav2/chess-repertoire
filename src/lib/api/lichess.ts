@@ -45,6 +45,8 @@ function parseOpening(opening: unknown): ExplorerOpening | null {
   return { eco: record.eco, name: record.name };
 }
 
+const datasetName: Record<HumanDatabaseType, string> = { MASTERS: "Masters", ELITE: "Elite", AMATEUR: "Amateur" };
+
 /**
  * EX.05: the games of all returned moves against the position's own total.
  * Returns the share of games with no move. Only the Amateur shortfall is recorded
@@ -56,7 +58,7 @@ export function checkExplorerGameCounts(
   positionTotalGames: number
 ): number {
   if (totalGames > positionTotalGames) {
-    throw new Error(`Explorer ${dbType} move counts (${totalGames} games) are more than the position's total games (${positionTotalGames}).`);
+    throw new Error(`Explorer move counts are more than the position's total games. Dataset: ${datasetName[dbType]}. Moves: ${totalGames} games. Position: ${positionTotalGames} games.`);
   }
   if (totalGames === positionTotalGames) return 0;
   const missing = positionTotalGames - totalGames;

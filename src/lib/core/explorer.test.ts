@@ -55,7 +55,10 @@ describe("EX.05 game counts", () => {
   });
 
   it("EX.05: more games than the position's total is a hard error", () => {
-    assert.throws(() => checkExplorerGameCounts("AMATEUR", 21, 20), /more than the position's total games/);
+    assert.throws(
+      () => checkExplorerGameCounts("AMATEUR", 21, 20),
+      { message: "Explorer move counts are more than the position's total games. Dataset: Amateur. Moves: 21 games. Position: 20 games." }
+    );
   });
 });
 
