@@ -1,4 +1,4 @@
-import { fetchWithRetry } from './retry';
+import { lichessHeaders, requestApi } from './retry';
 import { readExplorerCache, saveExplorerCache, ExplorerMoveRow, HumanDatabaseType } from '../db/operations';
 import { parseFullFen, positionKeyFromFen } from '../core/fen';
 import { computeExplorerCacheProfile, defaultConfig } from '../core/config';
@@ -54,8 +54,7 @@ export async function fetchAllDatabases(
 
   async function processBucket(
     dbType: HumanDatabaseType,
-    url: string,
-    retryCount: number
+    url: string
   ) {
     const cacheProfile = computeExplorerCacheProfile(dbType, defaultConfig);
     const cached = await readExplorerCache(posKey, cacheProfile);
@@ -68,10 +67,12 @@ export async function fetchAllDatabases(
       };
     }
 
-    const data = await fetchWithRetry(url, retryCount, true, "explorer");
-    if (!data) {
+    // AR.11: Explorer throws on give-up, so any result here is an answer.
+    const result = await requestApi("Explorer", url, { body: "json", headers: lichessHeaders(true) });
+    if (result.kind !== "answer") {
       throw new Error(`Required Lichess Explorer ${dbType} request failed for position ${posKey}`);
     }
+    const data = result.body;
 
     const chess = new Chess(fullFen);
     const validMoves: ExplorerMoveRow[] = [];
@@ -145,21 +146,21 @@ export async function fetchAllDatabases(
   const mastersUrl = `https://explorer.lichess.ovh/masters?fen=${encodeURIComponent(fullFen)}`;
   const skippedBucket = () => ({ moves: [], totalGames: 0, positionTotalGames: 0, opening: null, retrieval: "SKIPPED" as const });
   const mRes = requestedBuckets.includes("MASTERS")
-    ? await processBucket("MASTERS", mastersUrl, defaultConfig.api.lichessExplorer.retryAttempts)
+    ? await processBucket("MASTERS", mastersUrl)
     : skippedBucket();
 
   const eliteSpeeds = defaultConfig.explorerEliteSpeeds.join(',');
   const eliteRatings = defaultConfig.explorerEliteRatings.join(',');
   const eliteUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(fullFen)}&speeds=${eliteSpeeds}&ratings=${eliteRatings}`;
   const eRes = requestedBuckets.includes("ELITE")
-    ? await processBucket("ELITE", eliteUrl, defaultConfig.api.lichessExplorer.retryAttempts)
+    ? await processBucket("ELITE", eliteUrl)
     : skippedBucket();
 
   const amateurSpeeds = defaultConfig.explorerSpeeds.join(',');
   const amateurRatings = defaultConfig.explorerRatings.join(',');
   const amateurUrl = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(fullFen)}&speeds=${amateurSpeeds}&ratings=${amateurRatings}`;
   const aRes = requestedBuckets.includes("AMATEUR")
-    ? await processBucket("AMATEUR", amateurUrl, defaultConfig.api.lichessExplorer.retryAttempts)
+    ? await processBucket("AMATEUR", amateurUrl)
     : skippedBucket();
 
   return [mRes, eRes, aRes];

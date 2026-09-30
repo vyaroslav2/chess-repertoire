@@ -1,6 +1,6 @@
 import { Chess } from "chess.js";
 import { readRemoteEngineResult, saveRemoteEngineResult, type RemoteEngineEvaluation } from "../db/operations";
-import { fetchWithRetry, delay, GlobalState, LichessRateLimitError } from "../api/retry";
+import { delay, isApiOff, lichessHeaders, requestApi } from "../api/retry";
 import {
   getCpTolerance,
   verifyOrdinaryCpSnapshot,
@@ -138,33 +138,27 @@ export async function evaluateBlackMove(
   let lichessResult = await readRemoteEngineResult(fullFen, "LICHESS", lichessProfile);
   let lichessUnavailable = false;
 
-  if (lichessResult.status === "missing" && !GlobalState.lichessCloudEvalDisabled) {
-    // Ordinary flow without GlobalState.lichessCloudEvals bypass
-    try {
-      const cloudUrl = `https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(fullFen)}&multiPv=${defaultConfig.lichessCloudEvalMultiPv}`;
-      const cloudData = await fetchWithRetry(cloudUrl, defaultConfig.api.lichessCloudEval.retryAttempts, false, 'eval');
-      
-      if (cloudData && !cloudData.error) {
-        if (!Array.isArray(cloudData.pvs)) throw new Error("Malformed successful Lichess engine snapshot");
-        const evaluations: RemoteEngineEvaluation[] = cloudData.pvs.map((pv: any) => ({
-          uci: typeof pv.moves === "string" ? pv.moves.split(" ")[0] : "",
-          cp: pv.cp === undefined ? null : pv.cp,
-          mate: pv.mate === undefined ? null : pv.mate
-        }));
-        await saveRemoteEngineResult(fullFen, "LICHESS", lichessProfile, evaluations);
-        lichessResult = await readRemoteEngineResult(fullFen, "LICHESS", lichessProfile);
-      } else {
-        lichessUnavailable = true;
-        await saveRemoteEngineResult(fullFen, "LICHESS", lichessProfile, []);
-        lichessResult = await readRemoteEngineResult(fullFen, "LICHESS", lichessProfile);
-      }
-    } catch (e: any) {
-      if (e instanceof Error && (e.message.startsWith("Malformed successful") || e.message.startsWith("Invalid remote engine result"))) throw e;
-      if (e instanceof LichessRateLimitError) {
-        GlobalState.lichessCloudEvalDisabled = true;
-        console.warn("[WARNING] Lichess Cloud Eval remains rate-limited after the required cooldown. Disabling it for the rest of this run; using fallback sources instead.");
-      }
-      console.log("Error fetching Lichess engine eval:", e.message);
+  if (lichessResult.status === "missing" && !isApiOff("Cloud Eval")) {
+    const cloudUrl = `https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(fullFen)}&multiPv=${defaultConfig.lichessCloudEvalMultiPv}`;
+    const cloud = await requestApi("Cloud Eval", cloudUrl, { body: "json", headers: lichessHeaders(false) });
+
+    if (cloud.kind === "answer") {
+      const cloudData = cloud.body;
+      if (!cloudData || !Array.isArray(cloudData.pvs)) throw new Error("Malformed successful Lichess engine snapshot");
+      const evaluations: RemoteEngineEvaluation[] = cloudData.pvs.map((pv: any) => ({
+        uci: typeof pv.moves === "string" ? pv.moves.split(" ")[0] : "",
+        cp: pv.cp === undefined ? null : pv.cp,
+        mate: pv.mate === undefined ? null : pv.mate
+      }));
+      await saveRemoteEngineResult(fullFen, "LICHESS", lichessProfile, evaluations);
+      lichessResult = await readRemoteEngineResult(fullFen, "LICHESS", lichessProfile);
+    } else if (cloud.kind === "nothing") {
+      // AR.06: no cloud evaluation is a valid answer, cached as empty.
+      lichessUnavailable = true;
+      await saveRemoteEngineResult(fullFen, "LICHESS", lichessProfile, []);
+      lichessResult = await readRemoteEngineResult(fullFen, "LICHESS", lichessProfile);
+    } else {
+      // AR.12: a give-up is never cached.
       lichessUnavailable = true;
     }
   } else if (lichessResult.status === "missing") {
@@ -192,31 +186,35 @@ export async function evaluateBlackMove(
 
   const ensureChessDb = async () => {
     if (chessDbResult.status !== "missing" || chessDbUnavailable) return;
-    const chessdbUrl = `https://www.chessdb.cn/cdb.php?action=${defaultConfig.api.chessDb.queryMode}&board=${encodeURIComponent(fullFen)}`;
-    try {
-      const text = await fetchWithRetry(chessdbUrl, defaultConfig.api.chessDb.retryAttempts, false, 'chessdb');
-      if (text !== null) {
-        const evaluations: RemoteEngineEvaluation[] = text.includes("move:")
-          ? text.split("|").filter((row: string) => row.includes("move:")).map((row: string) => {
-              const match = row.match(/move:([^,]+),score:([^,]+)/);
-              if (!match || !/^-?\d+$/.test(match[2])) throw new Error("Malformed successful ChessDB engine snapshot");
-              return { uci: match[1], cp: -Number(match[2]), mate: null };
-            })
-          : [];
-        await saveRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile, evaluations);
-        chessDbResult = await readRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile);
-        if (chessDbResult.status === "success") {
-          chessDbOrdinarySnapshot = toOrdinaryCpSnapshot(chessDbResult.evaluations);
-        }
-      } else {
-        chessDbUnavailable = true;
-        await saveRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile, []);
-        chessDbResult = await readRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile);
-      }
-    } catch (e: any) {
-      if (e instanceof Error && (e.message.startsWith("Malformed successful") || e.message.startsWith("Invalid remote engine result"))) throw e;
-      console.log("Error fetching ChessDB engine eval:", e.message);
+    if (isApiOff("ChessDB")) {
       chessDbUnavailable = true;
+      return;
+    }
+    const chessdbUrl = `https://www.chessdb.cn/cdb.php?action=${defaultConfig.api.chessDb.queryMode}&board=${encodeURIComponent(fullFen)}`;
+    const chessDb = await requestApi("ChessDB", chessdbUrl, { body: "text" });
+    if (chessDb.kind !== "answer") {
+      // AR.12: a give-up is never cached.
+      chessDbUnavailable = true;
+      return;
+    }
+    const text: string = chessDb.body.trim();
+    let evaluations: RemoteEngineEvaluation[];
+    if (text === "unknown") {
+      evaluations = []; // AR.06
+    } else if (text.includes("move:")) {
+      evaluations = text.split("|").filter(row => row.includes("move:")).map(row => {
+        const match = row.match(/move:([^,]+),score:([^,]+)/);
+        if (!match || !/^-?\d+$/.test(match[2])) throw new Error("Malformed successful ChessDB engine snapshot");
+        return { uci: match[1], cp: -Number(match[2]), mate: null };
+      });
+    } else {
+      // AR.10: anything else is a malformed answer.
+      throw new Error(`Malformed successful ChessDB engine snapshot: ${text.slice(0, 80)}`);
+    }
+    await saveRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile, evaluations);
+    chessDbResult = await readRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile);
+    if (chessDbResult.status === "success") {
+      chessDbOrdinarySnapshot = toOrdinaryCpSnapshot(chessDbResult.evaluations);
     }
   };
 

@@ -91,8 +91,8 @@ function printConfiguration(): void {
   console.log(`Local CP tolerances: early=${defaultConfig.localToleranceCp.early}, middle=${defaultConfig.localToleranceCp.middle}, late=${defaultConfig.localToleranceCp.late}.`);
   console.log(`Black minimum weighted games: ${defaultConfig.minimumWeightedGames}; Masters weight: ${defaultConfig.mastersWeight}.`);
   console.log(`Repertoire-side smoothing: anchor games=${defaultConfig.anchorGames}; cautious prior score=${(defaultConfig.repertoireSidePrior * 100).toFixed(2)}%. In this Black repertoire, that is a ${(defaultConfig.repertoireSidePrior * 100).toFixed(2)}% Black score (equivalently ${(100 - defaultConfig.repertoireSidePrior * 100).toFixed(2)}% White score).`);
-  console.log(`Lichess Cloud: MultiPV=${defaultConfig.lichessCloudEvalMultiPv}; retries=${defaultConfig.api.lichessCloudEval.retryAttempts}. ChessDB retries=${defaultConfig.api.chessDb.retryAttempts}.`);
-  console.log(`Lichess request gate: one in-flight request at a time; minimum ${defaultConfig.apiRequestGapMs}ms between request starts; any HTTP 429 pauses all Lichess requests for at least ${defaultConfig.apiRetryDelayMs}ms.`);
+  console.log(`Lichess Cloud: MultiPV=${defaultConfig.lichessCloudEvalMultiPv}.`);
+  console.log(`API lanes: one request at a time per host; ${defaultConfig.apiRequestGapMs}ms after each answer; Cloud Eval waits ${defaultConfig.cloudEvalExtraGapMs}ms more; a 429, 5xx, network error or timeout pauses the lane for at least ${defaultConfig.apiRetryDelayMs}ms, then retries once.`);
   console.log(`Local Deep Stockfish: depth=${defaultConfig.localStockfishDepth}; MultiPV=${defaultConfig.localStockfishMultiPv}.`);
   console.log(`Explorer filters (fixed for this run): Elite speeds=${defaultConfig.explorerEliteSpeeds.join(",")}, ratings=${defaultConfig.explorerEliteRatings.join(",")}; Amateur speeds=${defaultConfig.explorerSpeeds.join(",")}, ratings=${defaultConfig.explorerRatings.join(",")}.`);
   console.log("White expansion requests only Masters metadata and Amateur moves; it never fetches or caches Elite. Black-response selection requests Masters plus Elite statistics.");

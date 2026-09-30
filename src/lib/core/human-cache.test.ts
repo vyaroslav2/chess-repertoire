@@ -207,13 +207,13 @@ test('DB.31 Explorer cache', async (t) => {
     assert.strictEqual((await read(posKey3, "MASTERS")).status, "empty", "Masters succeeded and was empty");
     assert.strictEqual((await read(posKey3, "ELITE")).status, "missing", "Elite failed and remains missing");
 
-    // A failed Amateur request must not become a successful empty row after Masters and Elite succeed.
+    // AR.11, AR.12: a failed Amateur request throws and must not become a successful empty row after Masters and Elite succeed.
     await prisma.positionCache.deleteMany();
     global.fetch = async (url: any) => {
       if (url.toString().includes("ratings=1600")) return new Response("Error", { status: 404 });
       return new Response(JSON.stringify({ moves: [] }));
     };
-    await assert.rejects(fetchAllDatabases(fen3), /Required Lichess Explorer AMATEUR request failed/);
+    await assert.rejects(fetchAllDatabases(fen3), /Explorer returned HTTP 404\./);
     assert.strictEqual((await read(posKey3, "MASTERS")).status, "empty", "Masters successful empty response remains cached");
     assert.strictEqual((await read(posKey3, "ELITE")).status, "empty", "Elite successful empty response remains cached");
     assert.strictEqual((await read(posKey3, "AMATEUR")).status, "missing", "Failed Amateur request must not create a row");

@@ -82,7 +82,7 @@ test('23. Local Deep profile tracks material search settings only', () => {
     assert.notStrictEqual(computeLocalEngineEvaluationProfile(defaultConfig), computeLocalEngineEvaluationProfile(changedMultiPv));
 
     const changedOperational = JSON.parse(JSON.stringify(defaultConfig));
-    changedOperational.api.networkRetryDelayMs += 1;
+    changedOperational.apiRetryDelayMs += 1;
     assert.strictEqual(computeLocalEngineEvaluationProfile(defaultConfig), computeLocalEngineEvaluationProfile(changedOperational));
 });
 
@@ -117,8 +117,8 @@ test('4. invalid counts rejected', () => {
 
 test('5. invalid duration rejected', () => {
     const cfg1 = JSON.parse(JSON.stringify(defaultConfig));
-    cfg1.api.networkRetryDelayMs = -100;
-    assert.throws(() => validateConfig(cfg1), /Invalid api.networkRetryDelayMs/);
+    cfg1.apiRequestGapMs = -100;
+    assert.throws(() => validateConfig(cfg1), /Invalid apiRequestGapMs/);
 });
 
 test('6. invalid engine depth/MultiPV rejected', () => {
@@ -141,18 +141,20 @@ test('6a. finite numbers validated', () => {
     assert.throws(() => validateConfig(cfg2), /Invalid apiToleranceCp.middle/);
 
     const cfg3 = JSON.parse(JSON.stringify(defaultConfig));
-    cfg3.api.networkRetryDelayMs = Infinity;
-    assert.throws(() => validateConfig(cfg3), /Invalid api.networkRetryDelayMs/);
+    cfg3.cloudEvalExtraGapMs = Infinity;
+    assert.throws(() => validateConfig(cfg3), /Invalid cloudEvalExtraGapMs/);
 });
 
-test('6b. zero retry attempts rejected', () => {
+test('6b. AR.03: zero request timeout rejected', () => {
     const cfg1 = JSON.parse(JSON.stringify(defaultConfig));
-    cfg1.api.lichessCloudEval.retryAttempts = 0;
-    assert.throws(() => validateConfig(cfg1), /Invalid api.lichessCloudEval.retryAttempts/);
+    cfg1.apiRequestTimeoutMs = 0;
+    assert.throws(() => validateConfig(cfg1), /Invalid apiRequestTimeoutMs/);
+});
 
-    const cfg2 = JSON.parse(JSON.stringify(defaultConfig));
-    cfg2.api.lichessExplorer.retryAttempts = 0;
-    assert.throws(() => validateConfig(cfg2), /Invalid api.lichessExplorer.retryAttempts/);
+test('6c. AR: retry settings not in generation-config are gone', () => {
+    assert.deepStrictEqual(Object.keys(defaultConfig.api).sort(), ['chessDb', 'wikibooks']);
+    assert.deepStrictEqual(Object.keys(defaultConfig.api.chessDb), ['queryMode']);
+    assert.deepStrictEqual(Object.keys(defaultConfig.api.wikibooks).sort(), ['maxLagSeconds', 'userAgent']);
 });
 
 test('7. shared move bands: 1/4 early, 5/8 middle, 9+ late', () => {
@@ -253,12 +255,12 @@ test('16. general config changes such as engine tolerance do not change the huma
     assert.strictEqual(profileA, profileB);
 });
 
-test('17. operational request settings such as retryAttempts/delays do not change the human explorer profile', () => {
+test('17. operational request settings such as delays do not change the human explorer profile', () => {
     
     const cfgA = JSON.parse(JSON.stringify(defaultConfig));
     const cfgB = JSON.parse(JSON.stringify(defaultConfig));
 
-    cfgB.api.lichessExplorer.retryAttempts = 99;
+    cfgB.apiRetryDelayMs = 999_999;
     cfgB.apiRequestGapMs = 5000;
 
     const profileA = computeExplorerRequestProfile(cfgA);
@@ -311,8 +313,8 @@ test('21. remote evaluation profile changes with material request shape', () => 
 
 test('22. remote evaluation profile ignores retry and delay settings', () => {
     const changed = JSON.parse(JSON.stringify(defaultConfig));
-    changed.api.lichessCloudEval.retryAttempts += 1;
-    changed.api.networkRetryDelayMs += 123;
+    changed.cloudEvalExtraGapMs += 1;
+    changed.apiRequestTimeoutMs += 123;
     changed.apiRetryDelayMs += 456;
     changed.apiRequestGapMs += 789;
     assert.strictEqual(computeRemoteEngineEvaluationProfile('LICHESS', defaultConfig), computeRemoteEngineEvaluationProfile('LICHESS', changed));

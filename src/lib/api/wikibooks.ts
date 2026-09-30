@@ -1,3 +1,6 @@
+import { defaultConfig } from "../core/config";
+import { requestApi } from "./retry";
+
 export type WikibooksResult =
   | { status: "DESCRIPTION"; text: string }
   | { status: "VALID_ABSENCE" }
@@ -7,42 +10,6 @@ type WikibooksDependencies = {
   fetch?: typeof fetch;
   wait?: (ms: number) => Promise<void>;
 };
-
-const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
-let requestQueue: Promise<void> = Promise.resolve();
-let nextRequestAt = 0;
-
-async function runPacedRequest<T>(request: () => Promise<T>, sleep: (ms: number) => Promise<void>): Promise<T> {
-  const previous = requestQueue;
-  let release!: () => void;
-  requestQueue = new Promise<void>(resolve => { release = resolve; });
-  await previous;
-  try {
-    const delay = Math.max(0, nextRequestAt - Date.now());
-    if (delay > 0) await sleep(delay);
-    const result = await request();
-    nextRequestAt = Date.now() + defaultConfig.api.wikibooks.minimumRequestIntervalMs;
-    return result;
-  } finally {
-    nextRequestAt = Math.max(nextRequestAt, Date.now() + defaultConfig.api.wikibooks.minimumRequestIntervalMs);
-    release();
-  }
-}
-
-function retryDelayMs(response: Response | null, attempt: number): number {
-  const retryAfter = response?.headers.get("Retry-After");
-  if (retryAfter) {
-    const seconds = Number(retryAfter);
-    if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
-    const dateMs = Date.parse(retryAfter);
-    if (Number.isFinite(dateMs)) return Math.max(0, dateMs - Date.now());
-  }
-  const config = defaultConfig.api.wikibooks;
-  const progressiveDelay = config.initialRetryDelayMs * Math.pow(config.retryBackoffMultiplier, attempt - 1);
-  return response && (response.status === 429 || response.status === 503)
-    ? Math.max(5000, progressiveDelay)
-    : progressiveDelay;
-}
 
 function parseResult(data: unknown): WikibooksResult {
   if (!data || typeof data !== "object") throw new Error("response is not an object");
@@ -70,28 +37,21 @@ export async function fetchWikibooksSnippet(history: string[], dependencies: Wik
     pagePath += i % 2 === 0 ? `/${moveNum}._${history[i]}` : `/${moveNum}...${history[i]}`;
   }
 
-  const request = dependencies.fetch ?? fetch;
-  const sleep = dependencies.wait ?? wait;
   const config = defaultConfig.api.wikibooks;
   const url = `https://en.wikibooks.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&maxlag=${config.maxLagSeconds}&titles=${encodeURIComponent(pagePath)}&format=json`;
-  let lastReason = "unknown failure";
+  const answer = await requestApi("Wikibooks", url, {
+    body: "json",
+    headers: { "User-Agent": config.userAgent },
+    fetch: dependencies.fetch,
+    wait: dependencies.wait
+  });
+  // AR.11, AR.12: a give-up leaves the node without text and is not cached.
+  if (answer.kind !== "answer") return { status: "TECHNICAL_FAILURE", reason: "Wikibooks is turned off for the rest of this run" };
 
-  for (let attempt = 1; attempt <= config.retryAttempts; attempt++) {
-    let response: Response | null = null;
-    try {
-      response = await runPacedRequest(() => request(url, {
-          headers: { "User-Agent": config.userAgent },
-          signal: AbortSignal.timeout(config.requestTimeoutMs)
-        }), sleep);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return parseResult(await response.json());
-    } catch (error) {
-      lastReason = error instanceof Error ? error.message : String(error);
-      if (attempt < config.retryAttempts) await sleep(retryDelayMs(response, attempt));
-    }
+  try {
+    return parseResult(answer.body);
+  } catch (error) {
+    // AR.10: a malformed answer is a hard error.
+    throw new Error(`Wikibooks returned a malformed answer: ${error instanceof Error ? error.message : String(error)}`);
   }
-
-  console.warn(`[WARNING] Wikibooks lookup failed after ${config.retryAttempts} attempts: ${lastReason}`);
-  return { status: "TECHNICAL_FAILURE", reason: lastReason };
 }
-import { defaultConfig } from "../core/config";

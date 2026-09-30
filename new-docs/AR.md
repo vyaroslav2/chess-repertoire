@@ -30,7 +30,7 @@ AR.04 **No prompts**: a request never waits for the user. The run carries on or 
 | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | AR.05 HTTP 200, answer readable.                                                                               | Return it. The caller caches it.                                                                                                                                                                                                                                       |
 | AR.06 A valid "nothing here": Cloud Eval 404 (no cloud evaluation), ChessDB `unknown`, Wikibooks missing page. | Not an error. No retry, no message. The caller caches it as empty, so it is not asked again ([[EW\|EW.07]], [[EW\|EW.08]]).                                                                                                                                            |
-| AR.07 HTTP 429, any 5xx, a network error or a timeout.                                                         | Log `"[WARNING] [api] returned [status or reason]. Pausing the [lane] lane for [n] s, then retrying once."` Pause the whole lane for `apiRetryDelayMs`[^1]. If the server sends a `Retry-After` header asking for longer, wait that long instead. Then retry once.[^2] |
+| AR.07 HTTP 429, any 5xx, a network error or a timeout.                                                         | Log `"[WARNING] [api] returned [status or reason]. Pausing the [lane] lane for [n] s, then retrying once."`[^3] Pause the whole lane for `apiRetryDelayMs`[^1]. If the server sends a `Retry-After` header asking for longer, wait that long instead. Then retry once.[^2] |
 | AR.08 The retry fails with any AR.07 case.                                                                     | Give up (AR.11).                                                                                                                                                                                                                                                       |
 | AR.09 Any other 4xx (400, 401, 403, a 404 not in AR.06).                                                       | Log `"[WARNING] [api] returned [status]. Not retrying."` A retry would get the same answer. Give up at once (AR.11).                                                                                                                                                   |
 | AR.10 HTTP 200, but the body is malformed.                                                                     | Hard error, no retry. Either the API has changed or our parser is wrong, so it must be fixed, not skipped. The error unwinds to [[S0\|S0.05]].                                                                                                                         |
@@ -48,7 +48,7 @@ AR.11 **What giving up means depends on the API:**
 
 AR.12 **A give-up is never cached.** Only a real answer (AR.05) or a valid "nothing here" (AR.06) is cached. So the next run asks again.
 
-AR.13 **Off for the rest of the run**: log `"[WARNING] [api] failed again after retry: [reason]. Turned off for the rest of this run."` Send that API no more requests in this run. Its cached answers are still used. An API that still fails after a long pause will not recover mid-run, and more requests only use up the allowance.
+AR.13 **Off for the rest of the run**: after a failed retry (AR.08), log `"[WARNING] [api] failed again after retry: [reason]. Turned off for the rest of this run."` Send that API no more requests in this run. Its cached answers are still used. An API that still fails after a long pause will not recover mid-run, and more requests only use up the allowance.
 
 
 [^1]: see [[generation-config]]
@@ -56,3 +56,4 @@ AR.13 **Off for the rest of the run**: log `"[WARNING] [api] failed again after 
 [^2]: The Lichess limit counts all requests from one account or IP, not each endpoint on its own. So a 429 on Cloud Eval pauses Explorer too, and the other way round.
 
 
+[^3]: [status or reason] is one of: `HTTP 429`, `HTTP 5xx` (any status), `a timeout`, `a network error ([message])`.

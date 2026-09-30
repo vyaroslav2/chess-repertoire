@@ -41,31 +41,15 @@ export interface Config {
     localStockfishDepth: number;
     localStockfishMultiPv: number;
     hardcodedBlackResponses: string[];
-    // Not in generation-config. Kept until AR, EW and EX are matched to their notes.
+    // Not in generation-config: the request shapes. Retries, gaps and timeouts follow AR.
     api: {
         wikibooks: {
-            retryAttempts: number;
-            initialRetryDelayMs: number;
-            retryBackoffMultiplier: number;
-            minimumRequestIntervalMs: number;
             maxLagSeconds: number;
-            requestTimeoutMs: number;
             userAgent: string;
-        };
-        lichessCloudEval: {
-            retryAttempts: number;
-        };
-        lichessExplorer: {
-            retryAttempts: number;
         };
         chessDb: {
             queryMode: "queryall";
-            retryAttempts: number;
         };
-        networkRetryDelayMs: number;
-        rateLimitRetryAttempts: number;
-        retryBackoffMultiplier: number;
-        maximumRetryDelayMs: number;
     };
 }
 
@@ -123,38 +107,13 @@ export const defaultConfig: Config = {
 
     api: {
         wikibooks: {
-            retryAttempts: 3,
-            initialRetryDelayMs: 1000,
-            retryBackoffMultiplier: 2,
-            minimumRequestIntervalMs: 1000,
             maxLagSeconds: 5,
-            requestTimeoutMs: 15000,
             userAgent: "chess-repertoire/0.1 (https://github.com/vyaroslav2/chess-repertoire) Wikibooks-opening-enrichment"
         },
-        // Lichess Cloud Evaluation API
-        // Guidance: https://lichess.org/api#tag/Chess-bot/operation/apiCloudEval
-        // Last checked: 2026-08
-        lichessCloudEval: {
-            retryAttempts: 10
-        },
-
-        // Lichess Explorer API (Masters and Lichess databases)
-        // Guidance: https://lichess.org/api#tag/Opening-Explorer
-        // Last checked: 2026-08
-        lichessExplorer: {
-            retryAttempts: 10
-        },
-
         // ChessDB request shape used for complete remote result snapshots.
         chessDb: {
-            queryMode: "queryall",
-            retryAttempts: 3
-        },
-
-        networkRetryDelayMs: 1000,
-        rateLimitRetryAttempts: 3,
-        retryBackoffMultiplier: 2,
-        maximumRetryDelayMs: 30000
+            queryMode: "queryall"
+        }
     }
 };
 
@@ -232,22 +191,10 @@ export function validateConfig(config: Config) {
     if (!Array.isArray(config.hardcodedBlackResponses) || config.hardcodedBlackResponses.some(s => typeof s !== 'string' || s.trim() === '')) throw new Error("Invalid hardcodedBlackResponses");
 
     // Validate API settings not yet covered by generation-config
-    if (!isPositiveInteger(config.api?.lichessCloudEval?.retryAttempts)) throw new Error("Invalid api.lichessCloudEval.retryAttempts");
-    if (!isPositiveInteger(config.api?.lichessExplorer?.retryAttempts)) throw new Error("Invalid api.lichessExplorer.retryAttempts");
     if (config.api?.chessDb?.queryMode !== "queryall") throw new Error("Invalid api.chessDb.queryMode");
-    if (!isPositiveInteger(config.api?.chessDb?.retryAttempts)) throw new Error("Invalid api.chessDb.retryAttempts");
-    if (!isNonNegative(config.api?.networkRetryDelayMs)) throw new Error("Invalid api.networkRetryDelayMs");
-    if (!isPositiveInteger(config.api?.rateLimitRetryAttempts)) throw new Error("Invalid api.rateLimitRetryAttempts");
-    if (!isNonNegative(config.api?.retryBackoffMultiplier) || config.api.retryBackoffMultiplier < 1) throw new Error("Invalid api.retryBackoffMultiplier");
-    if (!Number.isInteger(config.api?.maximumRetryDelayMs) || config.api.maximumRetryDelayMs < 0) throw new Error("Invalid api.maximumRetryDelayMs");
 
     const wikibooks = config.api?.wikibooks;
-    if (!isPositiveInteger(wikibooks?.retryAttempts)) throw new Error("Invalid api.wikibooks.retryAttempts");
-    if (!Number.isInteger(wikibooks?.initialRetryDelayMs) || wikibooks.initialRetryDelayMs < 0) throw new Error("Invalid api.wikibooks.initialRetryDelayMs");
-    if (!isNonNegative(wikibooks?.retryBackoffMultiplier) || wikibooks.retryBackoffMultiplier < 1) throw new Error("Invalid api.wikibooks.retryBackoffMultiplier");
-    if (!Number.isInteger(wikibooks?.minimumRequestIntervalMs) || wikibooks.minimumRequestIntervalMs < 0) throw new Error("Invalid api.wikibooks.minimumRequestIntervalMs");
     if (!isPositiveInteger(wikibooks?.maxLagSeconds)) throw new Error("Invalid api.wikibooks.maxLagSeconds");
-    if (!isPositiveInteger(wikibooks?.requestTimeoutMs)) throw new Error("Invalid api.wikibooks.requestTimeoutMs");
     if (typeof wikibooks?.userAgent !== "string" || wikibooks.userAgent.trim() === "") throw new Error("Invalid api.wikibooks.userAgent");
 }
 
