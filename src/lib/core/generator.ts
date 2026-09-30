@@ -27,6 +27,11 @@ import {
 
 type ResponseEvaluator = typeof evaluateBlackMove;
 
+// S2.02, S2.03: deliberately hardcoded.
+const userName = "Yaroslav";
+const repertoireTitle = "Black Universal Repertoire";
+const repertoireColour = "black";
+
 export type GenerateRepertoireDependencies = {
   repertoireId?: string;
   fetchDatabases?: typeof fetchAllDatabases;
@@ -361,6 +366,8 @@ export async function generateRepertoire(
   console.log("Initializing BFS Tree Generator...");
   
   const startTime = Date.now();
+  // S2.01: zeroed once per run. rareDroppedTotal and unaccountedDroppedTotal are summed from nodes.
+  const tinyDroppedTotal = 0;
   let totalPositionsProcessed = 0;
   let totalPositionsExpanded = 0;
   let totalWhiteMovesFound = 0;
@@ -382,12 +389,12 @@ export async function generateRepertoire(
     repertoire = await prisma.repertoire.findUnique({ where: { id: dependencies.repertoireId } });
     if (!repertoire) throw new Error(`Requested repertoire ${dependencies.repertoireId} does not exist`);
   } else {
-    let user = await prisma.user.findUnique({ where: { username: "Yaroslav" } });
-    if (!user) { user = await prisma.user.create({ data: { username: "Yaroslav" } }); }
-    repertoire = await prisma.repertoire.findFirst({ where: { title: "Black Universal Repertoire", userId: user.id } });
+    let user = await prisma.user.findUnique({ where: { username: userName } });
+    if (!user) { user = await prisma.user.create({ data: { username: userName } }); }
+    repertoire = await prisma.repertoire.findFirst({ where: { title: repertoireTitle, userId: user.id } });
     if (!repertoire) {
       repertoire = await prisma.repertoire.create({
-        data: { title: "Black Universal Repertoire", color: "black", userId: user.id }
+        data: { title: repertoireTitle, color: repertoireColour, userId: user.id }
       });
     }
   }
@@ -399,6 +406,9 @@ export async function generateRepertoire(
   try {
   await prisma.$transaction(async tx => {
     await tx.repertoire.update({ where: { id: repertoire.id }, data: { generationStatus: "GENERATING" } });
+    // S2.04: wipe the tree (nodes, moves) and the Position table built from it. Caches survive (DB.30).
+    await tx.position.deleteMany({ where: { repertoireId: repertoire.id } });
+    await tx.repertoireMove.deleteMany({ where: { repertoireId: repertoire.id } });
     await tx.repertoireNode.deleteMany({ where: { repertoireId: repertoire.id } });
   });
 
@@ -908,6 +918,7 @@ export async function generateRepertoire(
     totalTranspositions,
     totalRepetitionStops,
     totalMissingWhiteMoves,
+    tinyDroppedTotal,
   };
   } catch (error) {
     try {
