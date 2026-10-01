@@ -704,19 +704,21 @@ export async function createOpponentMove(data: {
   });
 }
 
-const NOT_REPETITION = { OR: [{ stopReason: null }, { stopReason: { not: "Repetition" } }] };
+/** HM.24, HM.29, HM.33: the White moves that end the route at their own node. */
+export const WHITE_MOVE_ENDINGS = ["Too rare", "Game over", "Repetition"] as const;
+export type WhiteMoveEnding = typeof WHITE_MOVE_ENDINGS[number];
 
-/** HM.04: a dropped move's node is only an ending, never a route owner or ancestor. */
-export const NOT_TOO_RARE_NODE = { incomingMoves: { none: { stopReason: "Too rare" } } };
+/** A node whose White move ended the route is only an ending, never a route owner or ancestor. */
+export const NOT_WHITE_MOVE_ENDING_NODE = { incomingMoves: { none: { stopReason: { in: [...WHITE_MOVE_ENDINGS] } } } };
 
 /**
- * What arrives at a node by every non-repetition route: each incoming White move
+ * What arrives at a node by every route: each incoming White move
  * carries its source's cumProb times moveProb; a Black move carries its source's cumProb.
  * `tooRare` marks a dropped move's node, which holds what arrives in rareDropped (HM.23).
  */
 export async function sumIncomingRouteProb(client: DbClient, nodeId: string) {
   const incoming = await client.repertoireMove.findMany({
-    where: { toNodeId: nodeId, ...NOT_REPETITION },
+    where: { toNodeId: nodeId },
     include: { fromNode: { select: { cumProb: true } } }
   });
   const sum = incoming.reduce((total, edge) => total + (edge.playerTurn === "OPPONENT"
@@ -753,7 +755,9 @@ export async function propagateRepertoireProbabilities(repertoireId: string, sta
       if (!source || source.repertoireId !== repertoireId) continue;
       const outgoing = await tx.repertoireMove.findMany({ where: { fromNodeId: sourceId } });
       for (const edge of outgoing) {
-        if (edge.stopReason === "Repetition") continue;
+        // A Black repetition has no destination. A White repetition has its own node,
+        // an ending that keeps its cumProb; nothing goes back to the earlier node (HM.32).
+        if (edge.stopReason === "Repetition" && edge.toNodeId === null) continue;
         if (edge.toNodeId === null) throw new Error("Non-repetition repertoire move is missing its destination");
         const { sum: cumProb, tooRare } = await sumIncomingRouteProb(tx, edge.toNodeId);
         const destination = await tx.repertoireNode.findUnique({ where: { id: edge.toNodeId } });

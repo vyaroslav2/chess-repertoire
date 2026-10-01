@@ -518,7 +518,7 @@ function installBlockFormatter(write: (...args: unknown[]) => void): () => void 
       write(`[LIVE COUNTER] Transpositions: +1 => ${liveCounters.transpositions} total.`);
       return;
     }
-    if (normalized.startsWith("[REPETITION STOP]")) {
+    if (normalized.startsWith("[REPETITION]")) {
       liveCounters.repetitions++;
       pendingCandidate = false;
       write(normalized);

@@ -186,13 +186,9 @@ export async function replaceResponseBranch(input: ReplaceResponseBranchInput) {
   }
   const newPgn = `${oldResponse.fromNode.displayPgn ? `${oldResponse.fromNode.displayPgn} ` : ""}${chessMove.san}`;
   const newHistory = `${oldResponse.fromNode.history ? `${oldResponse.fromNode.history} ` : ""}${input.newUci}`;
-  // Position keys omit move clocks, whereas a persisted edge must retain the
-  // exact FullFen produced by its UCI.  Only that exact state can be reused as
-  // this edge's destination.
-  const existingDestinationNode = await tx.repertoireNode.findFirst({ where: { repertoireId, fullFen: canonicalFullFen } });
-  const isRepetition = existingDestinationNode !== null && (existingDestinationNode.history === "" ||
-    (oldResponse.fromNode.history?.startsWith(`${existingDestinationNode.history} `) ?? false));
-  let newDestinationNode = existingDestinationNode;
+  // Black's reply never stops on a repetition or transposition: it always lands on
+  // this route's own node. HM.30 and HM.34 catch the White moves that follow.
+  let newDestinationNode = await tx.repertoireNode.findFirst({ where: { repertoireId, history: newHistory } });
   if (!newDestinationNode) {
     newDestinationNode = await tx.repertoireNode.create({
       data: {
@@ -202,12 +198,11 @@ export async function replaceResponseBranch(input: ReplaceResponseBranchInput) {
     });
     await claimPosition(tx, repertoireId, posKey, newDestinationNode.id);
   }
-  const isTransposition = !isRepetition && newDestinationNode.history !== newHistory;
   const newResponse = await tx.repertoireMove.create({
     data: {
       repertoireId,
       fromNodeId: oldResponse.fromNodeId,
-      toNodeId: isRepetition ? null : newDestinationNode.id,
+      toNodeId: newDestinationNode.id,
       san: chessMove.san,
       uci: input.newUci,
       playerTurn: "RESPONSE",
@@ -226,7 +221,7 @@ export async function replaceResponseBranch(input: ReplaceResponseBranchInput) {
       moveOrigin: input.newMoveOrigin,
       deepVerified: input.newDeepVerified,
       moveProb: null,
-      stopReason: isRepetition ? "Repetition" : isTransposition ? "Transposition" : null
+      stopReason: null
     }
   });
   await tx.repertoirePositionStat.upsert({
@@ -272,7 +267,7 @@ export async function replaceResponseBranch(input: ReplaceResponseBranchInput) {
     removedMoveCount: movesToDelete.size,
     invalidatedExternalSourceNodeIds,
     createdResponseId: newResponse.id,
-    createdDestinationNodeId: isRepetition ? null : newDestinationNode.id,
+    createdDestinationNodeId: newDestinationNode.id,
     createdDestinationFullFen: newDestinationNode.fullFen,
     createdDestinationPgn: newDestinationNode.displayPgn,
     replacementUci: newResponse.uci!,

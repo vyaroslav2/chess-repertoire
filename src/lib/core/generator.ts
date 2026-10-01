@@ -130,20 +130,6 @@ async function resolveOpeningMetadata(
   return { status: parent.status, eco: parent.eco, openingName: parent.openingName };
 }
 
-async function persistOpeningMetadataForHistory(
-  repertoireId: string,
-  history: string,
-  opening: ExplorerOpening | null
-) {
-  const state = await resolveOpeningMetadata(repertoireId, history, opening);
-  await prisma.openingMetadataHistoryCache.upsert({
-    where: { repertoireId_history: { repertoireId, history } },
-    update: state,
-    create: { repertoireId, history, ...state }
-  });
-  return state;
-}
-
 async function persistOpeningMetadata(nodeId: string, opening: ExplorerOpening | null) {
   const node = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: nodeId }, select: { repertoireId: true, history: true } });
   const state = await resolveOpeningMetadata(node.repertoireId, node.history, opening);
@@ -609,9 +595,20 @@ export async function generateRepertoire(
       const canonicalWhiteMove = canonicalOpponentCandidates[candidateIndex];
       const reconciledOpponent = reconciledOpponentByUci.get(canonicalWhiteMove.uci);
       if (!reconciledOpponent) throw new Error(`Reconciled OPPONENT branch ${canonicalWhiteMove.uci} is missing`);
-      if (canonicalWhiteMove.dropped) {
-        // HM.04: a dropped move keeps its node but gets no Black reply. DB.06 rule 4 names it.
-        await ensureNodeOpeningMetadata(reconciledOpponent.destinationNodeId!, rebuildOpeningMetadataCache, "NOT_FETCHED", fetchOpeningMetadata);
+      if (reconciledOpponent.ending) {
+        // HM.24, HM.29, HM.33: the move keeps its node but gets no Black reply. DB.06 rule 4 names it.
+        const endingNodeId = reconciledOpponent.destinationNodeId!;
+        await ensureNodeOpeningMetadata(endingNodeId, rebuildOpeningMetadataCache, "NOT_FETCHED", fetchOpeningMetadata);
+        const endingRoute = canonicalWhiteMove.destinationPgn;
+        if (reconciledOpponent.ending === "Too rare") {
+          const { rareDropped } = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: endingNodeId } });
+          console.log(`[TOO RARE] route=${endingRoute}; rareDropped=${(rareDropped * 100).toFixed(3)}%`);
+        } else if (reconciledOpponent.ending === "Game over") {
+          console.log(`[GAME OVER] route=${endingRoute}; cumProb=${(reconciledOpponent.effectiveCumProb * 100).toFixed(3)}%`);
+        } else {
+          console.log(`[REPETITION] route=${endingRoute}; repeated=${reconciledOpponent.repeatedPgn || "(root)"}; cumProb=${(reconciledOpponent.effectiveCumProb * 100).toFixed(3)}%`);
+          totalRepetitionStops++;
+        }
         continue;
       }
       console.log(`\nEvaluating White Move: ${whiteMove.san} (Reason: ${whiteMove.reason}, Prob: ${whiteMove.probability ? (whiteMove.probability*100).toFixed(1) : 0}%)`);
@@ -620,20 +617,8 @@ export async function generateRepertoire(
       const resultingBudget = runtime.config.depthBudget[resultingBand];
       console.log(`[BRANCH PROBABILITY] route probability before White move=${(canonicalSourceNode.cumProb * 100).toFixed(3)}%; White move share at this position=${(whiteMove.probability * 100).toFixed(3)}%; resulting route probability=${(resultingProbability * 100).toFixed(3)}%; band=${resultingBand}; dynamic budget=${resultingBudget} full moves; generation cap=${maxDepth}; effective depth limit=${Math.min(resultingBudget, maxDepth)}.`);
       const newPgn = canonicalWhiteMove.destinationPgn;
-      const reconciledEdge = await prisma.repertoireMove.findUnique({ where: { id: reconciledOpponent.edgeId } });
-      if (reconciledEdge?.stopReason === "Repetition") {
-        await persistOpeningMetadataForHistory(
-          repertoire.id,
-          canonicalWhiteMove.destinationHistory,
-          await fetchOpeningMetadata(canonicalWhiteMove.destinationFullFen)
-        );
-        console.log(`[REPETITION STOP] route=${canonicalWhiteMove.destinationHistory}; repeated=${reconciledOpponent.destinationCanonicalPgn || "(root)"}; repeatingMove=${canonicalWhiteMove.san}; terminalProbability=${reconciledOpponent.effectiveCumProb}; result=move retained and route terminated without a destination edge.`);
-        totalRepetitionStops++;
-        console.log(`[QUEUE] Not enqueued: ${newPgn}; reason=repetition stop; waiting=${queue.length}`);
-        continue;
-      }
       if (reconciledOpponent.destinationNodeId === null) {
-        throw new Error("Non-repetition OPPONENT branch is missing its destination");
+        throw new Error("OPPONENT branch is missing its destination");
       }
       const posAfterWhiteNode = await prisma.repertoireNode.findUnique({
         where: { id: reconciledOpponent.destinationNodeId }
@@ -764,17 +749,10 @@ export async function generateRepertoire(
           });
           if (explanationUpdate.count !== 1) throw new Error("Reconciled RESPONSE stat changed before explanation update");
       } else {
-          let posAfterBlackNode = await getRepertoireNode(repertoire.id, blackHistory) ??
-            await prisma.repertoireNode.findFirst({
-              // `positionKey` deliberately omits the halfmove/fullmove fields,
-              // but an edge must still point at the exact FullFen produced by
-              // its UCI move.  A same-key node with different clocks is a
-              // separate route node; treating it as this edge's destination
-              // breaks the move/FEN integrity check in createResponseMove.
-              where: { repertoireId: repertoire.id, fullFen: selectedDestinationFen }
-            });
-          const responseIsRepetition = posAfterBlackNode !== null &&
-            (posAfterBlackNode.history === "" || posAfterWhiteNode.history.startsWith(`${posAfterBlackNode.history} `));
+          // Black's reply never stops on a repetition or transposition: it always lands on
+          // this route's own node and goes on to the queue. If the position repeats, the
+          // White moves from it are caught by HM.30 and HM.34, so no card is duplicated.
+          let posAfterBlackNode = await getRepertoireNode(repertoire.id, blackHistory);
           if (!posAfterBlackNode) {
               // HM.06: routeProb follows the route only (x 100% for Black's reply); cumProb carries any cascade.
               posAfterBlackNode = await createRepertoireNode(repertoire.id, selectedDestinationFen, blackHistory, posAfterWhiteNode.routeProb, {
@@ -782,21 +760,21 @@ export async function generateRepertoire(
                 siblingIndex: 0,
                 cumProb: effectiveCanonicalProb
               });
-          } else if (!responseIsRepetition) {
+          } else {
               await prisma.repertoireNode.update({
                   where: { id: posAfterBlackNode.id },
                   data: { cumProb: Math.max(posAfterBlackNode.cumProb, effectiveCanonicalProb) }
               });
           }
 
-          resultingDestinationId = responseIsRepetition ? null : posAfterBlackNode.id;
+          resultingDestinationId = posAfterBlackNode.id;
           resultingDestinationFen = posAfterBlackNode.fullFen;
           resultingDestinationPgn = posAfterBlackNode.displayPgn;
           resultingDestinationHistory = posAfterBlackNode.history;
 
           const createdResponse = await createResponseMove({
               fromNodeId: posAfterWhiteNode.id,
-              toNodeId: responseIsRepetition ? null : posAfterBlackNode.id,
+              toNodeId: posAfterBlackNode.id,
               uci: algoResult.selectedUci,
               san: algoResult.selectedMoveSan,
               cp: algoResult.cp,
@@ -807,9 +785,6 @@ export async function generateRepertoire(
               moveOrigin: algoResult.moveOrigin,
               deepVerified: algoResult.deepVerified,
               localEvaluationProfile: algoResult.localEvaluationProfile
-              ,stopReason: responseIsRepetition
-                ? "Repetition"
-                : posAfterBlackNode.history !== blackHistory ? "Transposition" : null
           });
 
           const emptyCard = createEmptyCard();
@@ -838,24 +813,8 @@ export async function generateRepertoire(
           });
       }
 
-      const resultingResponse = await prisma.repertoireMove.findFirst({
-        where: { fromNodeId: posAfterWhiteNode.id, playerTurn: "RESPONSE" }
-      });
-      if (resultingResponse?.stopReason === "Repetition") {
-        await persistOpeningMetadataForHistory(
-          repertoire.id,
-          blackHistory,
-          await fetchOpeningMetadata(selectedDestinationFen)
-        );
-        console.log(`[REPETITION STOP] route=${blackHistory}; repeated=${resultingDestinationHistory || "(root)"}; repeatingMove=${algoResult.selectedMoveSan}; terminalProbability=${effectiveCanonicalProb}; result=target move retained and route terminated without a destination edge.`);
-        reconciledResponseNodeIds.add(posAfterWhiteNode.id);
-        totalRepetitionStops++;
-        console.log(`[QUEUE] Not enqueued: ${blackHistory}; reason=repetition stop; waiting=${queue.length}`);
-        continue;
-      }
-
       if (!resultingDestinationId || !resultingDestinationFen || resultingDestinationPgn === null || resultingDestinationHistory === null) {
-        throw new Error("Non-repetition RESPONSE is missing its destination");
+        throw new Error("RESPONSE is missing its destination");
       }
       await propagateRepertoireProbabilities(repertoire.id, resultingDestinationId);
       // Its opening metadata is set when it is dequeued: after the Explorer fetch (DB.06 rule 1),

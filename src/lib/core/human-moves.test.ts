@@ -10,11 +10,13 @@ import { canonicalizeOpponentCandidates, readExpectedOpponentEdges, reconcileOpp
 const START_FEN = new Chess().fen();
 const near = (actual: number, expected: number) => Math.abs(actual - expected) < defaultConfig.probabilityTolerance;
 
-function amateurMove(san: string, games: number) {
-  const chess = new Chess();
+function amateurMove(san: string, games: number, fen = START_FEN) {
+  const chess = new Chess(fen);
   const move = chess.move(san);
   return { san, uci: move.lan, games, white: games, draws: 0, black: 0 };
 }
+
+const boardAndTurn = (fen: string) => fen.split(" ").slice(0, 2).join(" ");
 
 async function captureLog<T>(run: () => Promise<T>): Promise<{ result: T; lines: string[] }> {
   const lines: string[] = [];
@@ -82,9 +84,10 @@ describe("HM generator", () => {
   });
   const fenAfter = (san: string) => { const chess = new Chess(); chess.move(san); return chess.fen(); };
 
-  function evaluator(calls: string[]) {
+  function evaluator(calls: string[], replies: Record<string, string> = {}) {
     return async (fen: string, chess: Chess) => {
-      const reply = chess.moves({ verbose: true })[0];
+      const legal = chess.moves({ verbose: true });
+      const reply = legal.find(move => move.san === replies[boardAndTurn(fen)]) ?? legal[0];
       calls.push(fen);
       return {
         selectedUci: reply.lan, selectedMoveSan: reply.san, cp: -10, mate: null,
@@ -109,9 +112,11 @@ describe("HM generator", () => {
     amateurMove("e4", 40), amateurMove("d4", 27), amateurMove("c4", 27), amateurMove("g3", 3), amateurMove("b3", 3)
   ];
 
-  it("HM.04: a dropped move gets a node with cumProb 0 and its arriving probability in rareDropped", async () => {
+  it("HM.04 HM.21 HM.23 HM.24: a dropped move gets a node with cumProb 0, its arriving probability in rareDropped, and a [TOO RARE] log", async () => {
     const calls: string[] = [];
-    await runRoot(rootMoves(), calls);
+    const { lines } = await runRoot(rootMoves(), calls);
+    assert.ok(lines.includes("[TOO RARE] route=b3; rareDropped=3.000%"));
+    assert.ok(lines.includes("[TOO RARE] route=g3; rareDropped=3.000%"));
     for (const san of ["b3", "g3"]) {
       const node = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, displayPgn: san } });
       assert.equal(node.cumProb, 0);
@@ -191,5 +196,177 @@ describe("HM generator", () => {
     assert.equal(after.cumProb, 0);
     assert.ok(near(after.rareDropped, 0.016));
     assert.ok(near(after.routeProb, 0.01));
+  });
+
+  async function reconcileFrom(
+    source: Awaited<ReturnType<typeof createRepertoireNode>>,
+    rows: Array<{ san: string; probability: number }>
+  ) {
+    return reconcileOpponentBranches({
+      repertoireId,
+      expectedSource: {
+        id: source.id, repertoireId, fullFen: source.fullFen, positionKey: source.positionKey,
+        displayPgn: source.displayPgn, routeProb: source.routeProb, cumProb: source.cumProb
+      },
+      expectedStoredEdges: await readExpectedOpponentEdges(source.id),
+      recomputedCandidates: canonicalizeOpponentCandidates({
+        sourceFullFen: source.fullFen, sourcePgn: source.displayPgn, sourceHistory: source.history,
+        sourceRouteProb: source.routeProb, sourceCumProb: source.cumProb, candidates: rows
+      })
+    });
+  }
+
+  it("HM.25: a new White-move node starts with cumProb = parent.cumProb * moveProb; routeProb follows the route", async () => {
+    const source = await createRepertoireNode(repertoireId, START_FEN, "", 0.5, { cumProb: 0.8 });
+    const { branches: [e4] } = await reconcileFrom(source, [{ san: "e4", probability: 0.5 }]);
+    const node = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: e4.destinationNodeId! } });
+    assert.ok(near(node.cumProb, 0.4));
+    assert.ok(near(node.routeProb, 0.25));
+    assert.equal(e4.ending, null);
+  });
+
+  // 1.e4 f6 2.d4 g5: White to move, and 3.Qh5 is mate.
+  const mateFen = (() => { const chess = new Chess(); for (const san of ["e4", "f6", "d4", "g5"]) chess.move(san); return chess.fen(); })();
+
+  it("HM.26 HM.27 HM.28 HM.29: a White move that ends the game keeps its node and cumProb, gets no Black reply, and logs [GAME OVER]", async () => {
+    const calls: string[] = [];
+    const { lines } = await captureLog(() => generateRepertoire(mateFen, 1, {
+      repertoireId, ...common,
+      responseEvaluator: evaluator(calls) as any,
+      fetchDatabases: (async (fen: string) => fen === mateFen
+        ? [empty, empty, amateurAt([amateurMove("Qh5#", 40, mateFen), amateurMove("Nc3", 60, mateFen)])]
+        : [empty, empty, empty]) as any
+    }));
+    assert.ok(lines.includes("[GAME OVER] route=Qh5#; cumProb=40.000%"));
+    const node = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, displayPgn: "Qh5#" } });
+    assert.ok(near(node.cumProb, 0.4));
+    assert.equal(node.rareDropped, 0);
+    assert.equal(node.transposesTo, null);
+    const edge = await prisma.repertoireMove.findFirstOrThrow({ where: { toNodeId: node.id } });
+    assert.equal(edge.stopReason, "Game over");
+    assert.equal(await prisma.repertoireMove.count({ where: { fromNodeId: node.id } }), 0);
+    assert.ok(!calls.includes(node.fullFen));
+    assert.equal(calls.length, 1); // Only Nc3 reaches EW (HM.36).
+  });
+
+  it("HM.30 HM.31 HM.32 HM.33 HM.N.04: a White move that repeats this route gets its own ending node and logs [REPETITION]", async () => {
+    const play = (sans: string[]) => { const chess = new Chess(); for (const san of sans) chess.move(san); return boardAndTurn(chess.fen()); };
+    const whiteMoves: Record<string, string> = {
+      [play([])]: "Nf3",
+      [play(["Nf3", "Nf6"])]: "Ne5",
+      [play(["Nf3", "Nf6", "Ne5", "Ng8"])]: "Nf3"
+    };
+    const calls: string[] = [];
+    const { lines } = await captureLog(() => generateRepertoire(START_FEN, 3, {
+      repertoireId, ...common,
+      responseEvaluator: evaluator(calls, { [play(["Nf3"])]: "Nf6", [play(["Nf3", "Nf6", "Ne5"])]: "Ng8" }) as any,
+      fetchDatabases: (async (fen: string) => {
+        const san = whiteMoves[boardAndTurn(fen)];
+        if (!san) return [empty, empty, empty];
+        return [empty, empty, amateurAt([amateurMove(san, 100, fen)])];
+      }) as any
+    }));
+    assert.ok(lines.includes("[REPETITION] route=Nf3 Nf6 Ne5 Ng8 Nf3; repeated=Nf3; cumProb=100.000%"));
+    const node = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, displayPgn: "Nf3 Nf6 Ne5 Ng8 Nf3" } });
+    const earlier = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, displayPgn: "Nf3" } });
+    assert.equal(node.positionKey, earlier.positionKey);
+    assert.ok(near(node.cumProb, 1));
+    assert.equal(node.transposesTo, null);
+    // HM.32: the earlier node keeps what it had; nothing is passed back to it.
+    assert.ok(near(earlier.cumProb, 1));
+    const edge = await prisma.repertoireMove.findFirstOrThrow({ where: { toNodeId: node.id } });
+    assert.equal(edge.stopReason, "Repetition");
+    assert.equal(await prisma.repertoireMove.count({ where: { fromNodeId: node.id } }), 0);
+    assert.ok(!calls.includes(node.fullFen));
+    const owner = await prisma.position.findUniqueOrThrow({ where: { repertoireId_positionKey: { repertoireId, positionKey: node.positionKey } } });
+    assert.equal(owner.nodeId, earlier.id);
+  });
+
+  const play = (sans: string[]) => { const chess = new Chess(); for (const san of sans) chess.move(san); return boardAndTurn(chess.fen()); };
+
+  async function runScripted(whiteMoves: Record<string, Array<[string, number]>>, replies: Record<string, string>, maxDepth: number) {
+    const calls: string[] = [];
+    const fetched: string[] = [];
+    const { lines } = await captureLog(() => generateRepertoire(START_FEN, maxDepth, {
+      repertoireId, ...common,
+      responseEvaluator: evaluator(calls, replies) as any,
+      fetchDatabases: (async (fen: string) => {
+        fetched.push(boardAndTurn(fen));
+        const moves = whiteMoves[boardAndTurn(fen)];
+        if (!moves) return [empty, empty, empty];
+        return [empty, empty, amateurAt(moves.map(([san, games]) => amateurMove(san, games, fen)))];
+      }) as any
+    }));
+    return { calls, fetched, lines };
+  }
+
+  it("RE.09 HM.30: Black's reply that repeats a position is not stopped; it is queued and the next White move is the repetition", async () => {
+    const { calls, fetched, lines } = await runScripted(
+      { [play([])]: [["Nf3", 100]], [play(["Nf3", "Nf6"])]: [["Ng1", 100]] },
+      { [play(["Nf3"])]: "Nf6", [play(["Nf3", "Nf6", "Ng1"])]: "Ng8" },
+      3
+    );
+    const reply = await prisma.repertoireMove.findFirstOrThrow({ where: { repertoireId, playerTurn: "RESPONSE", san: "Ng8" } });
+    const repeated = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, displayPgn: "Nf3 Nf6 Ng1 Ng8" } });
+    assert.equal(reply.stopReason, null);
+    assert.equal(reply.toNodeId, repeated.id);
+    assert.equal(repeated.positionKey, (await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, history: "" } })).positionKey);
+    // The repeated start position is taken off the queue, and its White move ends as a repetition.
+    assert.equal(fetched.filter(position => position === play([])).length, 2);
+    assert.ok(lines.includes("[REPETITION] route=Nf3 Nf6 Ng1 Ng8 Nf3; repeated=Nf3; cumProb=100.000%"));
+    assert.equal(calls.length, 2);
+    assert.ok(!lines.some(line => line.startsWith("[REPETITION STOP]")));
+  });
+
+  it("RE.09: Black's reply that reaches a position another route reached is not stopped; each route keeps its own node", async () => {
+    // 1.e4 d6 2.Nf3 e6 and 1.Nf3 e6 2.e4 d6 reach the same FullFen, clocks included.
+    const { fetched } = await runScripted(
+      {
+        [play([])]: [["e4", 60], ["Nf3", 40]],
+        [play(["e4", "d6"])]: [["Nf3", 100]],
+        [play(["Nf3", "e6"])]: [["e4", 100]]
+      },
+      { [play(["e4"])]: "d6", [play(["e4", "d6", "Nf3"])]: "e6", [play(["Nf3"])]: "e6", [play(["Nf3", "e6", "e4"])]: "d6" },
+      3
+    );
+    const first = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, displayPgn: "e4 d6 Nf3 e6" } });
+    const second = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, displayPgn: "Nf3 e6 e4 d6" } });
+    assert.equal(first.fullFen, second.fullFen);
+    assert.notEqual(first.id, second.id);
+    const responses = await prisma.repertoireMove.findMany({ where: { repertoireId, playerTurn: "RESPONSE" } });
+    assert.equal(responses.length, 4);
+    assert.ok(responses.every(response => response.stopReason === null && response.toNodeId !== null));
+    // Both routes reach the queue.
+    assert.equal(fetched.filter(position => position === boardAndTurn(first.fullFen)).length, 2);
+  });
+
+  it("HM.32: a cascade into the source raises the repetition node's cumProb, never the earlier node's", async () => {
+    let parent = await createRepertoireNode(repertoireId, START_FEN, "", 1);
+    const nodes = [];
+    const chess = new Chess();
+    const sans = ["Nf3", "Nf6", "Ne5", "Ng8"];
+    for (let i = 0; i < sans.length; i++) {
+      const move = chess.move(sans[i]);
+      parent = await createRepertoireNode(repertoireId, chess.fen(), `${parent.history ? `${parent.history} ` : ""}${move.lan}`, 0.5, {
+        displayPgn: sans.slice(0, i + 1).join(" ")
+      });
+      nodes.push(parent);
+    }
+    const [earlier] = nodes;
+    const source = nodes[nodes.length - 1];
+    const result = await reconcileFrom(source, [{ san: "Nf3", probability: 0.6 }, { san: "e4", probability: 0.4 }]);
+    const repetition = result.branches.find(branch => branch.san === "Nf3")!;
+    const e4 = result.branches.find(branch => branch.san === "e4")!;
+    assert.equal(repetition.ending, "Repetition");
+    assert.equal(repetition.repeatedPgn, "Nf3");
+    assert.equal(e4.ending, null);
+    assert.ok(near(repetition.effectiveCumProb, 0.3));
+
+    await prisma.repertoireNode.update({ where: { id: source.id }, data: { cumProb: 0.9 } });
+    await propagateRepertoireProbabilities(repertoireId, source.id);
+    const after = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: repetition.destinationNodeId! } });
+    assert.ok(near(after.cumProb, 0.54));
+    assert.ok(near(after.routeProb, 0.3));
+    assert.ok(near((await prisma.repertoireNode.findUniqueOrThrow({ where: { id: earlier.id } })).cumProb, 0.5));
   });
 });
