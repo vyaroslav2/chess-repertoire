@@ -5,7 +5,6 @@ import {
   createRepertoireNode,
   createResponseMove,
   ensureRepertoireNodeWikibooks,
-  propagateRepertoireProbabilities,
   responseHumanEvidence,
   validateOpeningMetadataState,
   type OpeningMetadataState
@@ -14,6 +13,7 @@ import { parseFullFen, positionKeyFromFen } from "./fen";
 import { fetchAllDatabases, fetchMastersOpeningMetadata, pickExplorerOpening, type ExplorerOpening } from "../api/lichess";
 import { defaultConfig, createRuntimeConfig, getProbabilityBand } from "../core/config";
 import { selectWhiteCandidates, evaluateBlackMove } from "./evaluator";
+import { runCascade, type CascadeRunState } from "./cascade";
 import { reconcileExistingResponse } from "./rm-reconciliation";
 import { delay } from "../api/retry";
 import { UserRequestedStopError } from "../api/retry";
@@ -353,7 +353,7 @@ export async function generateRepertoire(
   
   const startTime = Date.now();
   // S2.01: zeroed once per run. rareDroppedTotal and unaccountedDroppedTotal are summed from nodes.
-  const tinyDroppedTotal = 0;
+  const cascadeRun: CascadeRunState = { cascadeCount: 0, tinyDroppedTotal: 0 };
   let totalPositionsProcessed = 0;
   let totalPositionsExpanded = 0;
   let totalWhiteMovesFound = 0;
@@ -415,7 +415,6 @@ export async function generateRepertoire(
   }];
   
   const visitedPgns = new Set<string>();
-  const reconciledResponseNodeIds = new Set<string>();
   const wikibooksAttemptedNodeIds = new Set<string>();
   const pendingCanonicalContinuations: PendingCanonicalContinuations = new Map();
 
@@ -559,11 +558,6 @@ export async function generateRepertoire(
     const reconciledOpponentByUci = new Map(
       opponentReconciliation.branches.map(branch => [branch.uci, branch] as const)
     );
-    for (const branch of opponentReconciliation.branches) {
-      if (branch.destinationNodeId !== null) {
-        await propagateRepertoireProbabilities(repertoire.id, branch.destinationNodeId);
-      }
-    }
     // EX.05: the Amateur shortfall stays on this node, since the missing games have no child to hold them.
     if (rawAmateurMoveCount > 0) {
       await prisma.repertoireNode.update({
@@ -611,6 +605,16 @@ export async function generateRepertoire(
         }
         continue;
       }
+      if (reconciledOpponent.isTransposition) {
+        // TR.08: no Black reply and no card. TR.09 - TR.19: the cascade. TR.50: next White move.
+        const pointer = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: reconciledOpponent.destinationNodeId! } });
+        const owner = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: reconciledOpponent.ownerNodeId! } });
+        await ensureNodeOpeningMetadata(pointer.id, rebuildOpeningMetadataCache, "NOT_FETCHED", fetchOpeningMetadata);
+        totalTranspositions++;
+        console.log(`[TRANSPOSITION] route=${canonicalWhiteMove.destinationPgn}; owner=${owner.displayPgn}; cumProb=${(pointer.cumProb * 100).toFixed(3)}%`);
+        await runCascade({ repertoireId: repertoire.id, pointerId: pointer.id, ownerId: owner.id, run: cascadeRun, config: runtime.config });
+        continue;
+      }
       console.log(`\nEvaluating White Move: ${whiteMove.san} (Reason: ${whiteMove.reason}, Prob: ${whiteMove.probability ? (whiteMove.probability*100).toFixed(1) : 0}%)`);
       const resultingProbability = canonicalWhiteMove.routeProb;
       const resultingBand = getProbabilityBand(resultingProbability, runtime.config);
@@ -627,21 +631,8 @@ export async function generateRepertoire(
         throw new Error("Reconciled OPPONENT destination disappeared or changed repertoire");
       }
       await restoreRebuildWikibooksState(posAfterWhiteNode.id, rebuildWikibooksCache);
-      const effectiveCanonicalProb = reconciledOpponent.effectiveCumProb;
-
-      // A canonical transposition RESPONSE is reconciled once per generator pass.
-      // A pre-existing stat alone is never treated as proof that it was reconciled.
-      if (reconciledResponseNodeIds.has(posAfterWhiteNode.id)) {
-          raisePendingCanonicalContinuationProbability({
-              pendingByResponseSource: pendingCanonicalContinuations,
-              responseSourceNodeId: posAfterWhiteNode.id,
-              effectiveCumProb: effectiveCanonicalProb
-          });
-          totalTranspositions++;
-          console.log(`[TRANSPOSITION] route=${newPgn}; canonicalRoute=${posAfterWhiteNode.displayPgn}; canonical cumulative probability=${(effectiveCanonicalProb * 100).toFixed(3)}% from all incoming routes; result=reused the canonical Black response without duplicate evaluation.`);
-          console.log(`[QUEUE] Not enqueued: ${newPgn}; reason=canonical position already owns its continuation; waiting=${queue.length}`);
-          continue;
-      }
+      // HM.N.01: Black's reply starts with this node's cumProb, including any cascade that reached it since.
+      const effectiveCanonicalProb = posAfterWhiteNode.cumProb;
 
       const existingStat = await prisma.repertoirePositionStat.findFirst({
         where: { repertoireId: repertoire.id, nodeId: posAfterWhiteNode.id }
@@ -816,13 +807,11 @@ export async function generateRepertoire(
       if (!resultingDestinationId || !resultingDestinationFen || resultingDestinationPgn === null || resultingDestinationHistory === null) {
         throw new Error("RESPONSE is missing its destination");
       }
-      await propagateRepertoireProbabilities(repertoire.id, resultingDestinationId);
       // Its opening metadata is set when it is dequeued: after the Explorer fetch (DB.06 rule 1),
       // or by rule 4 if the route ends there first.
       await restoreRebuildWikibooksState(resultingDestinationId, rebuildWikibooksCache);
       await attemptCanonicalNodeWikibooks(resultingDestinationId, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
 
-      reconciledResponseNodeIds.add(posAfterWhiteNode.id);
       const continuationItem = buildCanonicalContinuationQueueItem({
           destinationNode: {
               id: resultingDestinationId,
@@ -898,7 +887,7 @@ export async function generateRepertoire(
     totalTranspositions,
     totalRepetitionStops,
     totalMissingWhiteMoves,
-    tinyDroppedTotal,
+    tinyDroppedTotal: cascadeRun.tinyDroppedTotal,
   };
   } catch (error) {
     try {

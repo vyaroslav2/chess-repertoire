@@ -5,7 +5,6 @@ import {
   WHITE_MOVE_ENDINGS,
   claimPosition,
   prisma,
-  sumIncomingRouteProb,
   type WhiteMoveEnding
 } from "../db/operations";
 import { parseFullFen, positionKeyFromFen } from "./fen";
@@ -58,7 +57,10 @@ export type ReconciledOpponentBranch = CanonicalOpponentCandidate & {
   destinationCanonicalPgn: string | null;
   destinationCanonicalFullFen: string | null;
   effectiveCumProb: number;
+  /** TR.08: this White move's node is a pointer. */
   isTransposition: boolean;
+  /** TR.03: the node that owns the position, when this node is a pointer. */
+  ownerNodeId: string | null;
   /** HM.24, HM.29, HM.33: set when this White move ends the route at its own node. */
   ending: WhiteMoveEnding | null;
   /** HM.30: the earlier node on this route that the position repeats. */
@@ -326,13 +328,6 @@ export async function reconcileOpponentBranches(input: {
     }
 
     const branches: ReconciledOpponentBranch[] = [];
-    const recomputeDestinationProbability = async (nodeId: string) => {
-      const { sum: cumProb } = await sumIncomingRouteProb(tx, nodeId);
-      return tx.repertoireNode.update({
-        where: { id: nodeId },
-        data: { cumProb }
-      });
-    };
     for (const candidate of [...input.recomputedCandidates].sort((a, b) => a.uci.localeCompare(b.uci))) {
       const stored = storedByUci.get(candidate.uci);
       // HM.20: the checks run in a fixed order: too rare, game over, repetition, then transposition.
@@ -410,6 +405,7 @@ export async function reconcileOpponentBranches(input: {
           destinationCanonicalFullFen: node.fullFen,
           effectiveCumProb: node.cumProb,
           isTransposition: false,
+          ownerNodeId: null,
           ending,
           repeatedPgn
         });
@@ -421,7 +417,7 @@ export async function reconcileOpponentBranches(input: {
         if (!retainedDestination) {
           throw new Error("Retained OPPONENT destination was removed with an obsolete canonical owner");
         }
-        const isTransposition = retainedDestination.displayPgn !== candidate.destinationPgn;
+        const isTransposition = retainedDestination.transposesTo !== null;
         const updated = await tx.repertoireMove.update({
           where: { id: stored.id },
           data: {
@@ -430,8 +426,7 @@ export async function reconcileOpponentBranches(input: {
             stopReason: isTransposition ? "Transposition" : null
           }
         });
-        const refreshedDestination = await recomputeDestinationProbability(retainedDestination.id);
-        const effectiveCumProb = refreshedDestination.cumProb;
+        const effectiveCumProb = retainedDestination.cumProb;
         branches.push({
           ...candidate,
           action: "RETAINED",
@@ -441,45 +436,35 @@ export async function reconcileOpponentBranches(input: {
           destinationCanonicalFullFen: retainedDestination.fullFen,
           effectiveCumProb,
           isTransposition,
+          ownerNodeId: retainedDestination.transposesTo,
           ending: null,
           repeatedPgn: null
         });
         continue;
       }
 
-      const matchingNodes = await tx.repertoireNode.findMany({
-        // A PositionKey intentionally normalizes the counters.  It is useful
-        // for detecting a transposition, but cannot select an edge target:
-        // chess moves must land on the exact FullFen they produced.
-        where: { repertoireId: input.repertoireId, fullFen: candidate.destinationFullFen, ...NOT_WHITE_MOVE_ENDING_NODE },
-        orderBy: { displayPgn: "asc" },
-        take: 2
-      });
-      if (matchingNodes.length > 1) throw new Error("Ambiguous canonical OPPONENT destination PositionKey");
-      let destination = matchingNodes[0];
-      if (destination) {
-        const canonicalDestinationFullFen = parseFullFen(destination.fullFen);
-        if (canonicalDestinationFullFen !== destination.fullFen ||
-            positionKeyFromFen(canonicalDestinationFullFen) !== destination.positionKey) {
-          throw new Error("Invalid canonical OPPONENT transposition destination");
+      // HM.25: every returned White move gets its own node.
+      let destination = await tx.repertoireNode.create({
+        data: {
+          repertoireId: input.repertoireId,
+          fullFen: candidate.destinationFullFen,
+          positionKey: candidate.destinationPositionKey,
+          history: candidate.destinationHistory,
+          displayPgn: candidate.destinationPgn,
+          routeProb: candidate.routeProb,
+          // HM.25: until a cascade reaches the parent, this equals routeProb.
+          cumProb: source.cumProb * candidate.moveProb,
+          siblingIndex: candidate.siblingIndex
         }
-      } else {
-        destination = await tx.repertoireNode.create({
-          data: {
-            repertoireId: input.repertoireId,
-            fullFen: candidate.destinationFullFen,
-            positionKey: candidate.destinationPositionKey,
-            history: candidate.destinationHistory,
-            displayPgn: candidate.destinationPgn,
-            routeProb: candidate.routeProb,
-            // HM.25: until a cascade reaches the parent, this equals routeProb.
-            cumProb: source.cumProb * candidate.moveProb,
-            siblingIndex: candidate.siblingIndex
-          }
-        });
-        await claimPosition(tx, input.repertoireId, candidate.destinationPositionKey, destination.id);
+      });
+      // TR.02, TR.03: an earlier node may already own this positionKey (DB.36).
+      // TR.06, TR.07: if not, this node takes the row and keeps transposesTo = null.
+      const ownerNodeId = await claimPosition(tx, input.repertoireId, candidate.destinationPositionKey, destination.id);
+      const isTransposition = ownerNodeId !== destination.id;
+      if (isTransposition) {
+        // TR.08: this node is now a pointer; its route stops here.
+        destination = await tx.repertoireNode.update({ where: { id: destination.id }, data: { transposesTo: ownerNodeId } });
       }
-      const isTransposition = destination.displayPgn !== candidate.destinationPgn;
       const created = await tx.repertoireMove.create({
         data: {
           repertoireId: source.repertoireId,
@@ -492,8 +477,6 @@ export async function reconcileOpponentBranches(input: {
           stopReason: isTransposition ? "Transposition" : null
         }
       });
-      destination = await recomputeDestinationProbability(destination.id);
-      const effectiveCumProb = destination.cumProb;
       branches.push({
         ...candidate,
         action: "ADDED",
@@ -501,8 +484,9 @@ export async function reconcileOpponentBranches(input: {
         destinationNodeId: destination.id,
         destinationCanonicalPgn: destination.displayPgn,
         destinationCanonicalFullFen: destination.fullFen,
-        effectiveCumProb,
+        effectiveCumProb: destination.cumProb,
         isTransposition,
+        ownerNodeId: isTransposition ? ownerNodeId : null,
         ending: null,
         repeatedPgn: null
       });

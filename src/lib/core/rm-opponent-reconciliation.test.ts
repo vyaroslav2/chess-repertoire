@@ -159,7 +159,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     assert.equal((await prisma.repertoirePositionStat.findUniqueOrThrow({ where: { id: response.stat.id } })).reps, 4);
   });
 
-  it("adds an ordinary UCI branch with exact FullFen/PositionKey and adds a transposition without overwriting canonical history", async () => {
+  it("TR.08: adds an ordinary UCI branch with exact FullFen/PositionKey, and a transposition as its own pointer node", async () => {
     const source = await createNode(initialFullFen, "", 1);
     const [e4, d4] = candidates(expectedSource(source), [
       { san: "e4", probability: 0.4 },
@@ -175,8 +175,13 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     assert.equal(e4Node.positionKey, e4.destinationPositionKey);
     assert.equal(e4Node.displayPgn, "e4");
     const d4Branch = result.branches.find(branch => branch.uci === "d2d4")!;
-    assert.equal(d4Branch.destinationNodeId, externalD4.id);
     assert.equal(d4Branch.isTransposition, true);
+    assert.equal(d4Branch.ownerNodeId, externalD4.id);
+    const pointer = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: d4Branch.destinationNodeId! } });
+    assert.notEqual(pointer.id, externalD4.id);
+    assert.equal(pointer.displayPgn, "d4");
+    assert.equal(pointer.transposesTo, externalD4.id);
+    assert.equal((await prisma.repertoireMove.findUniqueOrThrow({ where: { id: d4Branch.edgeId } })).stopReason, "Transposition");
     assert.equal((await prisma.repertoireNode.findUniqueOrThrow({ where: { id: externalD4.id } })).displayPgn, "external canonical d4");
   });
 

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { Chess } from "chess.js";
-import { createRepertoireNode, prisma, propagateRepertoireProbabilities } from "../db/operations";
+import { createRepertoireNode, prisma } from "../db/operations";
+import { runCascade } from "./cascade";
 import { defaultConfig } from "./config";
 import { selectWhiteCandidates } from "./evaluator";
 import { generateRepertoire } from "./generator";
@@ -172,7 +173,15 @@ describe("HM generator", () => {
     assert.deepEqual(edges.map(edge => edge.stopReason), ["Too rare", "Too rare"]);
   });
 
-  it("HM.04: a cascade that reaches a dropped move adds to its rareDropped, not its cumProb", async () => {
+  // A pointer elsewhere in the tree whose cascade reaches `owner` (TR.10).
+  async function cascadeInto(owner: { id: string }, gain: number) {
+    const pointer = await prisma.repertoireNode.create({
+      data: { repertoireId, fullFen: fenAfter("e4"), positionKey: "pointer", history: "pointer", routeProb: gain, cumProb: gain, transposesTo: owner.id }
+    });
+    await runCascade({ repertoireId, pointerId: pointer.id, ownerId: owner.id, run: { cascadeCount: 0, tinyDroppedTotal: 0 }, config: defaultConfig });
+  }
+
+  it("HM.04 TR.48 TR.45: a cascade that reaches a dropped move adds to its rareDropped, not its cumProb", async () => {
     const source = await createRepertoireNode(repertoireId, START_FEN, "", 0.5);
     const [dropped] = canonicalizeOpponentCandidates({
       sourceFullFen: source.fullFen, sourcePgn: "", sourceRouteProb: source.routeProb, sourceCumProb: source.cumProb,
@@ -190,8 +199,7 @@ describe("HM generator", () => {
     const nodeId = result.branches[0].destinationNodeId!;
     assert.ok(near((await prisma.repertoireNode.findUniqueOrThrow({ where: { id: nodeId } })).rareDropped, 0.01));
 
-    await prisma.repertoireNode.update({ where: { id: source.id }, data: { cumProb: 0.8 } });
-    await propagateRepertoireProbabilities(repertoireId, source.id);
+    await captureLog(() => cascadeInto(source, 0.3));
     const after = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: nodeId } });
     assert.equal(after.cumProb, 0);
     assert.ok(near(after.rareDropped, 0.016));
@@ -362,8 +370,7 @@ describe("HM generator", () => {
     assert.equal(e4.ending, null);
     assert.ok(near(repetition.effectiveCumProb, 0.3));
 
-    await prisma.repertoireNode.update({ where: { id: source.id }, data: { cumProb: 0.9 } });
-    await propagateRepertoireProbabilities(repertoireId, source.id);
+    await captureLog(() => cascadeInto(source, 0.4));
     const after = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: repetition.destinationNodeId! } });
     assert.ok(near(after.cumProb, 0.54));
     assert.ok(near(after.routeProb, 0.3));
