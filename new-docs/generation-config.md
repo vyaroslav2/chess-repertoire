@@ -3,37 +3,38 @@ tags:
   - reviewed
 ---
 
-| Setting                       | Value                                                             | Notes                                       |
-| ----------------------------- | ----------------------------------------------------------------- | ------------------------------------------- |
-| `timestampFormat`[^1]         | Always UTC (`2026-09-03T08:15:23.000Z`)                           |                                             |
-| `lockfileName`                | `lockfile-never-remove-by-yourself-unless-stale`                  |                                             |
-| `lockfileRetryLimit`          | 5                                                                 | [[lockfile-retry-limit]]                    |
-| `probabilityTolerance`        | 0.0001% (0.000001 as a fraction)                                  | [[probability-tolerance]]                   |
-| `tinyThreshold`               | 0.00001% (0.0000001 as a fraction)                                | [[tiny-threshold]]                          |
-| `nodeTouchCountCap`[^2]       | 500                                                               | [[node-touch-count-cap]]                    |
-| `moveNumberBands`             | `early` through 4; `middle` through 8; later moves use the `late` |                                             |
-| `popularityThresholds`        | early=5.00%, middle=10.00%, late=15.00%                           |                                             |
-| `probabilityBands`[^3]        | deep >= 2.00%; medium >= 0.50% and < 2.00%; shallow < 0.50%       |                                             |
-| `depthBudget`                 | deep=15, medium=8, shallow=5                                      | full moves counted from the root            |
-| `explorerSpeeds`              | classical, rapid                                                  | related to amateur cache profile            |
-| `explorerRatings`             | 1600, 1800, 2000                                                  | related to amateur cache profile            |
-| `apiRetryDelayMs`             | 120 000                                                           |                                             |
-| `apiRequestGapMs`             | 2 000                                                             |                                             |
-| `cloudEvalExtraGapMs`         | 10 000                                                            |                                             |
-| `apiRequestTimeoutMs`         | 30 000                                                            |                                             |
-| `explorerEliteSpeeds`         | classical, rapid                                                  | related to elite cache profile              |
-| `explorerEliteRatings`        | 2500                                                              | related to elite cache profile              |
-| `mastersWeight`               | 5                                                                 |                                             |
-| `minimumWeightedGames`        | 15                                                                |                                             |
-| `lichessCloudEvalMultiPv`     | 5                                                                 | related to Lichess Cloud Eval cache profile |
-| `apiToleranceCp`              | early=80, middle=50, late=35                                      |                                             |
-| `localToleranceCp`            | early=95, middle=60, late=40                                      |                                             |
-| `chessDbMaxAbsCp`             | 1000                                                              | [^4]                                        |
-| `anchorGames`                 | 50                                                                |                                             |
-| `repertoireSidePrior`         | 48%                                                               |                                             |
-| `localStockfishDepth`         | depth=24                                                          | related to local Stockfish  cache profile   |
-| `localStockfishMultiPv`       | 1                                                                 | related to local Stockfish  cache profile   |
-| `hardcodedBlackResponses`[^5] | 1. e4 c6,  1. d4 d5                                               |                                             |
+| Setting                       | Value                                                             | Notes                                                         |
+| ----------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------- |
+| `timestampFormat`[^1]         | Always UTC (`2026-09-03T08:15:23.000Z`)                           |                                                               |
+| `lockfileName`                | `lockfile-never-remove-by-yourself-unless-stale`                  |                                                               |
+| `lockfileRetryLimit`          | 5                                                                 | [[lockfile-retry-limit]]                                      |
+| `probabilityTolerance`        | 0.0001% (0.000001 as a fraction)                                  | [[probability-tolerance]]                                     |
+| `tinyThreshold`               | 0.00001% (0.0000001 as a fraction)                                | [[tiny-threshold]]                                            |
+| `nodeTouchCountCap`[^2]       | 500                                                               | [[node-touch-count-cap]]                                      |
+| `moveNumberBands`             | `early` through 4; `middle` through 8; later moves use the `late` |                                                               |
+| `popularityThresholds`        | early=5.00%, middle=10.00%, late=15.00%                           |                                                               |
+| `probabilityBands`[^3]        | deep >= 2.00%; medium >= 0.50% and < 2.00%; shallow < 0.50%       |                                                               |
+| `depthBudget`                 | deep=15, medium=8, shallow=5                                      | full moves counted from the root                              |
+| `depthCap`                    | 5                                                                 | full moves counted from the root; caps every depthBudget band |
+| `explorerSpeeds`              | classical, rapid                                                  | related to amateur cache profile                              |
+| `explorerRatings`             | 1600, 1800, 2000                                                  | related to amateur cache profile                              |
+| `apiRetryDelayMs`             | 120 000                                                           |                                                               |
+| `apiRequestGapMs`             | 2 000                                                             |                                                               |
+| `cloudEvalExtraGapMs`         | 10 000                                                            |                                                               |
+| `apiRequestTimeoutMs`         | 30 000                                                            |                                                               |
+| `explorerEliteSpeeds`         | classical, rapid                                                  | related to elite cache profile                                |
+| `explorerEliteRatings`        | 2500                                                              | related to elite cache profile                                |
+| `mastersWeight`               | 5                                                                 |                                                               |
+| `minimumWeightedGames`        | 15                                                                |                                                               |
+| `lichessCloudEvalMultiPv`     | 5                                                                 | related to Lichess Cloud Eval cache profile                   |
+| `apiToleranceCp`              | early=80, middle=50, late=35                                      |                                                               |
+| `localToleranceCp`            | early=95, middle=60, late=40                                      |                                                               |
+| `chessDbMaxAbsCp`             | 1000                                                              | [^4]                                                          |
+| `anchorGames`                 | 50                                                                |                                                               |
+| `repertoireSidePrior`         | 48%                                                               |                                                               |
+| `localStockfishDepth`         | depth=24                                                          | related to local Stockfish  cache profile                     |
+| `localStockfishMultiPv`       | 1                                                                 | related to local Stockfish  cache profile                     |
+| `hardcodedBlackResponses`[^5] | 1. e4 c6,  1. d4 d5                                               |                                                               |
 
 
 

@@ -25,7 +25,7 @@ describe("S0 stop request in the main loop", () => {
     let stopRequested = false;
     let flagReads = 0;
     await assert.rejects(
-      generateRepertoire(new Chess().fen(), 1, {
+      generateRepertoire(new Chess().fen(), {
         repertoireId,
         // The root has no games, so the queue is empty once it is processed.
         fetchDatabases: (async () => {

@@ -7,11 +7,12 @@ import {
   ensureRepertoireNodeWikibooks,
   responseHumanEvidence,
   validateOpeningMetadataState,
-  type OpeningMetadataState
+  type OpeningMetadataState,
+  type ResponseEnding
 } from "../db/operations";
 import { parseFullFen, positionKeyFromFen } from "./fen";
 import { fetchAllDatabases, fetchMastersOpeningMetadata, pickExplorerOpening, type ExplorerOpening } from "../api/lichess";
-import { defaultConfig, createRuntimeConfig, getProbabilityBand } from "../core/config";
+import { defaultConfig, createRuntimeConfig, getProbabilityBand, type Config } from "../core/config";
 import { selectWhiteCandidates, evaluateBlackMove } from "./evaluator";
 import { runCascade, type CascadeRunState } from "./cascade";
 import { reconcileExistingResponse } from "./rm-reconciliation";
@@ -244,6 +245,24 @@ export async function evaluateCanonicalResponse(input: {
   };
 }
 
+/**
+ * RE.02, RE.08: does the route end at the position Black's move reached?
+ * The position has White to move, so its fullmove number is one past the full moves played.
+ * No repetition or transposition check here (RE.N.02).
+ */
+export function responseEnding(input: {
+  fullFen: string;
+  cumProb: number;
+  config: Config;
+}): ResponseEnding | null {
+  if (new Chess(input.fullFen).isGameOver()) return "Game over on Black's move";
+  const depthBudget = input.config.depthBudget[getProbabilityBand(input.cumProb, input.config)];
+  if (fullmoveNumberFromFullFen(input.fullFen) > Math.min(depthBudget, input.config.depthCap)) {
+    return "Depth budget reached on Black's move";
+  }
+  return null;
+}
+
 export function buildCanonicalContinuationQueueItem(input: {
   destinationNode: { id: string; fullFen: string; displayPgn: string; history?: string };
   cumProb: number;
@@ -346,7 +365,6 @@ export async function persistCanonicalMaxCumulativeProbability(input: {
 
 export async function generateRepertoire(
   startFen: string,
-  maxDepth: number,
   dependencies: GenerateRepertoireDependencies = {}
 ) {
   console.log("Initializing BFS Tree Generator...");
@@ -465,6 +483,7 @@ export async function generateRepertoire(
     console.log(`History: ${pgnString}`);
     console.log(`[Run totals] Elapsed: ${currentElapsed}s | Work Items Examined: ${totalPositionsProcessed}`);
 
+    // Only the seeded root can be game over here: RE.02 keeps game-over positions off the queue.
     if (new Chess(node.fen).isGameOver()) {
       await ensureNodeOpeningMetadata(node.nodeId, rebuildOpeningMetadataCache, "NOT_FETCHED", fetchOpeningMetadata);
       console.log(`[TERMINAL] Game-over position reached. No continuation is generated.`);
@@ -472,19 +491,6 @@ export async function generateRepertoire(
       continue;
     }
 
-    const dynamicProbabilityBand = getProbabilityBand(node.cumProb, runtime.config);
-    let dynamicMaxDepth = runtime.config.depthBudget[dynamicProbabilityBand];
-    const uncappedDynamicMaxDepth = dynamicMaxDepth;
-    dynamicMaxDepth = Math.min(uncappedDynamicMaxDepth, maxDepth);
-    console.log(`[DYNAMIC DEPTH] cumulative probability=${(node.cumProb * 100).toFixed(3)}%; band=${dynamicProbabilityBand}; dynamic budget=${uncappedDynamicMaxDepth} full moves; generation cap=${maxDepth} full moves; effective depth limit=${dynamicMaxDepth} full moves.`);
-
-    if (node.currentMoveNumber > dynamicMaxDepth) {
-      console.log(`[DEPTH-LIMIT STOP] Hit dynamic depth limit (${dynamicMaxDepth} moves) for prob ${(node.cumProb*100).toFixed(2)}%. No White moves were processed for this work item.`);
-      await ensureNodeOpeningMetadata(node.nodeId, rebuildOpeningMetadataCache, "NOT_FETCHED", fetchOpeningMetadata);
-      totalBranchesAborted++;
-      console.log(`[QUEUE] Nothing enqueued: depth limit reached; waiting=${queue.length}`);
-      continue;
-    }
     totalPositionsExpanded++;
     const canonicalSourceNode = await prisma.repertoireNode.findUnique({ where: { id: node.nodeId } });
     if (!canonicalSourceNode || canonicalSourceNode.repertoireId !== repertoire.id) {
@@ -619,7 +625,7 @@ export async function generateRepertoire(
       const resultingProbability = canonicalWhiteMove.routeProb;
       const resultingBand = getProbabilityBand(resultingProbability, runtime.config);
       const resultingBudget = runtime.config.depthBudget[resultingBand];
-      console.log(`[BRANCH PROBABILITY] route probability before White move=${(canonicalSourceNode.cumProb * 100).toFixed(3)}%; White move share at this position=${(whiteMove.probability * 100).toFixed(3)}%; resulting route probability=${(resultingProbability * 100).toFixed(3)}%; band=${resultingBand}; dynamic budget=${resultingBudget} full moves; generation cap=${maxDepth}; effective depth limit=${Math.min(resultingBudget, maxDepth)}.`);
+      console.log(`[BRANCH PROBABILITY] route probability before White move=${(canonicalSourceNode.cumProb * 100).toFixed(3)}%; White move share at this position=${(whiteMove.probability * 100).toFixed(3)}%; resulting route probability=${(resultingProbability * 100).toFixed(3)}%; band=${resultingBand}; dynamic budget=${resultingBudget} full moves; depthCap=${runtime.config.depthCap}; effective depth limit=${Math.min(resultingBudget, runtime.config.depthCap)}.`);
       const newPgn = canonicalWhiteMove.destinationPgn;
       if (reconciledOpponent.destinationNodeId === null) {
         throw new Error("OPPONENT branch is missing its destination");
@@ -692,6 +698,7 @@ export async function generateRepertoire(
       const blackPgn = selectedHistory.join(" ");
       const blackHistory = [...(node.uciHistory ?? historyFromCanonicalPgn(canonicalSourceNode.history)), canonicalWhiteMove.uci, algoResult.selectedUci].join(" ");
 
+      let responseId: string;
       let resultingDestinationId: string | null;
       let resultingDestinationFen: string | null = selectedDestinationFen;
       let resultingDestinationPgn: string | null = blackPgn;
@@ -723,6 +730,7 @@ export async function generateRepertoire(
               }
           });
 
+          responseId = result.responseId;
           resultingDestinationId = result.destinationNodeId;
           resultingDestinationFen = result.destinationFullFen;
           resultingDestinationPgn = result.destinationPgn;
@@ -776,6 +784,7 @@ export async function generateRepertoire(
               deepVerified: algoResult.deepVerified,
               localEvaluationProfile: algoResult.localEvaluationProfile
           });
+          responseId = createdResponse.id;
 
           const emptyCard = createEmptyCard();
           await prisma.repertoirePositionStat.upsert({
@@ -806,11 +815,26 @@ export async function generateRepertoire(
       if (!resultingDestinationId || !resultingDestinationFen || resultingDestinationPgn === null || resultingDestinationHistory === null) {
         throw new Error("RESPONSE is missing its destination");
       }
-      // Its opening metadata is set when it is dequeued: after the Explorer fetch (DB.06 rule 1),
-      // or by rule 4 if the route ends there first.
       await restoreRebuildWikibooksState(resultingDestinationId, rebuildWikibooksCache);
       await attemptCanonicalNodeWikibooks(resultingDestinationId, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
 
+      // RE.02 - RE.10: the position after Black's move. RE.05: its cumProb stays as it is.
+      const ending = responseEnding({
+          fullFen: resultingDestinationFen,
+          cumProb: effectiveCanonicalProb,
+          config: runtime.config
+      });
+      if (ending) {
+          await prisma.repertoireMove.update({ where: { id: responseId }, data: { stopReason: ending } });
+          // DB.06 rule 4: the node is never dequeued, so it is named here.
+          await ensureNodeOpeningMetadata(resultingDestinationId, rebuildOpeningMetadataCache, "NOT_FETCHED", fetchOpeningMetadata);
+          const tag = ending === "Game over on Black's move" ? "[GAME OVER]" : "[DEPTH BUDGET REACHED]";
+          console.log(`${tag} route=${resultingDestinationPgn}; cumProb=${(effectiveCanonicalProb * 100).toFixed(3)}%`);
+          if (ending === "Depth budget reached on Black's move") totalBranchesAborted++;
+          continue;
+      }
+
+      // RE.09. Its opening metadata is set when it is dequeued, after the Explorer fetch (DB.06 rule 1).
       const continuationItem = buildCanonicalContinuationQueueItem({
           destinationNode: {
               id: resultingDestinationId,

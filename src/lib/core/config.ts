@@ -22,6 +22,7 @@ export interface Config {
         medium: number;
     };
     depthBudget: Record<ProbabilityBand, number>;
+    depthCap: number;
     explorerSpeeds: string[];
     explorerRatings: number[];
     apiRetryDelayMs: number;
@@ -77,6 +78,7 @@ export const defaultConfig: Config = {
         medium: 8,
         shallow: 5
     },
+    depthCap: 5,
     explorerSpeeds: ["classical", "rapid"],
     explorerRatings: [1600, 1800, 2000],
     apiRetryDelayMs: 120_000,
@@ -163,6 +165,7 @@ export function validateConfig(config: Config) {
     for (const key of PROBABILITY_BANDS) {
         if (!isPositiveInteger(config.depthBudget?.[key])) throw new Error(`Invalid depthBudget.${key}`);
     }
+    if (!isPositiveInteger(config.depthCap)) throw new Error("Invalid depthCap");
 
     if (!isNonEmptyStringList(config.explorerSpeeds)) throw new Error("Invalid explorerSpeeds");
     if (!isRatingList(config.explorerRatings)) throw new Error("Invalid explorerRatings");

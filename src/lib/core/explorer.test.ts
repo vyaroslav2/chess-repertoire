@@ -124,7 +124,7 @@ describe("EX.05 EX.06 generator", () => {
   const empty = { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0, opening: null };
 
   it("EX.06: no Amateur moves ends the route with \"No opponent moves found.\"", async () => {
-    const { lines } = await captureLog(() => generateRepertoire(START_FEN, 1, {
+    const { lines } = await captureLog(() => generateRepertoire(START_FEN, {
       repertoireId, ...common,
       fetchDatabases: (async () => [empty, empty, empty]) as any
     }));
@@ -159,7 +159,7 @@ describe("EX.05 EX.06 generator", () => {
       };
     };
 
-    await captureLog(() => generateRepertoire(START_FEN, 1, {
+    await captureLog(() => generateRepertoire(START_FEN, {
       repertoireId, ...common,
       responseEvaluator: responseEvaluator as any,
       fetchDatabases: (async (fen: string) => fen === START_FEN ? [empty, empty, amateur] : [empty, empty, empty]) as any

@@ -100,7 +100,7 @@ describe("TR", () => {
         [play(["Nf3", "e5"])]: [["e4", 100]]
       };
       const calls: string[] = [];
-      const log = await captureLog(() => generateRepertoire(START_FEN, 2, {
+      const log = await captureLog(() => generateRepertoire(START_FEN, {
         repertoireId, ...common,
         responseEvaluator: evaluator(calls, { [play(["e4"])]: "e5", [play(["Nf3"])]: "e5", [play(["e4", "e5", "Nf3"])]: "Nc6" }) as any,
         fetchDatabases: (async (fen: string) => {

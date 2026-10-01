@@ -431,12 +431,15 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
       { san: "c4", uci: "c2c4", games: 20, white: 10, draws: 5, black: 5 }
     ];
 
-    const summary = await generateRepertoire(initialFullFen, 1, {
+    const summary = await generateRepertoire(initialFullFen, {
       repertoireId,
-      fetchDatabases: (async () => [
+      // Only the root has White moves; the positions after Black's reply have none.
+      fetchDatabases: (async (fen: string) => [
         { moves: [], totalGames: 0, opening: undefined },
         { moves: [], totalGames: 0 },
-        { moves: humanRows, totalGames: 90, positionTotalGames: 100, unaccountedShare: 0.1 }
+        fen === initialFullFen
+          ? { moves: humanRows, totalGames: 90, positionTotalGames: 100, unaccountedShare: 0.1 }
+          : { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0 }
       ]) as any,
       fetchOpeningMetadata: async () => null,
       responseEvaluator: responseEvaluator as any,
@@ -539,7 +542,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     await prisma.repertoireMove.update({ where: { id: nc3_edge.edge.id }, data: { moveProb: 0.6} as any });
     await prisma.repertoireMove.update({ where: { id: nf3_edge.edge.id }, data: { moveProb: 0.4} as any });
 
-    await generateRepertoire(root.fullFen, 3, {
+    await generateRepertoire(root.fullFen, {
       repertoireId,
       fetchDatabases: mockDatabases,
       fetchOpeningMetadata: async () => null,
@@ -613,7 +616,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
       return { selectedUci: "e7e5", selectedMoveSan: "e5", cp: 0, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Lichess Cloud Evaluation", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false, localEvaluationProfile: null };
     };
 
-    await generateRepertoire(root.fullFen, 3, {
+    await generateRepertoire(root.fullFen, {
       repertoireId,
       fetchDatabases: mockDatabases,
       fetchOpeningMetadata: async () => null,

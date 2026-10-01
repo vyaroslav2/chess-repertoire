@@ -532,7 +532,7 @@ export type ResponsePersistenceInput = ResponseHumanEvidence & {
   deepVerified: boolean;
   /** The local profile the deepVerified evidence was read under. Checked, never stored (DB.14). */
   localEvaluationProfile: string | null;
-  stopReason?: "Repetition" | "Transposition" | null;
+  stopReason?: "Repetition" | "Transposition" | ResponseEnding | null;
   engineRank?: number | null;
 };
 
@@ -708,6 +708,10 @@ export async function createOpponentMove(data: {
 /** HM.24, HM.29, HM.33: the White moves that end the route at their own node. */
 export const WHITE_MOVE_ENDINGS = ["Too rare", "Game over", "Repetition"] as const;
 export type WhiteMoveEnding = typeof WHITE_MOVE_ENDINGS[number];
+
+/** RE.03, RE.07: the Black moves that end the route at the node they reach. */
+export const RESPONSE_ENDINGS = ["Game over on Black's move", "Depth budget reached on Black's move"] as const;
+export type ResponseEnding = typeof RESPONSE_ENDINGS[number];
 
 /** A node whose White move ended the route is only an ending, never a route owner or ancestor. */
 export const NOT_WHITE_MOVE_ENDING_NODE = { incomingMoves: { none: { stopReason: { in: [...WHITE_MOVE_ENDINGS] } } } };

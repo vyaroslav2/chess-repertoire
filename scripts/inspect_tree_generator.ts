@@ -525,7 +525,7 @@ function installBlockFormatter(write: (...args: unknown[]) => void): () => void 
       write(`[LIVE COUNTER] Repetition Stops: +1 => ${liveCounters.repetitions} total.`);
       return;
     }
-    if (normalized.startsWith("[DEPTH-LIMIT STOP]")) {
+    if (normalized.startsWith("[DEPTH BUDGET REACHED]")) {
       liveCounters.depthLimitedStops++;
       write(normalized);
       write(`[LIVE COUNTER] Depth-limited stops: +1 => ${liveCounters.depthLimitedStops} total.`);
@@ -585,7 +585,7 @@ async function main(): Promise<void> {
     console.log("DETAILED DIAGNOSTIC MODE — the production generator and decision functions are unchanged.");
     console.log(`Diagnostic log: ${logPath}`);
     printConfiguration();
-    await generateRepertoire(START_FEN, 3, {
+    await generateRepertoire(START_FEN, {
       fetchDatabases: diagnosticFetchAllDatabases,
       fetchOpeningMetadata: diagnosticFetchOpeningMetadata,
       responseEvaluator: diagnosticEvaluateBlackMove,

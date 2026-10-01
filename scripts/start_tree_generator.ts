@@ -82,7 +82,7 @@ export async function runTreeGenerator(
   };
   const generate =
     dependencies.generate ??
-    ((shouldStop) => generateRepertoire(START_FEN, 5, { shouldStop }));
+    ((shouldStop) => generateRepertoire(START_FEN, { shouldStop }));
   const disconnect = dependencies.disconnect ?? (() => prisma.$disconnect());
   const takeLock = dependencies.acquire ?? (() => acquireLock("treegen"));
 

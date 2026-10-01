@@ -47,7 +47,7 @@ describe("S2 seed", () => {
     });
 
     try {
-      await generateRepertoire(START_FEN, 1, { repertoireId, ...noGames });
+      await generateRepertoire(START_FEN, { repertoireId, ...noGames });
 
       const nodes = await prisma.repertoireNode.findMany({ where: { repertoireId } });
       assert.equal(nodes.length, 1);
@@ -63,7 +63,7 @@ describe("S2 seed", () => {
   });
 
   it("S2.01 S2.06 S2.07: tinyDroppedTotal starts at zero; the root is queued at 100% routeProb and cumProb", async () => {
-    const summary = await generateRepertoire(START_FEN, 1, { repertoireId, ...noGames });
+    const summary = await generateRepertoire(START_FEN, { repertoireId, ...noGames });
 
     assert.equal(summary.tinyDroppedTotal, 0);
     assert.equal(summary.totalPositionsProcessed, 1);
@@ -88,7 +88,7 @@ describe("S2.02 S2.03 user and repertoire", () => {
       ? await prisma.repertoire.findFirst({ where: { userId: existingUser.id, title: "Black Universal Repertoire" } })
       : null;
 
-    await generateRepertoire(START_FEN, 1, noGames);
+    await generateRepertoire(START_FEN, noGames);
 
     const user = await prisma.user.findUniqueOrThrow({ where: { username: "Yaroslav" } });
     const repertoires = await prisma.repertoire.findMany({ where: { userId: user.id, title: "Black Universal Repertoire" } });
@@ -97,7 +97,7 @@ describe("S2.02 S2.03 user and repertoire", () => {
     if (!existingUser) createdUserId = user.id;
     if (!existingRepertoire) createdRepertoireId = repertoires[0].id;
 
-    await generateRepertoire(START_FEN, 1, noGames);
+    await generateRepertoire(START_FEN, noGames);
     assert.equal(await prisma.user.count({ where: { username: "Yaroslav" } }), 1);
     assert.equal(await prisma.repertoire.count({ where: { userId: user.id, title: "Black Universal Repertoire" } }), 1);
   });

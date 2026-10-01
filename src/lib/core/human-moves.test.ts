@@ -5,7 +5,7 @@ import { createRepertoireNode, prisma } from "../db/operations";
 import { runCascade } from "./cascade";
 import { defaultConfig } from "./config";
 import { selectWhiteCandidates } from "./evaluator";
-import { generateRepertoire } from "./generator";
+import { generateRepertoire, responseEnding } from "./generator";
 import { canonicalizeOpponentCandidates, readExpectedOpponentEdges, reconcileOpponentBranches } from "./rm-opponent-reconciliation";
 
 const START_FEN = new Chess().fen();
@@ -58,6 +58,31 @@ describe("HM.04 HM.05 candidates", () => {
   });
 });
 
+describe("RE.08 depth budget", () => {
+  // White to move at fullmove n means Black has played n - 1 full moves.
+  const atMove = (fullmove: number) => `rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 ${fullmove}`;
+  const ending = (fullmove: number, cumProb: number, depthCap = defaultConfig.depthCap) =>
+    responseEnding({ fullFen: atMove(fullmove), cumProb, config: { ...defaultConfig, depthCap } });
+
+  it("RE.08: the band comes from cumProb (shallow=5, medium=8, deep=15 full moves)", () => {
+    assert.equal(ending(5, 0.004, 99), null);
+    assert.equal(ending(6, 0.004, 99), "Depth budget reached on Black's move");
+    assert.equal(ending(8, 0.01, 99), null);
+    assert.equal(ending(9, 0.01, 99), "Depth budget reached on Black's move");
+    assert.equal(ending(15, 0.02, 99), null);
+    assert.equal(ending(16, 0.02, 99), "Depth budget reached on Black's move");
+  });
+
+  it("RE.08: depthCap caps every band; at 5, every band stops after Black's 5th move", () => {
+    for (const cumProb of [0.004, 0.01, 0.02]) {
+      assert.equal(ending(5, cumProb), null);
+      assert.equal(ending(6, cumProb), "Depth budget reached on Black's move");
+    }
+    assert.equal(ending(2, 1, 2), null);
+    assert.equal(ending(3, 1, 2), "Depth budget reached on Black's move");
+  });
+});
+
 describe("HM generator", () => {
   let userId: string;
   let repertoireId: string;
@@ -102,7 +127,7 @@ describe("HM generator", () => {
   }
 
   async function runRoot(moves: ReturnType<typeof amateurMove>[], calls: string[] = []) {
-    return captureLog(() => generateRepertoire(START_FEN, 1, {
+    return captureLog(() => generateRepertoire(START_FEN, {
       repertoireId, ...common,
       responseEvaluator: evaluator(calls) as any,
       fetchDatabases: (async (fen: string) => fen === START_FEN ? [empty, empty, amateurAt(moves)] : [empty, empty, empty]) as any
@@ -160,7 +185,7 @@ describe("HM generator", () => {
   it("HM.08: all returned moves dropped logs the warning and ends the route", async () => {
     const calls: string[] = [];
     // Both moves fall below the 5% threshold; the other 93 games have no move (EX.05).
-    const { lines: warned } = await captureLog(() => generateRepertoire(START_FEN, 1, {
+    const { lines: warned } = await captureLog(() => generateRepertoire(START_FEN, {
       repertoireId, ...common,
       responseEvaluator: evaluator(calls) as any,
       fetchDatabases: (async (fen: string) => fen === START_FEN
@@ -238,7 +263,7 @@ describe("HM generator", () => {
 
   it("HM.26 HM.27 HM.28 HM.29: a White move that ends the game keeps its node and cumProb, gets no Black reply, and logs [GAME OVER]", async () => {
     const calls: string[] = [];
-    const { lines } = await captureLog(() => generateRepertoire(mateFen, 1, {
+    const { lines } = await captureLog(() => generateRepertoire(mateFen, {
       repertoireId, ...common,
       responseEvaluator: evaluator(calls) as any,
       fetchDatabases: (async (fen: string) => fen === mateFen
@@ -265,7 +290,7 @@ describe("HM generator", () => {
       [play(["Nf3", "Nf6", "Ne5", "Ng8"])]: "Nf3"
     };
     const calls: string[] = [];
-    const { lines } = await captureLog(() => generateRepertoire(START_FEN, 3, {
+    const { lines } = await captureLog(() => generateRepertoire(START_FEN, {
       repertoireId, ...common,
       responseEvaluator: evaluator(calls, { [play(["Nf3"])]: "Nf6", [play(["Nf3", "Nf6", "Ne5"])]: "Ng8" }) as any,
       fetchDatabases: (async (fen: string) => {
@@ -292,10 +317,10 @@ describe("HM generator", () => {
 
   const play = (sans: string[]) => { const chess = new Chess(); for (const san of sans) chess.move(san); return boardAndTurn(chess.fen()); };
 
-  async function runScripted(whiteMoves: Record<string, Array<[string, number]>>, replies: Record<string, string>, maxDepth: number) {
+  async function runScripted(whiteMoves: Record<string, Array<[string, number]>>, replies: Record<string, string>) {
     const calls: string[] = [];
     const fetched: string[] = [];
-    const { lines } = await captureLog(() => generateRepertoire(START_FEN, maxDepth, {
+    const { lines } = await captureLog(() => generateRepertoire(START_FEN, {
       repertoireId, ...common,
       responseEvaluator: evaluator(calls, replies) as any,
       fetchDatabases: (async (fen: string) => {
@@ -311,8 +336,7 @@ describe("HM generator", () => {
   it("RE.09 HM.30: Black's reply that repeats a position is not stopped; it is queued and the next White move is the repetition", async () => {
     const { calls, fetched, lines } = await runScripted(
       { [play([])]: [["Nf3", 100]], [play(["Nf3", "Nf6"])]: [["Ng1", 100]] },
-      { [play(["Nf3"])]: "Nf6", [play(["Nf3", "Nf6", "Ng1"])]: "Ng8" },
-      3
+      { [play(["Nf3"])]: "Nf6", [play(["Nf3", "Nf6", "Ng1"])]: "Ng8" }
     );
     const reply = await prisma.repertoireMove.findFirstOrThrow({ where: { repertoireId, playerTurn: "RESPONSE", san: "Ng8" } });
     const repeated = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, displayPgn: "Nf3 Nf6 Ng1 Ng8" } });
@@ -334,8 +358,7 @@ describe("HM generator", () => {
         [play(["e4", "d6"])]: [["Nf3", 100]],
         [play(["Nf3", "e6"])]: [["e4", 100]]
       },
-      { [play(["e4"])]: "d6", [play(["e4", "d6", "Nf3"])]: "e6", [play(["Nf3"])]: "e6", [play(["Nf3", "e6", "e4"])]: "d6" },
-      3
+      { [play(["e4"])]: "d6", [play(["e4", "d6", "Nf3"])]: "e6", [play(["Nf3"])]: "e6", [play(["Nf3", "e6", "e4"])]: "d6" }
     );
     const first = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, displayPgn: "e4 d6 Nf3 e6" } });
     const second = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, displayPgn: "Nf3 e6 e4 d6" } });
@@ -346,6 +369,56 @@ describe("HM generator", () => {
     assert.ok(responses.every(response => response.stopReason === null && response.toNodeId !== null));
     // Both routes reach the queue.
     assert.equal(fetched.filter(position => position === boardAndTurn(first.fullFen)).length, 2);
+  });
+
+  it("RE.02 RE.03 RE.04 RE.05 RE.06 RE.10: Black's move that ends the game ends the route and logs [GAME OVER]", async () => {
+    // 1.f3 e5 2.g4 Qh4#
+    const { fetched, lines } = await runScripted(
+      { [play([])]: [["f3", 100]], [play(["f3", "e5"])]: [["g4", 100]] },
+      { [play(["f3"])]: "e5", [play(["f3", "e5", "g4"])]: "Qh4#" }
+    );
+    const node = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, displayPgn: "f3 e5 g4 Qh4#" } });
+    const reply = await prisma.repertoireMove.findFirstOrThrow({ where: { toNodeId: node.id } });
+    assert.equal(reply.playerTurn, "RESPONSE");
+    assert.equal(reply.stopReason, "Game over on Black's move");
+    assert.ok(lines.includes("[GAME OVER] route=f3 e5 g4 Qh4#; cumProb=100.000%"));
+    // RE.04, RE.10: never queued, so never sent to Explorer and given no children.
+    assert.ok(!fetched.includes(boardAndTurn(node.fullFen)));
+    assert.equal(await prisma.repertoireMove.count({ where: { fromNodeId: node.id } }), 0);
+    // RE.05: the probability is left as it is.
+    assert.ok(near(node.cumProb, 1));
+    assert.notEqual(node.openingMetadataStatus, null);
+  });
+
+  it("RE.07 RE.08 RE.10: Black's move that uses up the depth budget ends the route and logs [DEPTH BUDGET REACHED]", async () => {
+    // depthCap = 5: the route ends straight after Black's 5th move.
+    const route = ["e4", "e5", "Nf3", "Nc6", "Bc4", "Bc5", "c3", "Nf6", "d3", "d6"];
+    const whiteMoves: Record<string, Array<[string, number]>> = {};
+    const replies: Record<string, string> = {};
+    for (let ply = 0; ply < route.length; ply += 2) {
+      whiteMoves[play(route.slice(0, ply))] = [[route[ply], 100]];
+      replies[play(route.slice(0, ply + 1))] = route[ply + 1];
+    }
+    const { fetched, lines } = await runScripted(whiteMoves, replies);
+    const node = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, displayPgn: route.join(" ") } });
+    const reply = await prisma.repertoireMove.findFirstOrThrow({ where: { toNodeId: node.id } });
+    assert.equal(reply.stopReason, "Depth budget reached on Black's move");
+    assert.ok(lines.includes(`[DEPTH BUDGET REACHED] route=${route.join(" ")}; cumProb=100.000%`));
+    // Black's 4th move is still within the budget.
+    const earlier = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, displayPgn: route.slice(0, 8).join(" ") } });
+    assert.ok(fetched.includes(boardAndTurn(earlier.fullFen)));
+    assert.ok(!fetched.includes(boardAndTurn(node.fullFen)));
+    assert.equal(await prisma.repertoireMove.count({ where: { fromNodeId: node.id } }), 0);
+    assert.ok(near(node.cumProb, 1));
+    assert.notEqual(node.openingMetadataStatus, null);
+  });
+
+  it("RE.09: Black's move within the budget is pushed, with no stopReason", async () => {
+    const { fetched } = await runScripted({ [play([])]: [["e4", 100]] }, { [play(["e4"])]: "e5" });
+    const node = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, displayPgn: "e4 e5" } });
+    const reply = await prisma.repertoireMove.findFirstOrThrow({ where: { toNodeId: node.id } });
+    assert.equal(reply.stopReason, null);
+    assert.ok(fetched.includes(boardAndTurn(node.fullFen)));
   });
 
   it("HM.32: a cascade into the source raises the repetition node's cumProb, never the earlier node's", async () => {
