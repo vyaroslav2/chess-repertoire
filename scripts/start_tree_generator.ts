@@ -10,6 +10,7 @@ if (fs.existsSync("C:\\Files\\.env")) {
 }
 
 import { generateRepertoire } from "../src/lib/core/generator";
+import { defaultConfig, type Config } from "../src/lib/core/config";
 import { prisma } from "../src/lib/db/operations";
 import {
   acquireLock,
@@ -56,6 +57,11 @@ type LauncherDependencies = {
   projectRoot?: string;
 };
 
+export function depthHeaderLine(config: Config = defaultConfig): string {
+  const { deep, medium, shallow } = config.depthBudget;
+  return `Depth: depthBudget deep=${deep}, medium=${medium}, shallow=${shallow}; depthCap=${config.depthCap} (full moves)`;
+}
+
 function errorReason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -98,7 +104,7 @@ export async function runTreeGenerator(
     fs.mkdirSync(path.dirname(logPath), { recursive: true });
     fs.writeFileSync(
       logPath,
-      `# Tree Generation Log\n\nStarted: ${startedAt.toISOString()}\nDepth: testing default (3 full moves)\n\n\`\`\`text\n`,
+      `# Tree Generation Log\n\nStarted: ${startedAt.toISOString()}\n${depthHeaderLine()}\n\n\`\`\`text\n`,
     );
     logOpened = true;
 

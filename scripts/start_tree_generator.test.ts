@@ -95,6 +95,25 @@ test("S1.03: each run writes its own log and earlier run logs are never touched"
   }
 });
 
+test("TGL: log file is named treegen-[timestamp].md and its header shows the configured depth", async () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "treegen-tgl-"));
+  try {
+    await runTreeGenerator({
+      environment: {},
+      projectRoot: fixtureRoot,
+      acquire: mockLock,
+      generate: async () => undefined,
+      disconnect: async () => undefined,
+      now: () => new Date("2026-08-30T11:15:23.456Z")
+    });
+    const log = fs.readFileSync(path.join(fixtureRoot, "new-docs", "logs", "treegen-2026-08-30T111523Z.md"), "utf8");
+    assert.match(log, /^Depth: depthBudget deep=15, medium=8, shallow=5; depthCap=5 \(full moves\)$/m);
+    assert.doesNotMatch(log, /3 full moves/);
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test("TREE_GEN_LOG_PATH override wins exactly", async () => {
   const override = tempLog("override");
   const unrelatedRoot = fs.mkdtempSync(path.join(os.tmpdir(), "treegen-override-root-"));
