@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { Chess } from "chess.js";
-import { createRepertoireNode, prisma } from "../db/operations";
+import { createRepertoireNode, prisma, saveLocalEngineBaseline } from "../db/operations";
 import { runCascade } from "./cascade";
 import { defaultConfig } from "./config";
 import { selectWhiteCandidates } from "./evaluator";
-import { generateRepertoire, responseEnding } from "./generator";
+import { generateRepertoire, NO_OPPONENT_MOVES_ENDING, responseEnding } from "./generator";
 import { canonicalizeOpponentCandidates, readExpectedOpponentEdges, reconcileOpponentBranches } from "./rm-opponent-reconciliation";
 
 const START_FEN = new Chess().fen();
@@ -115,10 +115,12 @@ describe("HM generator", () => {
       const legal = chess.moves({ verbose: true });
       const reply = legal.find(move => move.san === replies[boardAndTurn(fen)]) ?? legal[0];
       calls.push(fen);
+      // S3.12: every Black response must be deepVerified, which needs local Stockfish evidence.
+      await saveLocalEngineBaseline(fen, "test-local", { uci: reply.lan, cp: -10, mate: null });
       return {
         selectedUci: reply.lan, selectedMoveSan: reply.san, cp: -10, mate: null,
         source: "ChessDB" as const, selectionMethod: "Ordinary API" as const, moveOrigin: "Human Move" as const,
-        deepVerified: false, localEvaluationProfile: null,
+        deepVerified: true, localEvaluationProfile: "test-local",
         selectedStats: { weightedGames: 30, blackScore: 0.5 }, candidateMoves: [], enginePvs: [],
         evalSource: "ChessDB" as const, selectedEngineCp: -10, selectedMate: null,
         openingMetadata: null, openingMetadataRetrieval: "FRESH" as const
@@ -366,7 +368,8 @@ describe("HM generator", () => {
     assert.notEqual(first.id, second.id);
     const responses = await prisma.repertoireMove.findMany({ where: { repertoireId, playerTurn: "RESPONSE" } });
     assert.equal(responses.length, 4);
-    assert.ok(responses.every(response => response.stopReason === null && response.toNodeId !== null));
+    // RE.09 stops none of them; the replies into positions with no games end there later (EX.06, S3.14).
+    assert.ok(responses.every(response => (response.stopReason === null || response.stopReason === NO_OPPONENT_MOVES_ENDING) && response.toNodeId !== null));
     // Both routes reach the queue.
     assert.equal(fetched.filter(position => position === boardAndTurn(first.fullFen)).length, 2);
   });
@@ -417,7 +420,8 @@ describe("HM generator", () => {
     const { fetched } = await runScripted({ [play([])]: [["e4", 100]] }, { [play(["e4"])]: "e5" });
     const node = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, displayPgn: "e4 e5" } });
     const reply = await prisma.repertoireMove.findFirstOrThrow({ where: { toNodeId: node.id } });
-    assert.equal(reply.stopReason, null);
+    // Pushed without a stopReason; it gets one only when dequeued and Explorer has no games (EX.06, S3.14).
+    assert.equal(reply.stopReason, NO_OPPONENT_MOVES_ENDING);
     assert.ok(fetched.includes(boardAndTurn(node.fullFen)));
   });
 

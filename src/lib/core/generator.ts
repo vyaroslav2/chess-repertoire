@@ -14,7 +14,7 @@ import { parseFullFen, positionKeyFromFen } from "./fen";
 import { fetchAllDatabases, fetchMastersOpeningMetadata, pickExplorerOpening, type ExplorerOpening } from "../api/lichess";
 import { defaultConfig, createRuntimeConfig, getProbabilityBand, type Config } from "../core/config";
 import { selectWhiteCandidates, evaluateBlackMove } from "./evaluator";
-import { runCascade, type CascadeRunState } from "./cascade";
+import { runCascade, probabilityBalance, type CascadeRunState } from "./cascade";
 import { reconcileExistingResponse } from "./rm-reconciliation";
 import { delay } from "../api/retry";
 import { UserRequestedStopError } from "../api/retry";
@@ -363,6 +363,72 @@ export async function persistCanonicalMaxCumulativeProbability(input: {
   return currentNode;
 }
 
+/** EX.06: the route ends at a position Explorer has no Amateur games for. */
+export const NO_OPPONENT_MOVES_ENDING = "No opponent moves found";
+
+/** S3.10: rareDroppedMovesTotal, every node with stopReason = Too rare. */
+export async function countRareDroppedMoves(repertoireId: string) {
+  return prisma.repertoireMove.count({ where: { repertoireId, stopReason: "Too rare" } });
+}
+
+/** S3.11 - S3.14: the end-of-run checks. One message per check that fails; S3.15 throws on any. */
+export async function endOfRunFailures(input: {
+  repertoireId: string;
+  tinyDroppedTotal: number;
+  config: Pick<Config, "probabilityTolerance">;
+}) {
+  const { repertoireId } = input;
+  const failures: string[] = [];
+
+  // S3.11
+  const balance = await probabilityBalance(repertoireId, input.tinyDroppedTotal);
+  if (Math.abs(balance - 1) > input.config.probabilityTolerance) {
+    failures.push(`S3.11: ending total + rareDroppedTotal + unaccountedDroppedTotal + tinyDroppedTotal is ${(balance * 100).toFixed(6)}%, not 100%.`);
+  }
+
+  // S3.12, DB.14
+  const unverified = await prisma.repertoireMove.findMany({
+    where: { repertoireId, playerTurn: "RESPONSE", deepVerified: false },
+    select: { san: true }
+  });
+  if (unverified.length > 0) {
+    failures.push(`S3.12: ${unverified.length} Black responses do not have deepVerified set (first: ${unverified[0].san}).`);
+  }
+
+  // S3.13, DB.06: a missing status or a half-filled pair.
+  const openingStates = await prisma.repertoireNode.findMany({
+    where: { repertoireId },
+    select: { history: true, openingMetadataStatus: true, eco: true, openingName: true }
+  });
+  for (const state of openingStates) {
+    try {
+      validateOpeningMetadataState(
+        { status: state.openingMetadataStatus, eco: state.eco, openingName: state.openingName },
+        `Generated history ${state.history || "(root)"} has incomplete opening metadata state`
+      );
+    } catch (error) {
+      failures.push(`S3.13: ${(error as Error).message}`);
+      break;
+    }
+  }
+
+  // S3.14, DB.20: an ending reached by a move carries a stopReason on that move. The root has no move.
+  const unexplained = await prisma.repertoireNode.findMany({
+    where: {
+      repertoireId,
+      history: { not: "" },
+      outgoingMoves: { none: {} },
+      incomingMoves: { none: { stopReason: { not: null } } }
+    },
+    select: { displayPgn: true }
+  });
+  if (unexplained.length > 0) {
+    failures.push(`S3.14: ${unexplained.length} routes end without a stopReason (first: ${unexplained[0].displayPgn}).`);
+  }
+
+  return failures;
+}
+
 export async function generateRepertoire(
   startFen: string,
   dependencies: GenerateRepertoireDependencies = {}
@@ -432,7 +498,8 @@ export async function generateRepertoire(
     ,uciHistory: [] as string[]
   }];
   
-  const visitedPgns = new Set<string>();
+  // S3.03: in-run only, marked at dequeue.
+  const visitedNodes = new Set<string>();
   const wikibooksAttemptedNodeIds = new Set<string>();
   const pendingCanonicalContinuations: PendingCanonicalContinuations = new Map();
 
@@ -463,12 +530,13 @@ export async function generateRepertoire(
     if (!node) continue;
     
     const pgnString = node.history.join(" ");
-    if (visitedPgns.has(pgnString)) {
+    // S3.03
+    if (visitedNodes.has(node.nodeId)) {
       totalDuplicateHistories++;
       console.warn(`[WARNING] Duplicate queued history skipped: ${pgnString || "(root)"}`);
       continue;
     }
-    visitedPgns.add(pgnString);
+    visitedNodes.add(node.nodeId);
     
     totalPositionsProcessed++;
 
@@ -550,7 +618,7 @@ export async function generateRepertoire(
       if (invalidatedId === node.nodeId) continue;
       const invalidNode = await prisma.repertoireNode.findUnique({ where: { id: invalidatedId } });
       if (invalidNode) {
-        visitedPgns.delete(invalidNode.displayPgn);
+        visitedNodes.delete(invalidNode.id);
         queue.push({
           nodeId: invalidNode.id,
           fen: invalidNode.fullFen,
@@ -577,6 +645,11 @@ export async function generateRepertoire(
         const tempChess = new Chess(node.fen);
         if (!tempChess.isGameOver() && rawAmateurMoveCount === 0) {
             console.log("No opponent moves found."); // EX.06
+            // S3.14: the Black move that reached this position ends the route. The root has none.
+            await prisma.repertoireMove.updateMany({
+              where: { toNodeId: node.nodeId, playerTurn: "RESPONSE" },
+              data: { stopReason: NO_OPPONENT_MOVES_ENDING }
+            });
             totalMissingWhiteMoves++;
         } else if (!tempChess.isGameOver()) {
             console.warn("[WARNING] All opponent moves were filtered away."); // HM.08
@@ -869,19 +942,9 @@ export async function generateRepertoire(
   
   const endTime = Date.now();
   const timeElapsed = ((endTime - startTime) / 1000).toFixed(2);
-  // DB.06: by the end of a run every node carries a status; a missing status or a half-filled pair is an error.
-  const openingStates = await prisma.repertoireNode.findMany({
-    where: { repertoireId: repertoire.id },
-    select: { history: true, openingMetadataStatus: true, eco: true, openingName: true }
-  });
-  for (const state of openingStates) {
-    validateOpeningMetadataState(
-      { status: state.openingMetadataStatus, eco: state.eco, openingName: state.openingName },
-      `Generated history ${state.history || "(root)"} has incomplete opening metadata state`
-    );
-  }
+  const rareDroppedMovesTotal = await countRareDroppedMoves(repertoire.id);
 
-  
+  // S3.10
   console.log("\n========================================================");
   console.log("=== TREE GENERATION SUMMARY ===");
   console.log(`Time Elapsed:             ${timeElapsed} seconds`);
@@ -895,7 +958,17 @@ export async function generateRepertoire(
   console.log(`Missing White Moves:      ${totalMissingWhiteMoves}`);
   console.log(`Black Responses Without CP: ${totalNaEvals}`);
   console.log(`Duplicate Histories:      ${totalDuplicateHistories}`);
+  console.log(`Rare Dropped Moves Total: ${rareDroppedMovesTotal}`);
   console.log("========================================================\n");
+
+  // S3.11 - S3.15
+  const failures = await endOfRunFailures({
+    repertoireId: repertoire.id,
+    tinyDroppedTotal: cascadeRun.tinyDroppedTotal,
+    config: runtime.config
+  });
+  if (failures.length > 0) throw new Error(`End-of-run checks failed:\n${failures.join("\n")}`);
+
   await prisma.$transaction([
     prisma.repertoirePositionStat.deleteMany({ where: { repertoireId: repertoire.id, nodeId: null } }),
     prisma.repertoire.update({ where: { id: repertoire.id }, data: { generationStatus: "IDLE", completedConfigHash: runtime.configHash } })
@@ -911,6 +984,7 @@ export async function generateRepertoire(
     totalRepetitionStops,
     totalMissingWhiteMoves,
     tinyDroppedTotal: cascadeRun.tinyDroppedTotal,
+    rareDroppedMovesTotal,
   };
   } catch (error) {
     try {

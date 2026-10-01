@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { Chess } from "chess.js";
-import { prisma } from "../db/operations";
+import { prisma, saveLocalEngineBaseline } from "../db/operations";
 import { defaultConfig } from "./config";
 import { generateRepertoire } from "./generator";
 import { probabilityBalance, runCascade, type CascadeRunState } from "./cascade";
@@ -81,10 +81,12 @@ describe("TR", () => {
         const legal = chess.moves({ verbose: true });
         const reply = legal.find(candidate => candidate.san === replies[boardAndTurn(fen)]) ?? legal[0];
         calls.push(boardAndTurn(fen));
+        // S3.12: every Black response must be deepVerified, which needs local Stockfish evidence.
+        await saveLocalEngineBaseline(fen, "test-local", { uci: reply.lan, cp: -10, mate: null });
         return {
           selectedUci: reply.lan, selectedMoveSan: reply.san, cp: -10, mate: null,
           source: "ChessDB" as const, selectionMethod: "Ordinary API" as const, moveOrigin: "Human Move" as const,
-          deepVerified: false, localEvaluationProfile: null,
+          deepVerified: true, localEvaluationProfile: "test-local",
           selectedStats: { weightedGames: 30, blackScore: 0.5 }, candidateMoves: [], enginePvs: [],
           evalSource: "ChessDB" as const, selectedEngineCp: -10, selectedMate: null,
           openingMetadata: null, openingMetadataRetrieval: "FRESH" as const

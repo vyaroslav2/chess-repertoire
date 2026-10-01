@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { Chess } from "chess.js";
-import { prisma, readExplorerCache } from "../db/operations";
+import { prisma, readExplorerCache, saveLocalEngineBaseline } from "../db/operations";
 import { checkExplorerGameCounts, fetchAllDatabases } from "../api/lichess";
 import { computeExplorerCacheProfile, defaultConfig } from "./config";
 import { parseFullFen, positionKeyFromFen } from "./fen";
@@ -149,10 +149,12 @@ describe("EX.05 EX.06 generator", () => {
       if (!uci) throw new Error(`Unexpected evaluator FEN ${fen}`);
       const move = chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4) });
       chess.undo();
+      // S3.12: every Black response must be deepVerified, which needs local Stockfish evidence.
+      await saveLocalEngineBaseline(fen, "test-local", { uci, cp: -10, mate: null });
       return {
         selectedUci: uci, selectedMoveSan: move.san, cp: -10, mate: null,
         source: "ChessDB" as const, selectionMethod: "Ordinary API" as const, moveOrigin: "Human Move" as const,
-        deepVerified: false, localEvaluationProfile: null,
+        deepVerified: true, localEvaluationProfile: "test-local",
         selectedStats: { weightedGames: 30, blackScore: 0.5 }, candidateMoves: [], enginePvs: [],
         evalSource: "ChessDB" as const, selectedEngineCp: -10, selectedMate: null,
         openingMetadata: null, openingMetadataRetrieval: "FRESH" as const

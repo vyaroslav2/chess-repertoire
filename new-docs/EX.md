@@ -43,7 +43,7 @@ EX.05 **Store & Return Result**:
 	* More `-->` hard error `-->` exit: `"Explorer move counts are more than the position's total games. Dataset: [dataset]. Moves: [m] games. Position: [n] games."`
 
 EX.06 **Return to caller**: Return the move data for each requested dataset, empty or not, to the caller. The caller decides what an empty result means:
-* [[HM|HM.02]]: no Amateur moves `-->` end the route, log the stop reason `"No opponent moves found."`, proceed to [[S3|S3.01]].
+* [[HM|HM.02]]: no Amateur moves `-->` end the route: record stopReason = `No opponent moves found` on the Black move that reached this position, log `"No opponent moves found."`, proceed to [[S3|S3.01]]. 
 * [[EW|EW.02]]: handled there.
 
 EX.07 **Every result is checked, cached or fresh.** The EX.05 game count check runs on every result EX returns, not only after a fetch. The tree is rebuilt on every run, so each run must record `unaccountedDropped` again. The cache holds the counts, not the node values. So the warning is printed on every run that reaches the position.

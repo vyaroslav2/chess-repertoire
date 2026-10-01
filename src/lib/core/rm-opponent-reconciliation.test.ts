@@ -5,7 +5,8 @@ import {
   createOpponentMove,
   createRepertoireNode,
   createResponseMove,
-  prisma
+  prisma,
+  saveLocalEngineBaseline
 } from "../db/operations";
 import { parseFullFen, positionKeyFromFen } from "./fen";
 import {
@@ -21,6 +22,15 @@ import {
   type GeneratorQueueItem,
   type PendingCanonicalContinuations
 } from "./generator";
+
+// S3.12: every Black response must be deepVerified, which needs local Stockfish evidence.
+function deepVerified<T extends (fen: string, ...rest: any[]) => Promise<any>>(evaluator: T) {
+  return (async (fen: string, ...rest: any[]) => {
+    const result = await evaluator(fen, ...rest);
+    await saveLocalEngineBaseline(fen, "test-local", { uci: result.selectedUci, cp: result.cp, mate: result.mate });
+    return { ...result, deepVerified: true, localEvaluationProfile: "test-local" };
+  }) as T;
+}
 
 describe("Slice 17 OPPONENT set reconciliation", () => {
   const initialFullFen = new Chess().fen();
@@ -442,7 +452,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
           : { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0 }
       ]) as any,
       fetchOpeningMetadata: async () => null,
-      responseEvaluator: responseEvaluator as any,
+      responseEvaluator: deepVerified(responseEvaluator) as any,
       ensureNodeWikibooks: (async () => ({ status: "CACHED", text: null })) as any,
       wait: async () => undefined
     });
@@ -546,7 +556,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
       repertoireId,
       fetchDatabases: mockDatabases,
       fetchOpeningMetadata: async () => null,
-      responseEvaluator: mockEvaluator as any,
+      responseEvaluator: deepVerified(mockEvaluator) as any,
       ensureNodeWikibooks: (async () => ({ status: "CACHED", text: null })) as any,
       wait: async () => undefined
     });
@@ -620,7 +630,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
       repertoireId,
       fetchDatabases: mockDatabases,
       fetchOpeningMetadata: async () => null,
-      responseEvaluator: mockEvaluator as any,
+      responseEvaluator: deepVerified(mockEvaluator) as any,
       ensureNodeWikibooks: (async () => ({ status: "CACHED", text: null })) as any,
       wait: async () => undefined
     });
