@@ -15,7 +15,6 @@ import { fetchAllDatabases, fetchMastersOpeningMetadata, pickExplorerOpening, ty
 import { defaultConfig, createRuntimeConfig, getProbabilityBand, type Config } from "../core/config";
 import { selectWhiteCandidates, evaluateBlackMove } from "./evaluator";
 import { runCascade, probabilityBalance, type CascadeRunState } from "./cascade";
-import { reconcileExistingResponse } from "./rm-reconciliation";
 import { delay } from "../api/retry";
 import { UserRequestedStopError } from "../api/retry";
 import { createEmptyCard } from "ts-fsrs";
@@ -713,23 +712,6 @@ export async function generateRepertoire(
       // HM.N.01: Black's reply starts with this node's cumProb, including any cascade that reached it since.
       const effectiveCanonicalProb = posAfterWhiteNode.cumProb;
 
-      const existingStat = await prisma.repertoirePositionStat.findFirst({
-        where: { repertoireId: repertoire.id, nodeId: posAfterWhiteNode.id }
-      });
-
-      if (existingStat && !existingStat.targetMoveId) throw new Error("Stored RESPONSE stat is temporarily detached from its move");
-      const dbBlackMove = existingStat
-        ? await prisma.repertoireMove.findUnique({ where: { id: existingStat.targetMoveId! } })
-        : await prisma.repertoireMove.findFirst({ where: { fromNodeId: posAfterWhiteNode.id, playerTurn: "RESPONSE" } });
-      if (existingStat && !dbBlackMove) throw new Error(`Stored RESPONSE ${existingStat.targetMoveId} no longer exists`);
-      if (!existingStat && dbBlackMove) throw new Error(`Stored RESPONSE ${dbBlackMove.id} has no position stat and cannot be reconciled`);
-      if (dbBlackMove && (!dbBlackMove.uci || !dbBlackMove.source || !dbBlackMove.selectionMethod || !dbBlackMove.moveOrigin ||
-          dbBlackMove.playerTurn !== "RESPONSE" || dbBlackMove.fromNodeId !== posAfterWhiteNode.id ||
-          !((typeof dbBlackMove.cp === "number" && Number.isFinite(dbBlackMove.cp) && dbBlackMove.mate === null) ||
-            (dbBlackMove.cp === null && typeof dbBlackMove.mate === "number" && Number.isInteger(dbBlackMove.mate) && dbBlackMove.mate !== 0)))) {
-        throw new Error(`Stored RESPONSE ${dbBlackMove.id} is legacy/incomplete and cannot be reconciled`);
-      }
-
       const canonicalSelection = await evaluateCanonicalResponse({
           responseNode: posAfterWhiteNode,
           routePgn: newPgn,
@@ -777,113 +759,69 @@ export async function generateRepertoire(
       let resultingDestinationPgn: string | null = blackPgn;
       let resultingDestinationHistory: string | null = blackHistory;
 
-      if (dbBlackMove) {
-          const result = await reconcileExistingResponse({
-              repertoireId: repertoire.id,
-              sourceNodeId: posAfterWhiteNode.id,
-              expectedStoredResponse: {
-                  id: dbBlackMove.id,
-                  uci: dbBlackMove.uci as string,
-                  fromNodeId: dbBlackMove.fromNodeId,
-                  toNodeId: dbBlackMove.toNodeId,
-                  fullFen: posAfterWhiteNode.fullFen
-              },
-              cumProb: effectiveCanonicalProb,
-              recomputed: {
-                  selectedUci: algoResult.selectedUci,
-                  selectedMoveSan: algoResult.selectedMoveSan,
-                  cp: algoResult.cp,
-                  mate: algoResult.mate,
-                  source: algoResult.source,
-                  selectionMethod: algoResult.selectionMethod,
-                  moveOrigin: algoResult.moveOrigin,
-                  deepVerified: algoResult.deepVerified,
-                  localEvaluationProfile: algoResult.localEvaluationProfile
-                  ,...responseProvenance
-              }
+      // Black's reply never stops on a repetition or transposition: it always lands on
+      // this route's own node and goes on to the queue. If the position repeats, the
+      // White moves from it are caught by HM.30 and HM.34, so no card is duplicated.
+      let posAfterBlackNode = await getRepertoireNode(repertoire.id, blackHistory);
+      if (!posAfterBlackNode) {
+          // HM.06: routeProb follows the route only (x 100% for Black's reply); cumProb carries any cascade.
+          posAfterBlackNode = await createRepertoireNode(repertoire.id, selectedDestinationFen, blackHistory, posAfterWhiteNode.routeProb, {
+            displayPgn: blackPgn,
+            siblingIndex: 0,
+            cumProb: effectiveCanonicalProb
           });
-
-          responseId = result.responseId;
-          resultingDestinationId = result.destinationNodeId;
-          resultingDestinationFen = result.destinationFullFen;
-          resultingDestinationPgn = result.destinationPgn;
-          if (resultingDestinationId !== null) {
-            const destination = await prisma.repertoireNode.findUnique({ where: { id: resultingDestinationId } });
-            if (!destination) throw new Error("Reconciled RESPONSE destination disappeared");
-            resultingDestinationHistory = destination.history;
-          }
-
-          // Reconcile explanation but DO NOT wipe SRS progress
-          const explanationUpdate = await prisma.repertoirePositionStat.updateMany({
-             where: { repertoireId: repertoire.id, nodeId: posAfterWhiteNode.id, targetMoveId: result.responseId },
-             data: { explanation: explanation }
-          });
-          if (explanationUpdate.count !== 1) throw new Error("Reconciled RESPONSE stat changed before explanation update");
       } else {
-          // Black's reply never stops on a repetition or transposition: it always lands on
-          // this route's own node and goes on to the queue. If the position repeats, the
-          // White moves from it are caught by HM.30 and HM.34, so no card is duplicated.
-          let posAfterBlackNode = await getRepertoireNode(repertoire.id, blackHistory);
-          if (!posAfterBlackNode) {
-              // HM.06: routeProb follows the route only (x 100% for Black's reply); cumProb carries any cascade.
-              posAfterBlackNode = await createRepertoireNode(repertoire.id, selectedDestinationFen, blackHistory, posAfterWhiteNode.routeProb, {
-                displayPgn: blackPgn,
-                siblingIndex: 0,
-                cumProb: effectiveCanonicalProb
-              });
-          } else {
-              await prisma.repertoireNode.update({
-                  where: { id: posAfterBlackNode.id },
-                  data: { cumProb: Math.max(posAfterBlackNode.cumProb, effectiveCanonicalProb) }
-              });
-          }
-
-          resultingDestinationId = posAfterBlackNode.id;
-          resultingDestinationFen = posAfterBlackNode.fullFen;
-          resultingDestinationPgn = posAfterBlackNode.displayPgn;
-          resultingDestinationHistory = posAfterBlackNode.history;
-
-          const createdResponse = await createResponseMove({
-              fromNodeId: posAfterWhiteNode.id,
-              toNodeId: posAfterBlackNode.id,
-              uci: algoResult.selectedUci,
-              san: algoResult.selectedMoveSan,
-              cp: algoResult.cp,
-              mate: algoResult.mate,
-              ...responseProvenance,
-              source: algoResult.source,
-              selectionMethod: algoResult.selectionMethod,
-              moveOrigin: algoResult.moveOrigin,
-              deepVerified: algoResult.deepVerified,
-              localEvaluationProfile: algoResult.localEvaluationProfile
-          });
-          responseId = createdResponse.id;
-
-          const emptyCard = createEmptyCard();
-          await prisma.repertoirePositionStat.upsert({
-            where: { repertoireId_positionKey_targetUci: { repertoireId: repertoire.id, positionKey: posAfterWhiteNode.positionKey, targetUci: algoResult.selectedUci } },
-            update: { nodeId: posAfterWhiteNode.id, targetMoveId: createdResponse.id, explanation: explanation },
-            create: {
-              repertoireId: repertoire.id,
-              positionKey: posAfterWhiteNode.positionKey,
-              targetUci: algoResult.selectedUci,
-              nodeId: posAfterWhiteNode.id,
-              targetMoveId: createdResponse.id,
-              explanation: explanation,
-              // New cards are all immediately due; a small deterministic offset
-              // introduces the most probable positions first without changing FSRS state.
-              due: new Date(emptyCard.due.getTime() - (effectiveCanonicalProb * 1000)),
-              stability: emptyCard.stability,
-              difficulty: emptyCard.difficulty,
-              elapsed_days: emptyCard.elapsed_days,
-              scheduled_days: emptyCard.scheduled_days,
-              reps: emptyCard.reps,
-              lapses: emptyCard.lapses,
-              state: emptyCard.state,
-              last_review: emptyCard.last_review || null
-            }
+          await prisma.repertoireNode.update({
+              where: { id: posAfterBlackNode.id },
+              data: { cumProb: Math.max(posAfterBlackNode.cumProb, effectiveCanonicalProb) }
           });
       }
+
+      resultingDestinationId = posAfterBlackNode.id;
+      resultingDestinationFen = posAfterBlackNode.fullFen;
+      resultingDestinationPgn = posAfterBlackNode.displayPgn;
+      resultingDestinationHistory = posAfterBlackNode.history;
+
+      const createdResponse = await createResponseMove({
+          fromNodeId: posAfterWhiteNode.id,
+          toNodeId: posAfterBlackNode.id,
+          uci: algoResult.selectedUci,
+          san: algoResult.selectedMoveSan,
+          cp: algoResult.cp,
+          mate: algoResult.mate,
+          ...responseProvenance,
+          source: algoResult.source,
+          selectionMethod: algoResult.selectionMethod,
+          moveOrigin: algoResult.moveOrigin,
+          deepVerified: algoResult.deepVerified,
+          localEvaluationProfile: algoResult.localEvaluationProfile
+      });
+      responseId = createdResponse.id;
+
+      const emptyCard = createEmptyCard();
+      await prisma.repertoirePositionStat.upsert({
+        where: { repertoireId_positionKey_targetUci: { repertoireId: repertoire.id, positionKey: posAfterWhiteNode.positionKey, targetUci: algoResult.selectedUci } },
+        update: { nodeId: posAfterWhiteNode.id, targetMoveId: createdResponse.id, explanation: explanation },
+        create: {
+          repertoireId: repertoire.id,
+          positionKey: posAfterWhiteNode.positionKey,
+          targetUci: algoResult.selectedUci,
+          nodeId: posAfterWhiteNode.id,
+          targetMoveId: createdResponse.id,
+          explanation: explanation,
+          // New cards are all immediately due; a small deterministic offset
+          // introduces the most probable positions first without changing FSRS state.
+          due: new Date(emptyCard.due.getTime() - (effectiveCanonicalProb * 1000)),
+          stability: emptyCard.stability,
+          difficulty: emptyCard.difficulty,
+          elapsed_days: emptyCard.elapsed_days,
+          scheduled_days: emptyCard.scheduled_days,
+          reps: emptyCard.reps,
+          lapses: emptyCard.lapses,
+          state: emptyCard.state,
+          last_review: emptyCard.last_review || null
+        }
+      });
 
       if (!resultingDestinationId || !resultingDestinationFen || resultingDestinationPgn === null || resultingDestinationHistory === null) {
         throw new Error("RESPONSE is missing its destination");
