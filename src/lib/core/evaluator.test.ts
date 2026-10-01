@@ -60,7 +60,9 @@ test('Slice 10 Evaluator Tests', async (t) => {
       // We expect evaluateBlackMove to throw when it tries to apply 'e7e5'
       await assert.rejects(
         async () => {
-          await evaluateBlackMove(fen, chess, 2, ["e4", "e5"]);
+          await evaluateBlackMove(fen, chess, 2, ["e4", "e5"], {
+            localSearchRunner: async () => ({ uci: "e7e5", san: "e5", cp: null, mate: -3 })
+          });
         },
         (err: Error) => {
           return err.message.includes("illegal in this position");

@@ -507,7 +507,8 @@ export async function readLocalEngineCandidate(fullFen: string, candidateUci: st
 // --- DB.08 - DB.15 moves ---
 
 export const RESPONSE_EVALUATION_SOURCES = ["Lichess Cloud Evaluation", "ChessDB", "Local Deep Stockfish"] as const;
-export const RESPONSE_SELECTION_METHODS = ["Ordinary API", "Corrected after Deep Verification", "Local Engine Fallback", "Hardcoded Opening"] as const;
+// DB.14: the ordinary waterfall, no candidate has enough games, the engine fallback, a hardcoded response.
+export const RESPONSE_SELECTION_METHODS = ["Ordinary API", "No Qualifying Candidates", "Engine Fallback", "Hardcoded", "Corrected after Deep Verification"] as const;
 export const RESPONSE_MOVE_ORIGINS = ["Human Move", "Engine Move", "Hardcoded Move"] as const;
 export type ResponseEvaluationSource = typeof RESPONSE_EVALUATION_SOURCES[number];
 export type ResponseSelectionMethod = typeof RESPONSE_SELECTION_METHODS[number];

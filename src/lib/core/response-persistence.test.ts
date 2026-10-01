@@ -148,7 +148,7 @@ test("OPPONENT mismatched supplied repertoireId hard-errors without writing", as
 test("Slice 13 rejects every malformed evaluation and controlled value before writing", async () => {
   const bad = [
     { cp: null, mate: null }, { cp: 1, mate: 2 }, { cp: NaN, mate: null }, { cp: Infinity, mate: null },
-    { cp: null, mate: 1.5 }, { cp: null, mate: 0 }, { source: "Hardcoded Opening" }, { source: undefined },
+    { cp: null, mate: 1.5 }, { cp: null, mate: 0 }, { source: "Hardcoded" }, { source: undefined },
     { selectionMethod: "Guess" }, { moveOrigin: "Guess" }, { uci: "bad" }, { deepVerified: true, localEvaluationProfile: null }
   ];
   for (const override of bad) assert.throws(() => validateResponsePersistence(base(override)), /Invalid RESPONSE/);
@@ -160,8 +160,8 @@ test("Slice 13 persists valid provenance combinations including fallback and har
     { source: "Lichess Cloud Evaluation", selectionMethod: "Ordinary API", moveOrigin: "Human Move" },
     { source: "ChessDB", selectionMethod: "Ordinary API", moveOrigin: "Human Move" },
     { source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Human Move" },
-    { source: "Local Deep Stockfish", selectionMethod: "Local Engine Fallback", moveOrigin: "Engine Move" },
-    { source: "ChessDB", selectionMethod: "Hardcoded Opening", moveOrigin: "Hardcoded Move" }
+    { source: "Local Deep Stockfish", selectionMethod: "Engine Fallback", moveOrigin: "Engine Move" },
+    { source: "ChessDB", selectionMethod: "Hardcoded", moveOrigin: "Hardcoded Move" }
   ] as const) {
     const row = await createResponseMove(base(state));
     assert.equal(row.source, state.source); assert.equal(row.selectionMethod, state.selectionMethod); assert.equal(row.moveOrigin, state.moveOrigin);

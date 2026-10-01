@@ -319,12 +319,12 @@ describe("RM Reconciliation", () => {
                 },
                 recomputed: {
                     selectedUci: "c7c5", selectedMoveSan: "c5", cp: 7, mate: null,
-                    source: "ChessDB", selectionMethod: "Hardcoded Opening", moveOrigin: "Hardcoded Move",
+                    source: "ChessDB", selectionMethod: "Hardcoded", moveOrigin: "Hardcoded Move",
                     deepVerified: false, localEvaluationProfile: null, weightedGames: null
                 }
             });
             const updated = await prisma.repertoireMove.findUniqueOrThrow({ where: { id: responseMove.id } });
-            assert.equal(updated.selectionMethod, "Hardcoded Opening");
+            assert.equal(updated.selectionMethod, "Hardcoded");
             assert.equal(updated.moveOrigin, "Hardcoded Move");
             assert.equal(updated.source, "ChessDB");
             assert.equal((await prisma.repertoirePositionStat.findUniqueOrThrow({ where: { id: stat.id } })).reps, 5);

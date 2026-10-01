@@ -76,7 +76,7 @@ test("move-number bands use stored FullFen boundaries 4/5 and 8/9", () => {
 });
 
 test("DB.14 DV PASS marks deepVerified while preserving selected evaluation and provenance", async () => {
-  const response = await addResponse(repertoireId, 4, "pass", { cp: -20, source: "ChessDB", selectionMethod: "Hardcoded Opening", moveOrigin: "Hardcoded Move" });
+  const response = await addResponse(repertoireId, 4, "pass", { cp: -20, source: "ChessDB", selectionMethod: "Hardcoded", moveOrigin: "Hardcoded Move" });
   const from = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: response.fromNodeId } });
   await saveLocalEngineBaseline(from.fullFen, "current-profile", { uci: "e7e5", cp: -100, mate: null });
   await saveLocalEngineCandidate(from.fullFen, response.uci!, "current-profile", { uci: response.uci!, cp: -30, mate: null });
@@ -85,7 +85,7 @@ test("DB.14 DV PASS marks deepVerified while preserving selected evaluation and 
   const after = await prisma.repertoireMove.findUniqueOrThrow({ where: { id: response.id } });
   assert.equal(after.deepVerified, true);
   assert.equal(after.cp, -20); assert.equal(after.source, "ChessDB");
-  assert.equal(after.selectionMethod, "Hardcoded Opening"); assert.equal(after.moveOrigin, "Hardcoded Move");
+  assert.equal(after.selectionMethod, "Hardcoded"); assert.equal(after.moveOrigin, "Hardcoded Move");
 });
 
 test("DV pass persistence rejects a changed RESPONSE race", async () => {

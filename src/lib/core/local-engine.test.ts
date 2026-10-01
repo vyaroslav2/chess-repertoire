@@ -297,11 +297,16 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
     assert.throws(() => verifyLocalOrdinaryCp(-20, -30, 95), /better than baseline/);
   });
 
-  await t.test('mate never enters ordinary local cp verification', async () => {
-    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
-    const runner: LocalSearchRunner = async (_fen, _settings, expected) =>
-      expected ? cpEval(expected, 'c6', 0) : mateEval('e7e5', 'e5', -3);
-    await assert.rejects(verifyLocalCandidate(blackFen, 'c7c6', 95, defaultConfig, runner), /mate comparison/);
+  await t.test('EW.10 where a mate is involved, only the same mate distance as the baseline passes', async () => {
+    const decide = async (baseline: TrustedLocalEvaluation, candidate: TrustedLocalEvaluation) => {
+      await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
+      const runner: LocalSearchRunner = async (_fen, _settings, expected) => expected ? candidate : baseline;
+      return (await verifyLocalCandidate(blackFen, 'c7c6', 95, defaultConfig, runner)).decision;
+    };
+    assert.equal(await decide(mateEval('e7e5', 'e5', -3), cpEval('c7c6', 'c6', -500)), 'REJECT', 'misses the mate');
+    assert.equal(await decide(mateEval('e7e5', 'e5', -3), mateEval('c7c6', 'c6', -4)), 'REJECT', 'a longer mate');
+    assert.equal(await decide(mateEval('e7e5', 'e5', -3), mateEval('c7c6', 'c6', -3)), 'ACCEPT', 'the same mate distance');
+    assert.equal(await decide(cpEval('e7e5', 'e5', -30), mateEval('c7c6', 'c6', 6)), 'REJECT', 'walks into a mate');
   });
 
   await t.test('invalid replacement preserves trusted evidence and malformed evidence is not persisted', async () => {

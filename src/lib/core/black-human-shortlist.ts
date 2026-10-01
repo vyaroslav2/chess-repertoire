@@ -120,9 +120,13 @@ export function buildBlackHumanShortlist(
     shortlist.push(candidate);
   }
 
+  // EW.05: top score first; ties go to more evidence. The engine tie-break is the caller's.
   shortlist.sort((a, b) => {
     if (a.blackScore !== b.blackScore) {
       return b.blackScore - a.blackScore;
+    }
+    if (a.weightedGames !== b.weightedGames) {
+      return b.weightedGames - a.weightedGames;
     }
     return a.uci.localeCompare(b.uci);
   });

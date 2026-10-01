@@ -351,7 +351,7 @@ async function diagnosticEvaluateBlackMove(
 
   const tolerance = getCpTolerance(moveNumber, false);
   console.log(`\n[WATERFALL EXPLANATION] API tolerance=${tolerance}cp`);
-  const hardcoded = moveNumber === 1 && previousMovesSan.length === 1 && (previousMovesSan[0] === "e4" || previousMovesSan[0] === "d4");
+  const hardcoded = result.moveOrigin === "Hardcoded Move";
   if (hardcoded) {
     console.log(`  Opening rule fixes Black's response as ${result.selectedMoveSan}. Engines provide evidence but do not choose a competing move.`);
   } else {

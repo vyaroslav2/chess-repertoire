@@ -293,11 +293,12 @@ export async function verifyLocalCandidate(
   const candidateResult = await getOrCreateLocalCandidate(fullFen, candidateUci, config, runner);
   const baseline = baselineResult.evaluation;
   const candidate = candidateResult.evaluation;
-  if (baseline.cp === null || candidate.cp === null || baseline.mate !== null || candidate.mate !== null) {
-    throw new Error('Local mate comparison is outside the ordinary cp verifier');
-  }
+  // EW.10: where a mate is involved, only the same mate distance as the baseline passes.
+  const mateInvolved = baseline.mate !== null || candidate.mate !== null;
   return {
-    decision: verifyLocalOrdinaryCp(baseline.cp, candidate.cp, toleranceCp),
+    decision: mateInvolved
+      ? (candidate.mate === baseline.mate ? 'ACCEPT' : 'REJECT')
+      : verifyLocalOrdinaryCp(baseline.cp!, candidate.cp!, toleranceCp),
     baseline,
     candidate,
     evaluationProfile: baselineResult.evaluationProfile,

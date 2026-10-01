@@ -123,8 +123,9 @@ test('Slice 12 B4 Local Deep integration', async (t) => {
       assert.equal(result.selectedEngineCp, -25);
       assert.equal(result.evalSource, 'Local Deep Stockfish');
       assert.equal(result.deepVerified, true);
-      assert.equal(result.selectionMethod, 'Local Engine Fallback');
+      assert.equal(result.selectionMethod, 'No Qualifying Candidates');
       assert.equal(result.moveOrigin, 'Engine Move');
+      assert.equal(result.engineRank, 1);
       assert.ok(result.localEvaluationProfile);
       assert.equal(calls, 1);
     } finally {
@@ -159,6 +160,7 @@ test('Slice 12 B4 Local Deep integration', async (t) => {
     const requested: Array<string | undefined> = [];
     const runner: LocalSearchRunner = async (_fen, _settings, expected) => {
       requested.push(expected);
+      if (expected === undefined) return cpEval('e7e5', 'e5', 0);
       if (expected !== 'c7c6') throw new Error('hardcoded path must request c7c6 only');
       return cpEval('c7c6', 'c6', 42);
     };
@@ -167,10 +169,11 @@ test('Slice 12 B4 Local Deep integration', async (t) => {
       assert.equal(result.selectedMoveSan, 'c6');
       assert.equal(result.selectedEngineCp, 42);
       assert.equal(result.evalSource, 'Local Deep Stockfish');
-      assert.equal(result.deepVerified, false);
-      assert.equal(result.selectionMethod, 'Hardcoded Opening');
+      assert.equal(result.deepVerified, true);
+      assert.equal(result.engineRank, null);
+      assert.equal(result.selectionMethod, 'Hardcoded');
       assert.equal(result.moveOrigin, 'Hardcoded Move');
-      assert.deepEqual(requested, ['c7c6']);
+      assert.deepEqual(requested, [undefined, 'c7c6']);
 
       const second = await setupPosition(e4Fen, []);
       try {
@@ -187,7 +190,7 @@ test('Slice 12 B4 Local Deep integration', async (t) => {
   });
 
   await t.test('hardcoded Local mate remains explicit and wrong returned root hard-errors', async () => {
-    await prisma.engineCacheEvaluation.deleteMany({ where: { rank: null, cache: { engine: "LOCAL" } } });
+    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
     const mateState = await setupPosition(e4Fen, []);
     try {
       const mate = await evaluateBlackMove(e4Fen, new Chess(e4Fen), 1, ['e4'], {
@@ -200,7 +203,7 @@ test('Slice 12 B4 Local Deep integration', async (t) => {
       await cleanup(mateState.user.id, mateState.repertoire.id);
     }
 
-    await prisma.engineCacheEvaluation.deleteMany({ where: { rank: null, cache: { engine: "LOCAL" } } });
+    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
     const wrongState = await setupPosition(e4Fen, []);
     try {
       await assert.rejects(

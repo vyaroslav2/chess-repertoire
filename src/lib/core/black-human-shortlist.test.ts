@@ -137,6 +137,17 @@ describe('B1 Black Human Shortlist Construction', () => {
     assert.strictEqual(list[1].uci, 'h2h3');
   });
 
+  it('EW.05 equal score: more weighted games first', () => {
+    // 49/100 and 98/200: the same score from 50 and 150 weighted games.
+    const elite = [
+      { uci: 'a2a3', san: 'a3', white: 25, draws: 0, black: 25, games: 50 },
+      { uci: 'h2h3', san: 'h3', white: 76, draws: 0, black: 74, games: 150 }
+    ];
+    const list = buildBlackHumanShortlist([], elite, defaultConfig);
+    assert.strictEqual(list[0].blackScore, list[1].blackScore);
+    assert.strictEqual(list[0].uci, 'h2h3');
+  });
+
   it('17, 18. empty Masters + Elite empty -> empty shortlist, all below floor -> empty', () => {
     const l1 = buildBlackHumanShortlist([], [], defaultConfig);
     assert.strictEqual(l1.length, 0);

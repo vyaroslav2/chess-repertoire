@@ -85,6 +85,7 @@ OV.21 These docs describe generation and storage only. They deliberately say not
 * Reopening a branch when a transposition lifts its depth budget into a deeper band. #roadmap
 * Engine evaluation of White moves ([[DB|DB.10]]). #roadmap
 * Generating a repertoire for White. The generator builds a Black repertoire only; the White side is postponed. #roadmap
+* More than one first move reaching the shortest mate. Currently only one is kept, as one Black move per position ([[DB|DB.09]]). #roadmap
 
 OV.22 Where these notes and the production code disagree, these notes win.[^2]
 

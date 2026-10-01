@@ -659,7 +659,6 @@ export async function generateRepertoire(
       const algoResult = canonicalSelection.result;
       await ensureNodeOpeningMetadata(posAfterWhiteNode.id, rebuildOpeningMetadataCache, algoResult.openingMetadata ?? null, fetchOpeningMetadata);
       await attemptCanonicalNodeWikibooks(posAfterWhiteNode.id, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
-      const selectedEngineIndex = (algoResult.enginePvs ?? []).findIndex((pv: { uci?: string; moves?: string }) => (pv.uci ?? pv.moves?.split(" ")[0]) === algoResult.selectedUci);
       // DB.13 the human evidence; DB.14 engineRank.
       const responseProvenance = {
         ...responseHumanEvidence({
@@ -669,7 +668,7 @@ export async function generateRepertoire(
           totalMastersGames: algoResult.totalMastersGames,
           totalEliteGames: algoResult.totalEliteGames
         }),
-        engineRank: selectedEngineIndex >= 0 ? selectedEngineIndex + 1 : null
+        engineRank: algoResult.engineRank ?? null
       };
 
 
