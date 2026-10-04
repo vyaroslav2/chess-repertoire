@@ -55,8 +55,12 @@ new-docs/logs/
 
 # engine
 /bin/
+/stockfish-windows-x86-64-universal/
 generator.lock
 lockfile-never-remove-by-yourself-unless-stale
+
+# script output
+scripts/temp/depth_drift_results.json
 
 # database backups and journals
 *.db.bak*
