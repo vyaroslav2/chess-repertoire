@@ -82,7 +82,6 @@ OV.21 These docs describe generation and storage only. They deliberately say not
 * Reconciliation — abandoned; wipe and rebuild is the only strategy. 
 * Wikibooks text, which is kept working in code but not documented. Its requests follow [[AR]]. #deferred
 * The final UI card order ([[HM|HM.05]] gives sorting, not the finished order). #roadmap
-* Reopening a branch when a transposition lifts its depth budget into a deeper band. #roadmap
 * Engine evaluation of White moves ([[DB|DB.10]]). #roadmap
 * Generating a repertoire for White. The generator builds a Black repertoire only; the White side is postponed. #roadmap
 * More than one first move reaching the shortest mate. Currently only one is kept, as one Black move per position ([[DB|DB.09]]). #roadmap

@@ -75,6 +75,7 @@ DB.15 **`cp` is always from White's point of view.**[^11] A negative `cp` is goo
 DB.20 **A move that ends a route carries a `stopReason`.** The root is the only ending without one, since no move reaches it ([[S3|S3.14]]).
 * On a White move: `Too rare`, `Game over`, `Repetition` ([[HM.excalidraw|HM]]); `Transposition` ([[TR.excalidraw|TR]]).
 * On a Black move: `Game over on Black's move`, `Depth budget reached on Black's move` ([[RE.excalidraw|RE]]); `No opponent moves found` ([[EX|EX.06]]).
+* A route reopened by a sweep loses its `stopReason` ([[DRS|DRS.04]]). It gets a new one when it stops again. 
 
 ## The caches
 
