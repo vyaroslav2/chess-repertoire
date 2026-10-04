@@ -1,6 +1,6 @@
 ---
 tags:
-  - reviewed
+  - "#processed"
 ---
 # HM — Human Moves
 
@@ -19,7 +19,7 @@ HM.04 Filter returned moves by popularity:
 * Drop the rest — each dropped move still gets a node, whose `cumProb` is held at 0 and whose arriving probability accumulates in `rareDropped` instead ([[HM.excalidraw|HM.23]]).
 * Log how many moves were dropped at this position: `rareDroppedMoves`, counted from the nodes with `stopReason = Too rare`.
 
-HM.05 Assign an explicit `siblingIndex` (1, 2, 3...) to every returned move's node, dropped moves included, based on descending popularity, ensuring UI decks can sort cards reliably regardless of queue traversal order. UI cards are ordered from most popular White moves to least popular.[^2] Ties are resolved alphabetically by SAN. 
+HM.05 Assign an explicit `siblingIndex` (1, 2, 3...) to every returned move's node, dropped moves included, based on descending popularity, ensuring UI decks can sort cards reliably regardless of queue traversal order. UI cards are ordered from most popular White moves to least popular. Ties are resolved alphabetically by SAN. 
 
 
 HM.06 For each returned move, generate a new child node:
@@ -34,5 +34,4 @@ HM.08 If Explorer returned moves but all of them were filtered away `-->` end th
 
 [^1]: see [[generation-config]] and [[popularity-thresholds|popularityThresholds]]
 
-[^2]: #note A limitation I found. A transposition can raise a route's depth budget, which would reopen a route that has already stopped. Its new cards would then appear out of order. That is out of scope for these docs. For now, cards should still follow the popularity order (most popular White move first) as closely as possible. Later I will need a separate sort for the UI cards, so that they appear in order. #roadmap
 
