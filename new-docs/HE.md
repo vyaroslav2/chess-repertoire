@@ -5,6 +5,13 @@ tags:
 
 # Human evidence
 
+## Scope
+A standalone project inside chess-repertoire. It must not change or break the existing code.
+- All code lives in its own folder: `experiments/he/`.
+- It may read existing code and the DB, but never writes to them. No edits to `src/`, `config.ts` or the tree generator.
+- Its data (game files, eval cache, results) stays in `experiments/he/data/`, which is git-ignored.
+- It uses its own Stockfish 19 calls and cache, separate from the tree generator's.
+
 ## The problem
 Small samples lie. Nd7 (3 games, 33%) beat Bg7 (142 games, 44%) because a fixed 48% prior lifted it. If we rank moves by one score alone, a move with a few lucky games can end up on top.
 
@@ -15,12 +22,12 @@ Pick a move other than the engine top move only when the human games give strong
 From ~100,000[^1] games in the band we choose (rating gap under 100[^2], opening moves ~2–15). Use games that start with 1. d4 d5 and 1. e4 c6:
 
 1. **The curve (prior centre).** Eval → expected win/draw/loss for Black. Example: "+1.00 → Black scores 43%."
-2. The scatter (sets k). Group games by the same position and the same move. Keep groups with 200+ games. Within a group, results differ only by luck. Between groups, they also differ for real. Fit k directly on these groups' win/draw/loss counts. Report k with its uncertainty, and check whether one k fits all evals and move numbers.
+2. The scatter (sets k). Group games by the same position and the same move. Fit k on the win/draw/loss counts of all groups with 2+ games; the fit gives small groups less weight. One-game groups cannot show scatter, so they help only the curve. Check: fit k separately for bands of 2–9, 10–49, 50–199 and 200+ games. If the bands agree, use one k. If not, use the k that matches contender sizes. Report k with its uncertainty, and check whether it holds across evals and move numbers. Use one position per game, so groups stay independent.
 3. **The minimum sample (follows from 1 and 2).** The fewest games with which a contender could ever pass.
-4. Use the same eval source -- local Stockfish 19.
+4. One eval source for everything: local Stockfish 19 at a fixed depth (d24). The curve, each contender's prior and the engine checks all use it. ChessDB or Lichess cloud evals would not match the curve.
 
 ## The algorithm (draft)
-0. Candidates: from anywhere (band games, Masters games, engine top moves). Scoring: band games only (Lichess 1600, 1800, 2000 groups). A Masters move can be a candidate, but it is judged at my level.[^3]
+0. Candidates: from anywhere (band games, Masters games, engine top moves). Scoring: band games only (Lichess 1600, 1800, 2000 groups). A Masters move can be a candidate, but it is judged at my level.
 1. **Champion** = engine top move, even with zero games. It keeps the core rule clean. Its wide fog already makes it hard to beat with weak evidence.
 2. **Each contender's prior** = k fake games at the curve's win/draw/loss for its own eval.
 3. **Add its real games** (real counts, not ×5 weighted) → a Dirichlet "cloud" of believable scores.[^4]
@@ -40,7 +47,7 @@ k is only best if the model fits the data. That needs checking, not assuming.
 For the problem we started with, yes:
 * fewer unsupported switches, with the uncertainty made visible
 * the curve and k are measured, not guessed; the confidence and margin are tuned on data
-* the risk is one dial you understand ("95% sure")
+* the risk is set by two dials you understand: confidence ("95% sure") and margin ("1% better")
 * the engine cp limits and the line budget keep it sound
 
 Limits to expect:
@@ -57,9 +64,11 @@ The 2026 final test will tell you.
 
 
 ### Next step: a small pilot
-- **Scope:** 1. d4 d5 and Caro-Kann only, Lichess 1600–2000, Classical + Rapid.
+- **Scope:** 1. d4 d5 and Caro-Kann only, Lichess 1600–2199, Classical + Rapid.
 - **Periods:** 2023–24 fit; 2025 tune; 2026 final test.
 - **Output:** the curve, k (with its uncertainty), how well predictions match the 2026 games, and how many switches have enough evidence to judge.
+
+Open: build position + move counts from dated game files, with the same band, gap and time-control rules for fitting, tuning and testing. Band = average of both players' ratings.
 
 
 
@@ -68,9 +77,7 @@ The 2026 final test will tell you.
 
 [^2]: Do not guess a cut-off. Test it: build the curve for gaps 0–50, 50–100 and 100–200. Keep every group whose curve looks the same as 0–50.
 
-[^3]: 1. Candidates: take them from anywhere: your band's games, Masters games, the engine's top moves. Listing a move does no harm, because the test and the engine check decide. 2. Scoring: use your band only. In the Lichess explorer that is the 1600, 1800 and 2000 groups. So a Masters move can be a candidate, but it is judged on how it scores at my level.
-
-[^4]: We use 1600-2000, Classical and Rapid.
+[^4]: We use 1600–2199, Classical and Rapid.
 
 [^5]: Pick the values on separate periods: - 2023–24: fit the curve and k; count each move's games. - 2025: try 70%, 80%, 95% (margin 0% or 1%); keep the best setting. - 2026: test the frozen setting once. This is the final verdict. Keep all positions from one game in the same period. Compare each switch with its champion in the same position.
 
