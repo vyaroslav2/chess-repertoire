@@ -4,8 +4,8 @@ tags:
 ---
 
 # Human evidence
-
 ## Scope
+
 A standalone project inside chess-repertoire. It must not change or break the existing code.
 - All code lives in its own folder: `experiments/he/`.
 - It may read existing code and the DB, but never writes to them. No edits to `src/`, `config.ts` or the tree generator.
@@ -23,11 +23,14 @@ From ~100,000[^1] games in the band we choose (rating gap under 100[^2], opening
 
 1. **The curve (prior centre).** Eval → expected win/draw/loss for Black. Example: "+1.00 → Black scores 43%."
 2. The scatter (sets k). Group games by the same position and the same move. Fit k on the win/draw/loss counts of all groups with 2+ games; the fit gives small groups less weight. One-game groups cannot show scatter, so they help only the curve. Check: fit k separately for bands of 2–9, 10–49, 50–199 and 200+ games. If the bands agree, use one k. If not, use the k that matches contender sizes. Report k with its uncertainty, and check whether it holds across evals and move numbers. Use one position per game, so groups stay independent.
+   
+   ==2a. **Scatter check (before fitting k).** For position + move groups with 200+ games, plot real score against the curve at their eval. Spread well beyond coin-flip noise means eval is a weak guide (small k). Spread close to it means eval is reliable (big k).==
+
 3. **The minimum sample (follows from 1 and 2).** The fewest games with which a contender could ever pass.
 4. One eval source for everything: local Stockfish 19 at a fixed depth (d24). The curve, each contender's prior and the engine checks all use it. ChessDB or Lichess cloud evals would not match the curve.
 
 ## The algorithm (draft)
-0. Candidates: from anywhere (band games, Masters games, engine top moves). Scoring: band games only (Lichess 1600, 1800, 2000 groups). A Masters move can be a candidate, but it is judged at my level.
+0. Candidates: moves with band games (Lichess 1600–2199, Classical + Rapid), plus the engine top move. Masters moves are dropped: with no band games they can never pass.
 1. **Champion** = engine top move, even with zero games. It keeps the core rule clean. Its wide fog already makes it hard to beat with weak evidence.
 2. **Each contender's prior** = k fake games at the curve's win/draw/loss for its own eval.
 3. **Add its real games** (real counts, not ×5 weighted) → a Dirichlet "cloud" of believable scores.[^4]
