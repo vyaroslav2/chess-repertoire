@@ -12,6 +12,6 @@ Computers store probabilities as floats, and each sum adds a very small error. A
 
 The tolerance is absolute, not relative. 99.99995% passes as 100%, but 99.9998% fails.
 
-Probabilities are never rounded, so the error stays far below this limit ([[file-naming]], rule 11).
+Probabilities are never rounded, so the error stays far below this limit ([[file-naming]], rule 12).
 
 Not the same as [[tiny-threshold|tinyThreshold]], which drops a very small gain during a cascade. That gain is counted in `tinyDroppedTotal`, so it is not lost.
