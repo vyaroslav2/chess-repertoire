@@ -46,6 +46,10 @@ Spread matters particularly for short goals: one event, a fixed target (for exam
 
 Whether you prefer that risk is personal. That is taste, not maths. 
 
+### Decision
+
+The project uses points per game (option 1) as the raw score: `rawScore = (wins + 0.5 × draws) / games`. Other scores build on it.
+
 ### Problems with the current score
 
 The current score ([[EW|EW.04]]) is option 1 with shrinkage:
