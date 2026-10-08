@@ -4,7 +4,7 @@ import path from "node:path";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { gzipSync } from "node:zlib";
 import { Chess } from "chess.js";
-import { selectObservation, readGames } from "../pgn";
+import { selectObservation, readGames, gameRecord } from "../pgn";
 import { importFiles, groupObservations } from "../import";
 import { parseEvaluation } from "../engine";
 import { DATA_ROOT, assertDataDirectory, runPath } from "../paths";
@@ -146,4 +146,27 @@ test("run output paths reject traversal", () => {
   assert.throws(() => runPath("../outside"));
   assert.throws(() => runPath("a/b"));
   assert.throws(() => runPath(""));
+});
+test("game record keeps the full mainline, the PGN result and how it ended", () => {
+  const parsed = gameRecord(fixture({ Result: "1/2-1/2", Termination: "Normal" }));
+  assert.ok("record" in parsed, JSON.stringify(parsed));
+  assert.equal(parsed.record.result, "1/2-1/2");
+  assert.equal(parsed.record.termination, "Normal");
+  assert.equal(parsed.record.finalState, null);
+  assert.equal(parsed.record.sanMoves.split(" ").length, 32);
+  assert.ok(parsed.record.sanMoves.startsWith("d4 d5 Nf3 Nf6"));
+  assert.ok(parsed.record.uciMoves.startsWith("d2d4 d7d5 g1f3 g8f6"));
+  assert.equal(parsed.record.playedOn, "2024-06-01");
+  assert.deepEqual(gameRecord(fixture()), { rejected: "termination" });
+  assert.deepEqual(gameRecord(fixture({ Termination: "Normal" }).replace(/0-1\n$/, "1-0\n")), { rejected: "result-mismatch" });
+  assert.deepEqual(gameRecord(fixture({ Termination: "Rules infraction" })), { rejected: "rules-infraction" });
+});
+test("a checkmate or stalemate on the board must match the result", () => {
+  const mate = (result: string) => `[Site "https://lichess.org/abcd1234"]\n[UTCDate "2024.06.01"]\n[WhiteElo "1800"]\n` +
+    `[BlackElo "1800"]\n[Result "${result}"]\n[Termination "Normal"]\n\n1. f3 e5 2. g4 Qh4# ${result}\n`;
+  const parsed = gameRecord(mate("0-1"));
+  assert.ok("record" in parsed, JSON.stringify(parsed));
+  assert.equal(parsed.record.finalState, "checkmate");
+  assert.deepEqual(gameRecord(mate("1-0")), { rejected: "final-state-mismatch" });
+  assert.deepEqual(gameRecord(mate("1/2-1/2")), { rejected: "final-state-mismatch" });
 });

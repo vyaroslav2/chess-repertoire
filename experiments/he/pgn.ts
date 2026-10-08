@@ -68,6 +68,47 @@ function datedPeriod(value: string | undefined): { date: string; period: Period 
   const period = year === 2023 || year === 2024 ? "fit" : year === 2025 ? "tune" : year === 2026 ? "test" : null;
   return period ? { date, period } : null;
 }
+// Strip irrelevant comments before chess.js; header-like text inside comments can
+// otherwise confuse its PGN lexer. Preserve headers, and validate all mainline moves.
+function splitPgn(pgn: string): { tags: string; body: string } {
+  const lines = pgn.split(/\r?\n/);
+  let start = 0;
+  while (start < lines.length && (!lines[start].trim() || /^\s*\[\w+\s+"/.test(lines[start]))) start++;
+  return { tags: lines.slice(0, start).join("\n"),
+    body: lines.slice(start).join("\n").replace(/\{[^}]*\}/g, " ").replace(/;[^\n]*/g, " ") };
+}
+export type GameRecord = { gameId: string; playedOn: string; whiteElo: number; blackElo: number;
+  result: "1-0" | "0-1" | "1/2-1/2"; termination: string;
+  finalState: "checkmate" | "stalemate" | "insufficient" | null; uciMoves: string; sanMoves: string };
+// One database row per game: the full mainline in UCI and SAN, the PGN result and how it ended.
+export function gameRecord(pgn: string): { record: GameRecord } | { rejected: string } {
+  const h = headers(pgn);
+  const gameId = /^https?:\/\/(?:www\.)?lichess\.org\/([a-zA-Z0-9]{8})(?:\/(?:white|black))?\/?$/.exec(h.Site ?? "")?.[1];
+  if (!gameId) return { rejected: "game-id" };
+  const playedOn = (h.UTCDate ?? h.Date ?? "").replaceAll(".", "-");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(playedOn)) return { rejected: "date" };
+  if (!/^\d+$/.test(h.WhiteElo ?? "") || !/^\d+$/.test(h.BlackElo ?? "")) return { rejected: "rating" };
+  const result = h.Result;
+  if (result !== "1-0" && result !== "0-1" && result !== "1/2-1/2") return { rejected: "unfinished" };
+  const termination = h.Termination;
+  if (!termination) return { rejected: "termination" };
+  // Lichess may have changed the result after catching a rule breaker, so the game proves nothing.
+  if (termination === "Rules infraction") return { rejected: "rules-infraction" };
+  const { tags, body } = splitPgn(pgn);
+  const chess = new Chess();
+  try { chess.loadPgn(tags + "\n\n" + body); }
+  catch { return { rejected: "invalid-pgn" }; }
+  // The header and the result at the end of the moves must agree.
+  if (chess.getHeaders().Result !== result || !body.trim().endsWith(result)) return { rejected: "result-mismatch" };
+  // Where the final position settles the game, the result must match it.
+  const finalState = chess.isCheckmate() ? "checkmate" : chess.isStalemate() ? "stalemate"
+    : chess.isInsufficientMaterial() ? "insufficient" : null;
+  const forced = finalState === "checkmate" ? (chess.turn() === "w" ? "0-1" : "1-0") : finalState ? "1/2-1/2" : result;
+  if (forced !== result) return { rejected: "final-state-mismatch" };
+  const moves = chess.history({ verbose: true });
+  return { record: { gameId, playedOn, whiteElo: Number(h.WhiteElo), blackElo: Number(h.BlackElo), result,
+    termination, finalState, uciMoves: moves.map(move => move.lan).join(" "), sanMoves: moves.map(move => move.san).join(" ") } };
+}
 export function selectObservation(pgn: string, options: ImportOptions): Selection {
   const h = headers(pgn);
   const dated = datedPeriod(h.UTCDate ?? h.Date);
@@ -85,18 +126,13 @@ export function selectObservation(pgn: string, options: ImportOptions): Selectio
   if (!outcome) return { rejected: "unfinished" };
   const gameId = /^https?:\/\/(?:www\.)?lichess\.org\/([a-zA-Z0-9]{8})(?:\/(?:white|black))?\/?$/.exec(h.Site ?? "")?.[1];
   if (!gameId) return { rejected: "game-id" };
-  // Strip irrelevant comments before chess.js; header-like text inside comments can
-  // otherwise confuse its PGN lexer. Preserve headers, and validate all mainline moves.
-  const lines = pgn.split(/\r?\n/);
-  let start = 0;
-  while (start < lines.length && (!lines[start].trim() || /^\s*\[\w+\s+"/.test(lines[start]))) start++;
-  const body = lines.slice(start).join("\n").replace(/\{[^}]*\}/g, " ").replace(/;[^\n]*/g, " ");
+  const { tags, body } = splitPgn(pgn);
   // Cheap opening check before chess.js, which is the slow step: most games fail here.
   const firstTwo = body.trim().split(/\s+/).filter(token => !/^\d+\.+$/.test(token) && !token.startsWith("$"))
     .slice(0, 2).map(token => token.replace(/^\d+\.+/, "").replace(/[!?]+$/, "")).join(" ");
   if (firstTwo !== "d4 d5" && firstTwo !== "e4 c6") return { rejected: "opening" };
   const chess = new Chess();
-  try { chess.loadPgn(lines.slice(0, start).join("\n") + "\n\n" + body); }
+  try { chess.loadPgn(tags + "\n\n" + body); }
   catch { return { rejected: "invalid-pgn" }; }
   if (chess.getHeaders().Result !== h.Result) return { rejected: "result-mismatch" };
   const moves = chess.history({ verbose: true });

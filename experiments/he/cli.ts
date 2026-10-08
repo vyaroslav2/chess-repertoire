@@ -4,7 +4,9 @@ import { downloadRun, filterDownloaded } from "./download";
 import { evaluateRun } from "./evaluate";
 import type { Period } from "./types";
 import { resolveInputPath } from "./paths";
-import { checkConnection } from "./db";
+import { checkConnection, loadGames } from "./db";
+import path from "node:path";
+import { DATA_ROOT, runPath } from "./paths";
 
 const HELP = String.raw`Human evidence pilot
   npm --prefix experiments/he run download -- --run fit-50k --month 2024-01 --gb 2.5 --limit 50000
@@ -12,11 +14,13 @@ const HELP = String.raw`Human evidence pilot
   npm --prefix experiments/he run import -- --run pilot-50k --limit 50000 file.pgn [other.pgn.gz]
   npm --prefix experiments/he run evaluate -- --run pilot-50k --engine <stockfish-19-binary> [--period fit] [--limit 5]
   npm --prefix experiments/he run db-check
+  npm --prefix experiments/he run load -- --run fit-50k [--limit 100]
 
 Import: --seed he-v1 (default), --max-gap 100 (default) or 200 (diagnostic).
 Periods: fit (2023-24), tune (2025), test (2026).
 Input and engine paths are relative to the terminal directory where you launch npm.
 All outputs live in experiments/he/data/. Existing run/results names are protected.
+Load copies a download's sample.pgn into the MySQL games table; repeating it is safe.
 Input supports .pgn and .pgn.gz. Decompress Lichess .pgn.zst exports first.
 `;
 async function main() {
@@ -49,6 +53,11 @@ async function main() {
     const gap = Number(values["max-gap"] ?? 100);
     if (gap !== 100 && gap !== 200) throw new Error("--max-gap must be 100 or 200.");
     console.log(JSON.stringify(await importFiles(positionals.map(file => resolveInputPath(file)), values.run, { seed: values.seed ?? "he-v1", maxGap: gap }, limit), null, 2));
+  } else if (command === "load") {
+    if (positionals.length || values.month || values.gb || values.seed || values["max-gap"] || values.engine || values.period)
+      throw new Error("Load takes only --run and --limit.");
+    runPath(values.run);
+    console.log(JSON.stringify(await loadGames(path.join(DATA_ROOT, "downloads", values.run, "sample.pgn"), limit), null, 2));
   } else if (command === "evaluate") {
     if (!values.engine) throw new Error("--engine is required; point to a Stockfish 19 binary.");
     if (positionals.length || values.seed || values["max-gap"]) throw new Error("Evaluate uses the import run's inputs and filters.");

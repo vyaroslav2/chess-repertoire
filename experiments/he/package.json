@@ -8,6 +8,7 @@
     "import": "tsx cli.ts import",
     "evaluate": "tsx cli.ts evaluate",
     "db-check": "tsx cli.ts db-check",
+    "load": "tsx cli.ts load",
     "test": "tsx --test tests/*.test.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
