@@ -29,6 +29,14 @@ From ~100,000[^1] games in the band we choose (rating gap under 100[^2], opening
 3. **The minimum sample (follows from 1 and 2).** The fewest games with which a contender could ever pass.
 4. One eval source for everything: local Stockfish 19 at a fixed depth (d24). The curve, each contender's prior and the engine checks all use it. ChessDB or Lichess cloud evals would not match the curve.
 
+## Which games count
+- **Every game counts,** however it stopped: checkmate, resignation, time, draw. A game is never dropped for how it ended.
+- **One exception:** games Lichess ended for a rules infraction are dropped on load. Lichess may have set their result, so it proves nothing.
+- **Sensitivity check.** Run the analysis twice. Main run: all games. Check run: without time losses, and without games that ended by Black's move m + 5, where m is the sampled move. Compare which moves pass.
+	- Same moves pass → the doubtful games didn't matter. The main run stands.
+	- Different moves pass → the doubtful games drove the result. Look closer before trusting it.
+- This rule is fixed now, before any results, so neither run can be picked after seeing them.
+
 ## The algorithm (draft)
 0. Candidates: moves with band games (Lichess 1600–2199, Classical + Rapid), plus the engine top move. Masters moves are dropped: with no band games they can never pass.
 1. **Champion** = engine top move, even with zero games. It keeps the core rule clean. Its wide fog already makes it hard to beat with weak evidence.
