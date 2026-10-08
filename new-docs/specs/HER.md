@@ -153,6 +153,8 @@ HER.63 **Every game counts, whatever its stop reason.** Time losses and early en
 
 HER.64 **Results are kept in PGN form** (`1-0`). Not from one side's view, e.g. not `wins`, `draws`, `losses` for Black, as `observations.jsonl` stores it.". Neutral, so there is no doubt whose view it is.
 
+HER.65 **More data means a new download from byte 0.** There is no "continue": every download starts at the beginning of the archive (HER.02). For more games, raise `--gb` (e.g. `--gb 5`) or choose another month. Each is a new run with a new `--run` name (HER.04). Continuing from where a prefix ended is possible, but needs new code, so it is deferred. Downloading the first 2.5 GB again costs only minutes. Loading the bigger run on top of the old one is safe: games already in the table are overwritten with the same values, never doubled (HER.32), and only the new games are added. Raise `--limit` too, or drop it: with `--limit 50000` the filter stops at the same 50,000 games.
+
 
 
 
