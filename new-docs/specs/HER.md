@@ -9,7 +9,7 @@ All code lives in `experiments/he/`. All data stays in `experiments/he/data/`, w
 
 ## Download
 
-HER.01 **Source.** A Lichess monthly archive of rated standard games (`.pgn.zst`). ==For now the pilot uses January 2024.[^1]==
+HER.01 **Source.** A Lichess monthly archive of rated standard games (`.pgn.zst`). For now, the pilot uses the January 2024 archive.
 
 HER.02 ==**Only the start of the archive is downloaded.** The archive is in time order, so the start means the month's earliest games. We download the first 2.5 GB of about 32 GB. A month is about 32 GB compressed.[^2]== ==The download asks for the first N GB (`--gb`) and checks that the server the server confirms it sent bytes 0 to 2.5 GB (HTTP 206), not the whole file or something else.== If not, it stops. `npm --prefix experiments/he run download -- --run fit-50k --month 2024-01 --gb 2.5 --limit 50000`. Any size from 16 bytes up to the whole month; 0.001 (1 MB) for a quick trial. 2.5 GB was a guess, big enough to find 50,000 kept games. It was: the filter reached 50,000 before the prefix ran out. It is a cap, not a promise of 50,000 games.The prefix is a short window of time: ==fit-50k[^3]== covers 1–2 January 2024 only.
 
