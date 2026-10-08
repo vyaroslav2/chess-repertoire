@@ -23,6 +23,14 @@ export async function checkConnection() {
   } finally { await connection.end(); }
 }
 
+// Why the game stopped, filled in by MySQL from the other columns. Only "time" comes from
+// Lichess directly. "resigned" is inferred (decisive, no mate, no flag) and may include
+// players who left; "drawn" is an agreed draw, repetition or the 50-move rule.
+export const STOP_REASON = `ENUM('checkmate','stalemate','insufficient','time','drawn','resigned') AS (CASE
+    WHEN final_state IS NOT NULL THEN final_state
+    WHEN termination = 'Time forfeit' THEN 'time'
+    WHEN result = '1/2-1/2' THEN 'drawn'
+    ELSE 'resigned' END) STORED`;
 // One row per game. The full mainline is kept; queries can show only the opening.
 // IDs and moves compare case-sensitively: Lichess IDs mix cases, and bxc4 is not Bxc4.
 export const GAMES_TABLE = `CREATE TABLE IF NOT EXISTS games (
@@ -33,6 +41,7 @@ export const GAMES_TABLE = `CREATE TABLE IF NOT EXISTS games (
   result    ENUM('1-0','0-1','1/2-1/2') NOT NULL,
   termination VARCHAR(20) NOT NULL,                       -- Lichess's reason: Normal, Time forfeit…
   final_state ENUM('checkmate','stalemate','insufficient') NULL,  -- empty when the board settles nothing
+  stop_reason ${STOP_REASON},
   uci_moves TEXT CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   san_moves TEXT CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   INDEX (uci_moves(100)),
