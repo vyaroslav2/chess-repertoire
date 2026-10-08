@@ -7,11 +7,13 @@ tags:
 HER is the revised version of [[HE]] and will replace it. So far it covers only what is built: downloading, filtering, loading into MySQL, the checks on the way, what each row holds, and the decisions behind them. Until the rest moves here, the curve, k and the algorithm stay in [[HE]].
 All code lives in `experiments/he/`. All data stays in `experiments/he/data/`, which is git-ignored.
 
+
+==archive --> prefix --> filter --> `sample.pgn` --> `games` table==
 ## Download
 
 HER.01 **Source.** A Lichess monthly archive of rated standard games (`.pgn.zst`). For now, the pilot uses the January 2024 archive.
 
-HER.02 ==**Only the start of the archive is downloaded.** The archive is in time order, so the start means the month's earliest games. We download the first 2.5 GB of about 32 GB. A month is about 32 GB compressed.[^2]== ==The download asks for the first N GB (`--gb`) and checks that the server the server confirms it sent bytes 0 to 2.5 GB (HTTP 206), not the whole file or something else.== If not, it stops. `npm --prefix experiments/he run download -- --run fit-50k --month 2024-01 --gb 2.5 --limit 50000`. Any size from 16 bytes up to the whole month; 0.001 (1 MB) for a quick trial. 2.5 GB was a guess, big enough to find 50,000 kept games. It was: the filter reached 50,000 before the prefix ran out. It is a cap, not a promise of 50,000 games.The prefix is a short window of time: ==fit-50k[^3]== covers 1–2 January 2024 only.
+HER.02 **Only the start of the archive is downloaded.** A month is about 32 GB compressed. The archive is in time order, so its start holds the month's earliest games. The pilot downloads the first 2.5 GB. The download asks the server for the first N GB (`--gb`). It then checks that the server answered with HTTP 206 (part of a file) and sent exactly the bytes asked for, not the whole file or another range. If not, it stops. N can be anything from 16 bytes to the whole month; 0.001 (1 MB) suits a quick trial. `npm --prefix experiments/he run download -- --run fit-50k --month 2024-01 --gb 2.5 --limit 50000`. 2.5 GB was a guess at a size big enough for 50,000 kept games. The guess held: the filter reached 50,000 before the [[archive-prefix|prefix]] ran out. The size is a cap, not a promise of 50,000 games. The prefix is a short window of time: ==fit-50k[^3]== covers only 1–2 January 2024.
 
 HER.03 **Provenance is kept.** The download manifest records the URL, the bytes requested, the archive's total size, ETag[^4] and last-modified date, and the ==prefix's SHA-256[^5]==. A run can then be traced to the exact bytes it came from[^6].
 
@@ -73,15 +75,15 @@ HER.40 **One row per game.**
 
 | Column                   | Holds                                                                                         |
 | ------------------------ | --------------------------------------------------------------------------------------------- |
-| `game_id`                | Lichess ID, e.g. `1jf1GRFe`. The primary key. [^23][^26]                                      |
+| `game_id`                | Lichess ID, e.g. `1jf1GRFe`. The primary key. [^23][^24]                                      |
 | `game_date`              | Date played. Read back as plain text, so the time zone cannot shift it (HER.44).              |
-| `white_elo`, `black_elo` | Ratings before the game.[^24]                                                                 |
+| `white_elo`, `black_elo` | Ratings before the game.[^25]                                                                 |
 | `result`                 | `1-0`, `0-1` or `1/2-1/2`, as in the PGN. ==🟡//- сократить длину поля до минимума. -//==     |
 | `termination`            | Lichess's reason, copied as is: `Normal` or `Time forfeit`.                                   |
-| `final_state`            | `checkmate`, `stalemate`, `insufficient`, or `undefined` when the board settles nothing.[^25] |
+| `final_state`            | `checkmate`, `stalemate`, `insufficient`, or `undefined` when the board settles nothing.[^26] |
 | `stop_reason`            | Why the game stopped (HER.42).                                                                |
 | `uci_moves`              | Full mainline in UCI: `e2e4 c7c6 d2d4`.                                                       |
-| `san_moves`              | The same in SAN: `e4 c6 d4`.[^26]                                                             |
+| `san_moves`              | The same in SAN: `e4 c6 d4`.[^24]                                                             |
 
 HER.41 **Moves are stored whole, with no move numbers.** The full game costs little. A query shows as much as it needs. A move's number follows from its place in the list. UCI is for code; SAN is for reading. Same as `history` and `displayPgn` in [[DB|DB.03]]. ==//- Опционально можно добавить генерируемое (не нужно писать запрос для заполнения это поля) поле `hash_uci` для каждой партии. Потому что строка `uci_moves` очень длинная и с `hash_uci` будет легче работать. -//==
 
@@ -124,7 +126,7 @@ HER.50 **A game is rejected on load if:**
 * the final position contradicts the result: checkmate must match the winner; stalemate and insufficient material must be draws;
 * Lichess ended it for a rules infraction (HER.61).
 
-HER.51 **Cross-check with the importer.** Every row was compared with `observations.jsonl`, written separately by the importer. For each game, the result and the sampled move (UCI and SAN) must agree. fit-50k: 49,995 rows checked, 0 mismatches. Both come from the same PGN, so this checks the code, not Lichess.[^32] To check against Lichess, open `lichess.org/<game_id>`.
+HER.51 **Cross-check with the importer.** Every row was compared with `observations.jsonl`, written separately by the importer. For each game, the result and the sampled move (UCI and SAN) must agree. fit-50k: 49,995 rows checked, 0 mismatches. Both come from the same PGN, so this checks the code, not Lichess.[^29] To check against Lichess, open `lichess.org/<game_id>`.
 
 HER.52 **fit-50k in the table.** 49,995 games.
 
@@ -157,12 +159,13 @@ HER.64 **Results are kept in PGN form** (`1-0`). Not from one side's view, e.g. 
 
 
 
-[^1]: check grammar
-[^2]: Rephrase this part. 
+[^1]: 
 
 
 
 
+
+[^2]: 
 
 [^3]: fit-50k is the run's name: "fit" is the period (2023–24), "50k" the target (`--limit 50000`). Not an estimate: exactly 50,000 games were kept (49,995 after the load). It covers only 1–2 January because the archive is in time order and the first two days already held 50,000 kept games.
 
@@ -205,9 +208,11 @@ HER.64 **Results are kept in PGN form** (`1-0`). Not from one side's view, e.g. 
 [^22]: Why do we have them? We should explain in the spec. Wouldn't it be more logical to split into 2-5, 6-10, 11-15 groups? My logic, move number matters. -100cp in the first few moves is not the same as -100 in the middle (potentially, I can't back my words), because it's closer to the end (less moves to equalise in theory). Those 3 bands for start point should be enough. Could be later checked for accuracy, but should not be a spec. A note rather.    ==🟠%%They come from HE item 2: k is fitted separately for groups of 2–9, 10–49, 50–199 and 200+ games, to see whether one k fits all. So the bands are about how many games share a position + move, not move numbers. Agreed: the spec should say why. Your move-number idea is a separate axis. HE already asks to check k across move numbers, and each observation stores its move number, so 2–5, 6–10, 11–15 can be checked later. Agreed: a research note, not spec.%%==
 [^23]: The ID is the game's address on Lichess: lichess.org/1jf1GRFe.
 
-[^24]: Make a footnote that one elo could be below or above the limit. It's the average that counts. %%Suggested footnote: "One rating can be outside 1600–2199; the average counts. 1660 and 1583 average 1621.5, so the game is in."
+[^24]: Case matters: `bxc4` is a pawn capture, `Bxc4` a bishop capture. See HER.43.
 
-[^25]: A bug could also leave NULL, and the two could not be told apart. Better: add a value `undefined` and make the column required (NOT NULL), so MySQL refuses a missing value. 
+[^25]: Make a footnote that one elo could be below or above the limit. It's the average that counts. %%Suggested footnote: "One rating can be outside 1600–2199; the average counts. 1660 and 1583 average 1621.5, so the game is in."
+
+[^26]: A bug could also leave NULL, and the two could not be told apart. Better: add a value `undefined` and make the column required (NOT NULL), so MySQL refuses a missing value. 
 
 
 
@@ -215,51 +220,50 @@ HER.64 **Results are kept in PGN form** (`1-0`). Not from one side's view, e.g. 
 
 [^28]: Explain. What columns override it? This deserves it's own place in the spec (HER), rather than my earlier footnote suggestion, right? So what's the solution to this, how do we avoid case-insensitivity?  %%MySQL compares text by a collation, a set of comparison rules. The default, `utf8mb4_0900_ai_ci`, ignores case ("ci" = case-insensitive). `game_id`, `uci_moves` and `san_moves` ==use `ascii_bin`== //- нужен или hash или ascii_bin #question -// instead, which compares exact characters, so b is not B. That is the fix, set when the table is created. And yes, it already has its own block, so [^32] can point here.
 
-[^29]: 
+[^29]: "The code" means our two programs: the importer, which wrote `observations.jsonl`, and the loader, which filled the table. Agreement shows they read each game the same way and did not mix up rows. It cannot catch an error in Lichess's own file, e.g. a wrong result recorded by Lichess: both programs would copy it.
 
 [^30]: 
 
+[^31]: 
 
 
-[^32]: "The code" means our two programs: the importer, which wrote `observations.jsonl`, and the loader, which filled the table. Agreement shows they read each game the same way and did not mix up rows. It cannot catch an error in Lichess's own file, e.g. a wrong result recorded by Lichess: both programs would copy it.
+
+[^32]: 
 
 [^33]: 
 
+
+
+
+
 [^34]: 
-
-
-
-
 
 [^35]: 
 
 [^36]: 
 
-[^37]: 
+[^37]: Should mention as a footnote the date can be screwed by the local time setting in the DB. %%Small correction: the stored date is always right. Only reading it back shifted it, and that is fixed (HER.44). Suggested footnote: ""%%
 
-[^38]: Should mention as a footnote the date can be screwed by the local time setting in the DB. %%Small correction: the stored date is always right. Only reading it back shifted it, and that is fixed (HER.44). Suggested footnote: ""%%
+[^38]: 
 
 [^39]: 
 
-[^40]: 
+[^40]:
+[^41]: explain %%Where the data came from, recorded so it can be checked.%%
 
-[^41]:
-[^42]: explain %%Where the data came from, recorded so it can be checked.%%
+[^42]:==A small JSON file describing a run: the settings used, the source, the counts and whether it finished. Here: `data/downloads/fit-50k/manifest.json`.==
 
-[^43]:==A small JSON file describing a run: the settings used, the source, the counts and whether it finished. Here: `data/downloads/fit-50k/manifest.json`.==
+[^43]: Should be part of the spec. Write it. 
 
-[^44]: Should be part of the spec. Write it. 
+[^44]: So what exactly is `prefix`?
 
-[^45]: So what exactly is `prefix`?
+[^45]: should mention this, either as a footnote or as part of the spec
 
-[^46]: should mention this, either as a footnote or as part of the spec
+[^46]: should be part of the spec or a footnote
 
-[^47]: should be part of the spec or a footnote
+[^47]: write a footnote for manifest
 
-[^48]: write a footnote for manifest
+[^48]: make a footnote
 
-[^49]: make a footnote
+[^49]: 
 
-[^26]: Case matters: `bxc4` is a pawn capture, `Bxc4` a bishop capture. See HER.43.
-
-[^50]: 
