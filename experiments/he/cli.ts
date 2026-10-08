@@ -4,12 +4,14 @@ import { downloadRun, filterDownloaded } from "./download";
 import { evaluateRun } from "./evaluate";
 import type { Period } from "./types";
 import { resolveInputPath } from "./paths";
+import { checkConnection } from "./db";
 
 const HELP = String.raw`Human evidence pilot
   npm --prefix experiments/he run download -- --run fit-50k --month 2024-01 --gb 2.5 --limit 50000
   npm --prefix experiments/he run filter -- --run fit-50k
   npm --prefix experiments/he run import -- --run pilot-50k --limit 50000 file.pgn [other.pgn.gz]
   npm --prefix experiments/he run evaluate -- --run pilot-50k --engine <stockfish-19-binary> [--period fit] [--limit 5]
+  npm --prefix experiments/he run db-check
 
 Import: --seed he-v1 (default), --max-gap 100 (default) or 200 (diagnostic).
 Periods: fit (2023-24), tune (2025), test (2026).
@@ -26,6 +28,7 @@ async function main() {
   } });
   const { values, positionals } = parsed;
   if (values.help) { console.log(HELP); return; }
+  if (command === "db-check") { console.log(JSON.stringify(await checkConnection(), null, 2)); return; }
   if (!values.run) throw new Error("--run is required.");
   const limit = values.limit === undefined ? undefined : Number(values.limit);
   if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) throw new Error("--limit must be a positive integer.");

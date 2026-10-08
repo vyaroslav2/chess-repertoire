@@ -133,3 +133,17 @@ minimum-sample bounds, cumulative route budget, 2025 tuning and frozen 2026 verd
 are not implemented yet. The first real task after this foundation is to collect and evaluate
 the 2023–24 fit cohort, inspect repeated-group coverage, then fit and check the WDL curve.
 No guessed prior, k or selection confidence is presented as a measured result.
+
+## MySQL
+
+HE data can also live in a local MySQL 8.0 container, `he-mysql`, with its files in data/mysql/.
+Scripts log in as the `he` user. Set the connection once as a Windows user environment variable,
+then restart terminals and editors so they see it:
+
+```powershell
+[Environment]::SetEnvironmentVariable("HE_MYSQL_URL", "mysql://he:<password>@127.0.0.1:3306/he", "User")
+npm --prefix experiments/he run db-check
+```
+
+db-check prints the server version, user and database. The password is never stored in the code.
+The mysql2 driver is installed in experiments/he/node_modules, not in the application.
