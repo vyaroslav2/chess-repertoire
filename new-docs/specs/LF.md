@@ -47,7 +47,6 @@ LF.11 The lockfile is created exclusively: the create either makes a brand-new f
 
 [^2]: `[time]` -- always UTC (ISO 8601 format, e.g. `2026-09-03T08:15:23.000Z`), regardless of the machine's local timezone.
 
-
 [^3]: e.g. permission denied, disk full, directory missing. 
 
 [^4]: `Reason` here means the exact error / code OS throws. 

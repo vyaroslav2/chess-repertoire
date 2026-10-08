@@ -78,7 +78,7 @@ function splitPgn(pgn: string): { tags: string; body: string } {
     body: lines.slice(start).join("\n").replace(/\{[^}]*\}/g, " ").replace(/;[^\n]*/g, " ") };
 }
 export type GameRecord = { gameId: string; playedOn: string; whiteElo: number; blackElo: number;
-  result: "1-0" | "0-1" | "1/2-1/2"; termination: string;
+  result: "1-0" | "0-1" | "1/2-1/2"; termination: string; eco: string; opening: string;
   finalState: "checkmate" | "stalemate" | "insufficient" | null; uciMoves: string; sanMoves: string };
 // One database row per game: the full mainline in UCI and SAN, the PGN result and how it ended.
 export function gameRecord(pgn: string): { record: GameRecord } | { rejected: string } {
@@ -94,6 +94,9 @@ export function gameRecord(pgn: string): { record: GameRecord } | { rejected: st
   if (!termination) return { rejected: "termination" };
   // Lichess may have changed the result after catching a rule breaker, so the game proves nothing.
   if (termination === "Rules infraction") return { rejected: "rules-infraction" };
+  // Lichess's opening for the whole game, from the headers; "?" means unknown.
+  const eco = h.ECO, opening = h.Opening;
+  if (!eco || eco === "?" || !opening || opening === "?") return { rejected: "opening-header" };
   const { tags, body } = splitPgn(pgn);
   const chess = new Chess();
   try { chess.loadPgn(tags + "\n\n" + body); }
@@ -107,7 +110,7 @@ export function gameRecord(pgn: string): { record: GameRecord } | { rejected: st
   if (forced !== result) return { rejected: "final-state-mismatch" };
   const moves = chess.history({ verbose: true });
   return { record: { gameId, playedOn, whiteElo: Number(h.WhiteElo), blackElo: Number(h.BlackElo), result,
-    termination, finalState, uciMoves: moves.map(move => move.lan).join(" "), sanMoves: moves.map(move => move.san).join(" ") } };
+    termination, finalState, eco, opening, uciMoves: moves.map(move => move.lan).join(" "), sanMoves: moves.map(move => move.san).join(" ") } };
 }
 export function selectObservation(pgn: string, options: ImportOptions): Selection {
   const h = headers(pgn);

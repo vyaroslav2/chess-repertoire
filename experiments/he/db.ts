@@ -42,6 +42,8 @@ export const GAMES_TABLE = `CREATE TABLE IF NOT EXISTS games (
   termination VARCHAR(20) NOT NULL,                       -- Lichess's reason: Normal, Time forfeit…
   final_state ENUM('checkmate','stalemate','insufficient') NULL,  -- empty when the board settles nothing
   stop_reason ${STOP_REASON},
+  eco       CHAR(3) CHARACTER SET ascii NOT NULL,             -- Lichess's ECO code, e.g. D30
+  opening   VARCHAR(150) NOT NULL,                          -- Lichess's opening name for the whole game
   uci_moves TEXT CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   san_moves TEXT CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   INDEX (uci_moves(100)),
@@ -55,12 +57,12 @@ export async function loadGames(file: string, limit?: number) {
   let read = 0, loaded = 0, batch: GameRecord[] = [];
   const flush = async () => {
     if (!batch.length) return;
-    await connection.query(`INSERT INTO games (game_id, played_on, white_elo, black_elo, result, termination, final_state, uci_moves, san_moves)
+    await connection.query(`INSERT INTO games (game_id, played_on, white_elo, black_elo, result, termination, final_state, eco, opening, uci_moves, san_moves)
       VALUES ? AS new ON DUPLICATE KEY UPDATE played_on = new.played_on, white_elo = new.white_elo,
       black_elo = new.black_elo, result = new.result, termination = new.termination,
-      final_state = new.final_state, uci_moves = new.uci_moves, san_moves = new.san_moves`,
+      final_state = new.final_state, eco = new.eco, opening = new.opening, uci_moves = new.uci_moves, san_moves = new.san_moves`,
       [batch.map(game => [game.gameId, game.playedOn, game.whiteElo, game.blackElo, game.result,
-        game.termination, game.finalState, game.uciMoves, game.sanMoves])]);
+        game.termination, game.finalState, game.eco, game.opening, game.uciMoves, game.sanMoves])]);
     loaded += batch.length; batch = [];
   };
   try {

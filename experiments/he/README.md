@@ -151,14 +151,15 @@ The mysql2 driver is installed in experiments/he/node_modules, not in the applic
 ### Games table
 
 load copies a download's sample.pgn into the `games` table: one row per game with its
-Lichess ID, date, both ratings, the PGN result, Lichess's termination reason, the final
+Lichess ID, date, both ratings, the PGN result, Lichess's termination reason, its ECO code
+and opening name for the whole game, the final
 position's state (checkmate, stalemate, insufficient material or empty) and the full mainline
 in UCI and in SAN. MySQL fills in `stop_reason` from these: checkmate, stalemate, insufficient,
 time, drawn (agreed, repetition or 50-move) or resigned (inferred; may include players who left).
 It creates the table on first use. Loading again is safe: a game already
 in the table is overwritten, not doubled. A game is rejected if its header and move-list
 results differ, if a checkmate or drawn final position contradicts the result, or if Lichess
-ended it for a rules infraction. 50,000 games take about 20 minutes.
+ended it for a rules infraction, or if it has no ECO code or opening name. 50,000 games take about 20 minutes.
 
 ```powershell
 npm --prefix experiments/he run load -- --run fit-50k --limit 100
