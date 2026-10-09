@@ -113,35 +113,31 @@ HER.40 **One row per game.**
 ==Code does not match yet: the column is still `played_on`, and `final_state` still uses NULL instead of `undefined`. To fix later.==
 
 HER.41 **Moves are stored whole, with no move numbers.** The full game costs little. A query shows as much as it needs. A move's number follows from its place in the list. UCI is for code; SAN is for reading. Same as `history` and `displayPgn` in [[DB|DB.03]]. 
-A generated `hash_uci` column (a short fixed key from `uci_moves`) would make whole-game comparisons fast, e.g. finding identical games. It does not help "starts with" queries. Not added: no query needs it yet, and MySQL can add it at any time without a reload (HER.60).
+
+#note A generated `hash_uci` column (a short fixed key from `uci_moves`) would make whole-game comparisons fast, e.g. finding identical games. It does not help "starts with" queries. Not added: no query needs it yet, and MySQL can add it at any time without a reload (HER.60).
  
 
-HER.42 **`stop_reason` is filled in by MySQL** from ==🔵the other columns, so it is never out of date.==
-1. `final_state` is set `-->` that value.
-2. ==`termination` is `Time forfeit` `-->` `time`.[^25]==
-3. A draw `-->` `drawn` (agreed, repetition or 50-move rule).
-4. Otherwise `-->` `resigned`.
-==🔵//- Список значений нужен, отдельная таблица в db. 6 значений всего. Do not write it yet. We need to discuss it first. -//==
-`stop_reason`
+HER.42 `stop_reason` is filled in by MySQL from the other columns; no code writes it, so it always agrees with them.
 
-| `resigned`     |
-| -------------- |
-| `checkmate`    |
-| `time`         |
-| `drawn`        |
-| `insufficient` |
-| `stalemate`    |
+`stop_reason` takes one of six values, checked in this order:
 
+| Value          | Meaning                                                               | From                      |
+| -------------- | --------------------------------------------------------------------- | ------------------------- |
+| `checkmate`    |                                                                       | The board (`final_state`) |
+| `stalemate`    | The final position is stalemate. A draw.                              | The board (`final_state`) |
+| `insufficient` | Neither side has enough material to mate. A draw.                     | The board (`final_state`) |
+| `time`         | A player ran out of time. A draw if the opponent could not mate.[^25] | Lichess (`termination`)   |
+| `drawn`        | Any other draw: agreed, repetition or 50-move rule.                   | Inferred                  |
+| `resigned`     | Any other win. May include players who left the game.                 | Inferred                  |
 
+#note The rows don't hold text: `stop_reason` is an [[enum|ENUM]], so MySQL stores a small number per row (1 byte) and shows the word. It also refuses any value outside the six. That is what a separate table gives, without a join in every query. A separate table pays off when the values carry more data (a description, a group) or change often. 
 
-
-Only `time` comes from Lichess directly. `resigned` is inferred and may include players who left the game.
 
 ==HER.43 **Game IDs and SAN moves are case-sensitive.** Lichess IDs mix cases, and `bxc4` (pawn) is not `Bxc4` (bishop). MySQL ignores case by default, so these columns override it. 
 
 
 ==🔵//- should it be its own block or just footnotes? -//==
-[^26]
+[^27]
 
 HER.44 **Dates come back as plain text** (`2024-01-01`). ==//- come back to where? -//== Turning them into clock times would shift them a day in some time zones.
 
@@ -155,7 +151,7 @@ HER.50 **A game is rejected on load if:**
 * the final position contradicts the result: checkmate must match the winner; stalemate and insufficient material must be draws;
 * Lichess ended it for a rules infraction (HER.61).
 
-HER.51 **Cross-check with the importer.** Every row was compared with `observations.jsonl`, written separately by the importer. For each game, the result and the sampled move (UCI and SAN) must agree. 2024-01-2500mb: 49,995 rows checked, 0 mismatches. Both come from the same PGN, so this checks the code, not Lichess.[^27] To check against Lichess, open `lichess.org/<game_id>`.
+HER.51 **Cross-check with the importer.** Every row was compared with `observations.jsonl`, written separately by the importer. For each game, the result and the sampled move (UCI and SAN) must agree. 2024-01-2500mb: 49,995 rows checked, 0 mismatches. Both come from the same PGN, so this checks the code, not Lichess.[^28] To check against Lichess, open `lichess.org/<game_id>`.
 
 HER.52 **2024-01-2500mb in the table.** 49,995 games.
 
@@ -240,78 +236,82 @@ HER.65 **More data means a new download from byte 0.** There is no "continue": e
 
 
 
-[^25]: Time could be a random distribution or could be caused by a sharp line. We should make a note about possible future check ups. %%Agreed. Suggested note: "A time loss may be random, or caused by a sharp line that eats the clock. The second would not cancel out. The sensitivity check in HE covers it for now. Later check: compare time-loss rates per move."%%
+[^25]: Provide an example of how time ended and a player had a rook and king vs king.
+[^26]: 
 
-[^26]: Explain. What columns override it? This deserves it's own place in the spec (HER), rather than my earlier footnote suggestion, right? So what's the solution to this, how do we avoid case-insensitivity?  %%MySQL compares text by a collation, a set of comparison rules. The default, `utf8mb4_0900_ai_ci`, ignores case ("ci" = case-insensitive). `game_id`, `uci_moves` and `san_moves` ==use `ascii_bin`== //- нужен или hash или ascii_bin #question -// instead, which compares exact characters, so b is not B. That is the fix, set when the table is created. And yes, it already has its own block, so [^32] can point here.
+[^27]: Explain. What columns override it? This deserves it's own place in the spec (HER), rather than my earlier footnote suggestion, right? So what's the solution to this, how do we avoid case-insensitivity?  %%MySQL compares text by a collation, a set of comparison rules. The default, `utf8mb4_0900_ai_ci`, ignores case ("ci" = case-insensitive). `game_id`, `uci_moves` and `san_moves` ==use `ascii_bin`== //- нужен или hash или ascii_bin #question -// instead, which compares exact characters, so b is not B. That is the fix, set when the table is created. And yes, it already has its own block, so [^32] can point here.
 
-[^27]: "The code" means our two programs: the importer, which wrote `observations.jsonl`, and the loader, which filled the table. Agreement shows they read each game the same way and did not mix up rows. It cannot catch an error in Lichess's own file, e.g. a wrong result recorded by Lichess: both programs would copy it.
+[^28]: "The code" means our two programs: the importer, which wrote `observations.jsonl`, and the loader, which filled the table. Agreement shows they read each game the same way and did not mix up rows. It cannot catch an error in Lichess's own file, e.g. a wrong result recorded by Lichess: both programs would copy it.
 
-[^28]: 
-
-[^29]: The ID is the game's address on Lichess: lichess.org/1jf1GRFe.
-
-[^30]: 
+[^29]: explain, I don't understand why we need to state that. It feels awkward. %%The point: no code writes `stop_reason`. MySQL works it out from the row's other columns, so it can never disagree with them; if `final_state` were corrected, `stop_reason` would follow. "Never out of date" says this badly. Suggested: ""%%
+[^30]: A time loss may be random, or caused by a sharp line that eats the clock. The second would not cancel out. The sensitivity check in HE covers it for now. Later check: compare time-loss rates per move.
 
 [^31]: 
 
-[^32]: 
+[^32]: The ID is the game's address on Lichess: lichess.org/1jf1GRFe.
 
 [^33]: 
+
 [^34]: 
-
-
-
-
 
 [^35]: 
 
-
 [^36]: 
-
 [^37]: 
+
+
 
 
 
 [^38]: 
 
+
 [^39]: 
 
-
-
-
-
 [^40]: 
+
+
 
 [^41]: 
 
 [^42]: 
 
-[^43]: Should mention as a footnote the date can be screwed by the local time setting in the DB. %%Small correction: the stored date is always right. Only reading it back shifted it, and that is fixed (HER.44). Suggested footnote: ""%%
+
+
+
+
+[^43]: 
 
 [^44]: 
 
 [^45]: 
 
-[^46]:
-[^47]: explain %%Where the data came from, recorded so it can be checked.
+[^46]: Should mention as a footnote the date can be screwed by the local time setting in the DB. %%Small correction: the stored date is always right. Only reading it back shifted it, and that is fixed (HER.44). Suggested footnote: ""%%
 
-[^48]:==A small JSON file describing a run: the settings used, the source, the counts and whether it finished. Here: `data/downloads/2024-01-2500mb/manifest.json`.==
+[^47]: 
 
-[^49]: Should be part of the spec. Write it. 
+[^48]: 
 
-[^50]: So what exactly is `prefix`?
+[^49]:
+[^50]: explain %%Where the data came from, recorded so it can be checked.
 
-[^51]: should mention this, either as a footnote or as part of the spec
+[^51]:==A small JSON file describing a run: the settings used, the source, the counts and whether it finished. Here: `data/downloads/2024-01-2500mb/manifest.json`.==
 
-[^52]: should be part of the spec or a footnote
+[^52]: Should be part of the spec. Write it. 
+
+[^53]: So what exactly is `prefix`?
+
+[^54]: should mention this, either as a footnote or as part of the spec
+
+[^55]: should be part of the spec or a footnote
 
 
 
-[^53]: make a footnote
+[^56]: make a footnote
 
 
 
-[^54]: Prefix might me more precise word here.
+[^57]: Prefix might me more precise word here.
 
  
 
