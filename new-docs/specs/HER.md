@@ -8,7 +8,17 @@ HER is the revised version of [[HE]] and will replace it. So far it covers only 
 All code lives in `experiments/he/`. All data stays in `experiments/he/data/`, which is git-ignored.
 
 
-==archive --> prefix --> filter --> `sample.pgn` --> `games` table==
+Lichess archive --> [[archive-prefix|prefix]] --> `sample.pgn` --> `games` table. Each step:
+
+| Step     | Reads                   | Writes                                              | Blocks    |
+| -------- | ----------------------- | --------------------------------------------------- | --------- |
+| Download | Lichess monthly archive | its first N GB, the prefix (`archive-prefix.pgn.zst`) | HER.01–04 |
+| Filter   | the prefix              | the kept games (`sample.pgn`)                        | HER.10–14 |
+| Import   | `sample.pgn`            | `observations.jsonl`, `groups.jsonl`                 | HER.20–21 |
+| Load     | `sample.pgn`            | the MySQL `games` table                             | HER.30–33 |
+
+The `download` command runs the first three steps in one go; `load` is run on its own.
+
 ## Download
 
 HER.01 **Source.** A Lichess monthly archive of rated standard games (`.pgn.zst`). For now, the pilot uses the January 2024 archive.
@@ -45,7 +55,7 @@ HER.11 **A game is kept only if all of these hold.**
 * Starts 1. d4 d5 or 1. e4 c6.
 * Average of both ratings from 1600 up to, not including, 2200.
 * Rating gap under 100[^11] (`--max-gap 200` exists as a diagnostic only).[^12]
-* A full, valid date ==(`UTCDate`, else `Date`).[^13]== The year sets the period: 2023–24 fit, 2025 tune, 2026 test.
+* A full, valid date (`UTCDate`, else `Date`).[^13] The year sets the period: 2023–24 fit, 2025 tune, 2026 test.
 * A finished result[^14] and a valid Lichess game ID.
 * Every move legal.[^15]
 * The game reaches its sampled move (HER.12).
@@ -76,11 +86,11 @@ Each game is counted once, in the highest row it fails.
 
 HER.20 **Each run writes files.**
 * `downloads/<run>/sample.pgn` — the kept games, full PGN.[^17]
-* ==🔴`runs/<run>/observations.jsonl` — one row per game: the sampled position[^18], Black's move and the result.== 
-* ==🔴`runs/<run>/groups.jsonl` — win/draw/loss counts per position + move.[^19]==
+* ==🔴`runs/<run>/observations.jsonl` — one row per game: the sampled position, Black's move and the result.==  //- why do we need observations.jsonl and what it does, conceptually. use simple language -//
+* ==🔴`runs/<run>/groups.jsonl` — win/draw/loss counts per position + move.[^18]==
 * `runs/<run>/manifest.json` — filters, rejection counts and group sizes.
 
-==🔴HER.21 **Group sizes in 2024-01-2500mb.** 40,951 position + move groups: 39,313 with one game, 1,472 with 2–9, 136 with 10–49, 25 with 50–199, 5 with 200+.[^20]==
+==🔴HER.21 **Group sizes in 2024-01-2500mb.** 40,951 position + move groups: 39,313 with one game, 1,472 with 2–9, 136 with 10–49, 25 with 50–199, 5 with 200+.[^19]==
 
 ## Load into MySQL
 
@@ -99,11 +109,11 @@ HER.40 **One row per game.**
 | Column                   | Holds                                                                                         |
 | ------------------------ | --------------------------------------------------------------------------------------------- |
 | `game_id`                | Lichess ID, e.g. `1jf1GRFe`. The primary key. Case-sensitive (HER.43)                         |
-| `game_date`[^21]              | Date played. Read back as plain text, so the time zone cannot shift it (HER.44).              |
-| `white_elo`, `black_elo` | Ratings before the game.[^22]                                                                 |
-| `result`                 | `1-0`, `0-1` or `1/2-1/2`, as in the PGN.[^23]                                                |
+| `game_date`[^20]              | Date played. Read back as plain text, so the time zone cannot shift it (HER.44).              |
+| `white_elo`, `black_elo` | Ratings before the game.[^21]                                                                 |
+| `result`                 | `1-0`, `0-1` or `1/2-1/2`, as in the PGN.[^22]                                                |
 | `termination`            | Lichess's reason, copied as is: `Normal` or `Time forfeit`.                                   |
-| `final_state`            | `checkmate`, `stalemate`, `insufficient`, or `undefined` when the board settles nothing.[^24] |
+| `final_state`            | `checkmate`, `stalemate`, `insufficient`, or `undefined` when the board settles nothing.[^23] |
 | `stop_reason`            | Why the game stopped (HER.42).                                                                |
 | `eco`                    | Lichess's ECO code for the whole game, e.g. `D30`.                                             |
 | `opening`                | Lichess's opening name for the whole game, e.g. `Queen's Gambit Declined`.                     |
@@ -126,7 +136,7 @@ HER.42 `stop_reason` is filled in by MySQL from the other columns; no code write
 | `checkmate`    |                                                                       | The board (`final_state`) |
 | `stalemate`    | The final position is stalemate. A draw.                              | The board (`final_state`) |
 | `insufficient` | Neither side has enough material to mate. A draw.                     | The board (`final_state`) |
-| `time`         | A player ran out of time. A draw if the opponent could not mate.[^25] | Lichess (`termination`)   |
+| `time`         | A player ran out of time. A draw if the opponent could not mate.[^24] | Lichess (`termination`)   |
 | `drawn`        | Any other draw: agreed, repetition or 50-move rule.                   | Inferred                  |
 | `resigned`     | Any other win. May include players who left the game.                 | Inferred                  |
 
@@ -150,7 +160,7 @@ HER.50 **A game is rejected on load if:**
 * a move is illegal;
 * the final position contradicts the result: checkmate must match the winner; stalemate and insufficient material must be draws.
 
-HER.51 **Cross-check with the importer.** Every row was compared with `observations.jsonl`, written separately by the importer. For each game, the result and the sampled move (UCI and SAN) must agree. 2024-01-2500mb: 49,995 rows checked, 0 mismatches. Both come from the same PGN, so this checks the code, not Lichess.[^28] To check against Lichess, open `lichess.org/<game_id>`.
+HER.51 **Cross-check with the importer.** Every row was compared with `observations.jsonl`, written separately by the importer. For each game, the result and the sampled move (UCI and SAN) must agree. 2024-01-2500mb: 49,995 rows checked, 0 mismatches. Both come from the same PGN, so this checks the code, not Lichess.[^25] To check against Lichess, open `lichess.org/<game_id>`.
 
 HER.52 **2024-01-2500mb in the table.** 49,995 games.
 
@@ -163,7 +173,7 @@ HER.52 **2024-01-2500mb in the table.** 49,995 games.
 | `insufficient` | —         | —         | 610   | 610    |
 | `stalemate`    | —         | —         | 289   | 289    |
 
-The 154 time draws are flags where the opponent could not mate.[^25]
+The 154 time draws are flags where the opponent could not mate.[^24]
 
 ## Decisions
 
@@ -171,7 +181,7 @@ HER.60 **Store facts now, filter in queries later.** The table holds every kept 
 
 HER.61 **Rules-infraction games are dropped.** Lichess may have set the result after catching a rule breaker, so it proves nothing. The filter drops them as its last check (HER.11), so they never reach `sample.pgn`, `observations.jsonl` or the table. `load` does not check again. ==Postponed until the spec is finished, so the code does not match this yet: it still checks on load only. 2024-01-2500mb was made that way: its 5 rules-infraction games were dropped on load, so they are still in its `sample.pgn` and `observations.jsonl`. Once the filter checks, it will be filtered and loaded again from scratch; a sample made before the change must not be loaded.==
 
-HER.62 **No guessed reasons are stored.** Lichess's `Normal` covers mate, resignation, agreed draws and stalemate. "Resigned" and "agreed" are not stored as facts, only inferred in `stop_reason`. ==🔵Repetition and the 50-move rule are not detected: a repetition on the board does not prove that is why the game ended.==
+HER.62 **No guessed reasons are stored.** Lichess's `Normal` covers mate, resignation, agreed draws and stalemate. "Resigned" and "agreed" are not stored as facts, only inferred in `stop_reason`. Repetition and the 50-move rule are not detected: a repetition on the board does not prove that is why the game ended.
 
 HER.63 **Every game counts, whatever its stop reason.** Time losses and early endings are checked by the sensitivity check in [[HE]], not removed.
 
@@ -219,100 +229,40 @@ HER.65 **More data means a new download from byte 0.** There is no "continue": e
 
 [^17]:  `sample.pgn` is the kept games, copied unchanged, clocks and comments included.
 
-[^18]: This what our code does, right? 
-	I need a sample with explanation. Most importantly, do we truncate the game on a Black's move?  %%Yes, the importer (`import.ts`). Example row, shortened: `{"gameId":"Pl5d9kYH", "moveNumber":9, "fen":"rn1q1rk1/pb2bppp/1pp1pn2/2Pp4/1P1P1B2/P2BP2P/5PP1/RN1QK1NR b KQ - 1 9", "uci":"b8d7", "san":"Nbd7", "outcome":"wins"}`, plus date, ratings and opening. It reads: in game Pl5d9kYH, before Black's 9th move the board was this FEN; Black played 9...Nbd7; Black went on to win. No truncation: `outcome` is the result of the whole game, and the full game stays in `sample.pgn` and the table. The row records one moment.%%
+[^18]: We group //- what? -// by `positionKey`/ `normalisedFen`. So one position reached by different move orders is one group. Then by move (UCI) and by period. All three come after filtering: the download filters into `sample.pgn`, then import writes the `observations.jsonl`. JSON is one document. JSONL (JSON Lines) is one JSON object per line: easier for long lists, read or added one line at a time. 
 
-[^19]: We group ... by `positionKey`: the FEN without the two move counters, exactly the normalised FEN in the glossary. So one position reached by different move orders is one group. Then by move (UCI) and by period. Yes, all three come after filtering: the download filters into `sample.pgn`, then import writes the three files. JSON is one document. JSONL (JSON Lines) is one JSON object per line: easier for long lists, read or added one line at a time. 
+[^19]: Why do we have them? We should explain in the spec. Wouldn't it be more logical to split into 2-5, 6-10, 11-15 groups? My logic, move number matters. -100cp in the first few moves is not the same as -100 in the middle (potentially, I can't back my words), because it's closer to the end (less moves to equalise in theory). Those 3 bands for start point should be enough. Could be later checked for accuracy, but should not be a spec. A note rather.    ==🟠%%They come from HE item 2: k is fitted separately for groups of 2–9, 10–49, 50–199 and 200+ games, to see whether one k fits all. So the bands are about how many games share a position + move, not move numbers. Agreed: the spec should say why. Your move-number idea is a separate axis. HE already asks to check k across move numbers, and each observation stores its move number, so 2–5, 6–10, 11–15 can be checked later. Agreed: a research note, not spec.%%==
+[^20]: **`game_date`:** the column is called `played_on` in the code. HER.45 also uses `game_date`. The code must change to match the spec. #bug
 
-[^20]: Why do we have them? We should explain in the spec. Wouldn't it be more logical to split into 2-5, 6-10, 11-15 groups? My logic, move number matters. -100cp in the first few moves is not the same as -100 in the middle (potentially, I can't back my words), because it's closer to the end (less moves to equalise in theory). Those 3 bands for start point should be enough. Could be later checked for accuracy, but should not be a spec. A note rather.    ==🟠%%They come from HE item 2: k is fitted separately for groups of 2–9, 10–49, 50–199 and 200+ games, to see whether one k fits all. So the bands are about how many games share a position + move, not move numbers. Agreed: the spec should say why. Your move-number idea is a separate axis. HE already asks to check k across move numbers, and each observation stores its move number, so 2–5, 6–10, 11–15 can be checked later. Agreed: a research note, not spec.%%==
-[^21]: **`game_date`:** the column is called `played_on` in the code. HER.45 also uses `game_date`. The code must change to match the spec. #bug
+[^21]: One rating can be outside 1600–2199; the average counts. 1660 and 1583 average 1621.5, so the game is in. 
 
-[^22]: One rating can be outside 1600–2199; the average counts. 1660 and 1583 average 1621.5, so the game is in. 
+[^22]:  `result` is an ENUM of the three values, which MySQL stores as one byte per row. It cannot get smaller.
 
-[^23]:  `result` is an ENUM of the three values, which MySQL stores as one byte per row. It cannot get smaller.
-
-[^24]: A bug could also leave NULL, and then a deliberate NULL (the board settles nothing) and a NULL left by a bug would look the same." Also, the code does not do this yet: `final_state` still allows NULL, with no `undefined` value. #bug
+[^23]: A bug could also leave NULL, and then a deliberate NULL (the board settles nothing) and a NULL left by a bug would look the same." Also, the code does not do this yet: `final_state` still allows NULL, with no `undefined` value. #bug
 
 
 
-[^25]: Example: White has king and rook, Black has only a king. White's clock runs out. Normally that loses, but Black has nothing left to mate with, so the game is drawn, not won by Black. Lichess records `Termination "Time forfeit"` and `1/2-1/2`. On the board it is no stalemate and no insufficient material (White could still mate), so `final_state` is empty and `stop_reason` is `time`. If Black's clock had run out instead, White would win on time.
+[^24]: Example: White has king and rook, Black has only a king. White's clock runs out. Normally that loses, but Black has nothing left to mate with, so the game is drawn, not won by Black. Lichess records `Termination "Time forfeit"` and `1/2-1/2`. On the board it is no stalemate and no insufficient material (White could still mate), so `final_state` is empty and `stop_reason` is `time`. If Black's clock had run out instead, White would win on time.
 
-[^26]: 
+[^25]: "The code" means our two programs: the importer, which wrote `observations.jsonl`, and the loader, which filled the table. Agreement shows they read each game the same way and did not mix up rows. It cannot catch an error in Lichess's own file, e.g. a wrong result recorded by Lichess: both programs would copy it.
 
-[^27]: 
 
-[^28]: "The code" means our two programs: the importer, which wrote `observations.jsonl`, and the loader, which filled the table. Agreement shows they read each game the same way and did not mix up rows. It cannot catch an error in Lichess's own file, e.g. a wrong result recorded by Lichess: both programs would copy it.
 
-[^29]: explain, I don't understand why we need to state that. It feels awkward. %%The point: no code writes `stop_reason`. MySQL works it out from the row's other columns, so it can never disagree with them; if `final_state` were corrected, `stop_reason` would follow. "Never out of date" says this badly. Suggested: ""%%
-[^30]: A time loss may be random, or caused by a sharp line that eats the clock. The second would not cancel out. The sensitivity check in HE covers it for now. Later check: compare time-loss rates per move.
+[^26]: A time loss may be random, or caused by a sharp line that eats the clock. The second would not cancel out. The sensitivity check in HE covers it for now. Later check: compare time-loss rates per move.
 
-[^31]: 
 
-[^32]: The ID is the game's address on Lichess: lichess.org/1jf1GRFe.
 
-[^33]: 
-
-[^34]: 
-
-[^35]: 
-
-[^36]: 
-[^37]: 
+[^27]: The ID is the game's address on Lichess: lichess.org/1jf1GRFe.
 
 
 
 
 
-[^38]: 
-
-
-[^39]: 
-
-[^40]: 
-
-
-
-[^41]: 
-
-[^42]: 
 
 
 
 
 
-[^43]: 
-
-[^44]: 
-
-[^45]: 
-
-[^46]: Should mention as a footnote the date can be screwed by the local time setting in the DB. %%Small correction: the stored date is always right. Only reading it back shifted it, and that is fixed (HER.44). Suggested footnote: ""%%
-
-[^47]: 
-
-[^48]: 
-
-[^49]:
-[^50]: explain %%Where the data came from, recorded so it can be checked.
-
-[^51]:==A small JSON file describing a run: the settings used, the source, the counts and whether it finished. Here: `data/downloads/2024-01-2500mb/manifest.json`.==
-
-[^52]: Should be part of the spec. Write it. 
-
-[^53]: So what exactly is `prefix`?
-
-[^54]: should mention this, either as a footnote or as part of the spec
-
-[^55]: should be part of the spec or a footnote
 
 
 
-[^56]: make a footnote
-
-
-
-[^57]: Prefix might me more precise word here.
-
- 
-
-[^58]: 
