@@ -77,23 +77,21 @@ function splitPgn(pgn: string): { tags: string; body: string } {
   return { tags: lines.slice(0, start).join("\n"),
     body: lines.slice(start).join("\n").replace(/\{[^}]*\}/g, " ").replace(/;[^\n]*/g, " ") };
 }
-export type GameRecord = { gameId: string; playedOn: string; whiteElo: number; blackElo: number;
+export type GameRecord = { gameId: string; gameDate: string; whiteElo: number; blackElo: number;
   result: "1-0" | "0-1" | "1/2-1/2"; termination: string; eco: string; opening: string;
-  finalState: "checkmate" | "stalemate" | "insufficient" | null; uciMoves: string; sanMoves: string };
+  finalState: "checkmate" | "stalemate" | "insufficient" | "undefined"; uciMoves: string; sanMoves: string };
 // One database row per game: the full mainline in UCI and SAN, the PGN result and how it ended.
 export function gameRecord(pgn: string): { record: GameRecord } | { rejected: string } {
   const h = headers(pgn);
   const gameId = /^https?:\/\/(?:www\.)?lichess\.org\/([a-zA-Z0-9]{8})(?:\/(?:white|black))?\/?$/.exec(h.Site ?? "")?.[1];
   if (!gameId) return { rejected: "game-id" };
-  const playedOn = (h.UTCDate ?? h.Date ?? "").replaceAll(".", "-");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(playedOn)) return { rejected: "date" };
+  const gameDate = (h.UTCDate ?? h.Date ?? "").replaceAll(".", "-");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(gameDate)) return { rejected: "date" };
   if (!/^\d+$/.test(h.WhiteElo ?? "") || !/^\d+$/.test(h.BlackElo ?? "")) return { rejected: "rating" };
   const result = h.Result;
   if (result !== "1-0" && result !== "0-1" && result !== "1/2-1/2") return { rejected: "unfinished" };
   const termination = h.Termination;
   if (!termination) return { rejected: "termination" };
-  // Lichess may have changed the result after catching a rule breaker, so the game proves nothing.
-  if (termination === "Rules infraction") return { rejected: "rules-infraction" };
   // Lichess's opening for the whole game, from the headers; "?" means unknown.
   const eco = h.ECO, opening = h.Opening;
   if (!eco || eco === "?" || !opening || opening === "?") return { rejected: "opening-header" };
@@ -105,11 +103,11 @@ export function gameRecord(pgn: string): { record: GameRecord } | { rejected: st
   if (chess.getHeaders().Result !== result || !body.trim().endsWith(result)) return { rejected: "result-mismatch" };
   // Where the final position settles the game, the result must match it.
   const finalState = chess.isCheckmate() ? "checkmate" : chess.isStalemate() ? "stalemate"
-    : chess.isInsufficientMaterial() ? "insufficient" : null;
-  const forced = finalState === "checkmate" ? (chess.turn() === "w" ? "0-1" : "1-0") : finalState ? "1/2-1/2" : result;
+    : chess.isInsufficientMaterial() ? "insufficient" : "undefined";
+  const forced = finalState === "checkmate" ? (chess.turn() === "w" ? "0-1" : "1-0") : finalState !== "undefined" ? "1/2-1/2" : result;
   if (forced !== result) return { rejected: "final-state-mismatch" };
   const moves = chess.history({ verbose: true });
-  return { record: { gameId, playedOn, whiteElo: Number(h.WhiteElo), blackElo: Number(h.BlackElo), result,
+  return { record: { gameId, gameDate, whiteElo: Number(h.WhiteElo), blackElo: Number(h.BlackElo), result,
     termination, finalState, eco, opening, uciMoves: moves.map(move => move.lan).join(" "), sanMoves: moves.map(move => move.san).join(" ") } };
 }
 export function selectObservation(pgn: string, options: ImportOptions): Selection {
@@ -147,6 +145,8 @@ export function selectObservation(pgn: string, options: ImportOptions): Selectio
   const moveNumber = 2 + hash.readUInt32BE(0) % 14;
   const move = moves[moveNumber * 2 - 1];
   if (!move) return { rejected: "sampled-move-missing" };
+  // Lichess may have changed the result after catching a rule breaker, so the game proves nothing.
+  if (h.Termination === "Rules infraction") return { rejected: "rules-infraction" };
   return { observation: {
     gameId, ...dated, opening, speed, white: h.White ?? "?", black: h.Black ?? "?",
     whiteRating, blackRating, averageRating, ratingGap,

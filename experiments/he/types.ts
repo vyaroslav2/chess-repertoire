@@ -12,11 +12,12 @@ export type MoveGroup = Counts & {
   games: number; moveNumbers: Record<string, number>;
 };
 export const POLICY = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   rating: { minimum: 1600, maximumExclusive: 2200, basis: "players-average" },
   speeds: ["rapid", "classical"], ratedOnly: true,
   openings: ["d2d4 d7d5", "e2e4 c7c6"],
   moves: { minimum: 2, maximum: 15, side: "black" },
+  excludedTerminations: ["Rules infraction"],
   periods: { fit: [2023, 2024], tune: [2025], test: [2026] },
   sampling: "sha256(seed:gameId), one fixed Black move number per game; missing moves excluded",
   evaluation: { engine: "Stockfish 19", depth: 24, multiPv: 1, view: "white" },

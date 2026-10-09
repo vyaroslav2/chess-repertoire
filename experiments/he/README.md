@@ -80,6 +80,7 @@ to import under a new run name; keep the same seed and filters.
   It does not use the result to choose a move. If the game does not reach that move,
   the game is excluded. This means the cohort is conditioned on reaching the sampled move;
   report short-game exclusions when assessing coverage.
+- Games Lichess ended for a rules infraction are excluded; this is the filter's last check.
 - Lichess game IDs deduplicate overlapping exports. Games without a valid Lichess Site ID,
   unfinished results, nonstandard starts and illegal movetext are excluded.
 - Four-field FENs group positions. Full FENs (including fifty-move clocks and move numbers)
@@ -153,13 +154,13 @@ The mysql2 driver is installed in experiments/he/node_modules, not in the applic
 load copies a download's sample.pgn into the `games` table: one row per game with its
 Lichess ID, date, both ratings, the PGN result, Lichess's termination reason, its ECO code
 and opening name for the whole game, the final
-position's state (checkmate, stalemate, insufficient material or empty) and the full mainline
+position's state (checkmate, stalemate, insufficient material or undefined) and the full mainline
 in UCI and in SAN. MySQL fills in `stop_reason` from these: checkmate, stalemate, insufficient,
 time, drawn (agreed, repetition or 50-move) or resigned (inferred; may include players who left).
 It creates the table on first use. Loading again is safe: a game already
 in the table is overwritten, not doubled. A game is rejected if its header and move-list
-results differ, if a checkmate or drawn final position contradicts the result, or if Lichess
-ended it for a rules infraction, or if it has no ECO code or opening name. 50,000 games take about 20 minutes.
+results differ, if a checkmate or drawn final position contradicts the result, or if it has
+no ECO code or opening name. Rules-infraction games never reach it: the filter drops them. 50,000 games take about 20 minutes.
 
 ```powershell
 npm --prefix experiments/he run load -- --run 2024-01-2500mb --limit 100

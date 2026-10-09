@@ -59,7 +59,7 @@ HER.11 **A game is kept only if all of these hold.**
 * A finished result[^14] and a valid Lichess game ID.
 * Every move legal.[^15]
 * The game reaches its sampled move (HER.12).
-* ==Postponed:== not ended by Lichess for a rules infraction, read from the `Termination` header (HER.61).
+* Not ended by Lichess for a rules infraction, read from the `Termination` header (HER.61).
 
 HER.12 **One sampled Black move per game.** A hash of the seed (`he-v1`) and the game ID[^16] picks one Black move number from 2 to 15. The move is picked **before** the game's length is checked. If the game ends before that move, the game is dropped; no other move is picked instead. So every kept game reached its sampled move. In 2024-01-2500mb, 1,277 games were dropped this way.
 Fair side effect: short games are kept less often. A game in which Black makes 5 moves is kept only if it drew move 2–5. A game in which Black makes 15 moves or more is always kept. Why it's fine: the sample is unbiased for each position. A short game can't be observed at moves it never reached.   
@@ -80,7 +80,7 @@ HER.14 The filter reads games until N are kept (`--limit`). Example: 2024-01-250
 
 Each game is counted once, in the highest row it fails.
 
-==The last row shows today's code: rules-infraction games are dropped on load, after the filter. Moving that check into the filter is postponed (HER.61). Then the table will end at 50,000, with rules infraction as the filter's last check.==
+==These numbers come from the code before rules infraction moved into the filter: the last row was dropped on load. To update after the rerun; the table will then end at 50,000, with rules infraction as the filter's last check.==
 
 ## Files
 
@@ -109,7 +109,7 @@ HER.40 **One row per game.**
 | Column                   | Holds                                                                                         |
 | ------------------------ | --------------------------------------------------------------------------------------------- |
 | `game_id`                | Lichess ID, e.g. `1jf1GRFe`. The primary key. Case-sensitive (HER.43)                         |
-| `game_date`[^18]              | Date played. Read back as plain text, so the time zone cannot shift it (HER.44).              |
+| `game_date`              | Date played. Read back as plain text, so the time zone cannot shift it (HER.44).              |
 | `white_elo`, `black_elo` | Ratings before the game.[^19]                                                                 |
 | `result`                 | `1-0`, `0-1` or `1/2-1/2`, as in the PGN.[^20]                                                |
 | `termination`            | Lichess's reason, copied as is: `Normal` or `Time forfeit`.                                   |
@@ -119,8 +119,6 @@ HER.40 **One row per game.**
 | `opening`                | Lichess's opening name for the whole game, e.g. `Queen's Gambit Declined`.                     |
 | `uci_moves`              | Full mainline in UCI: `e2e4 c7c6 d2d4`.                                                       |
 | `san_moves`              | The same in SAN: `e4 c6 d4`. Case-sensitive (HER.43).                                         |
-
-==Code does not match yet: the column is still `played_on`, and `final_state` still uses NULL instead of `undefined`. To fix later.==
 
 HER.41 **Moves are stored whole, with no move numbers.** The full game costs little. A query shows as much as it needs. A move's number follows from its place in the list. UCI is for code; SAN is for reading. Same as `history` and `displayPgn` in [[DB|DB.03]]. 
 
@@ -179,7 +177,7 @@ The 154 time draws are flags where the opponent could not mate.[^22]
 
 HER.60 **Store facts now, filter in queries later.** The table holds every kept game and how it ended. Which games an analysis uses is decided in the query, not by deleting rows. Facts only in the PGN header (`termination`) must be stored on load. Facts that follow from the moves can be added any time.
 
-HER.61 **Rules-infraction games are dropped.** Lichess may have set the result after catching a rule breaker, so it proves nothing. The filter drops them as its last check (HER.11), so they never reach `sample.pgn`, `observations.jsonl` or the table. `load` does not check again. ==Postponed until the spec is finished, so the code does not match this yet: it still checks on load only. 2024-01-2500mb was made that way: its 5 rules-infraction games were dropped on load, so they are still in its `sample.pgn` and `observations.jsonl`. Once the filter checks, it will be filtered and loaded again from scratch; a sample made before the change must not be loaded.==
+HER.61 **Rules-infraction games are dropped.** Lichess may have set the result after catching a rule breaker, so it proves nothing. The filter drops them as its last check (HER.11), so they never reach `sample.pgn`, `observations.jsonl` or the table. `load` does not check again. ==2024-01-2500mb was made before this: its 5 rules-infraction games were dropped on load, so they are still in its `sample.pgn` and `observations.jsonl`. It will be downloaded, filtered and loaded again from scratch; a sample made before the change must not be loaded.==
 
 HER.62 **No guessed reasons are stored.** Lichess's `Normal` covers mate, resignation, agreed draws and stalemate. "Resigned" and "agreed" are not stored as facts, only inferred in `stop_reason`. Repetition and the 50-move rule are not detected: a repetition on the board does not prove that is why the game ended.
 
@@ -229,13 +227,11 @@ HER.65 **More data means a new download from byte 0.** There is no "continue": e
 
 [^17]: A group is all the games where Black faced the same position, played the same move, in the same period. `groups.jsonl` has one line per group: how many games, Black's wins, draws and losses, and at which move numbers. We group games by `positionKey`/ `normalisedFen`. So one position reached by different move orders is one group. Then by move (UCI) and by period. All three come after filtering: the download filters into `sample.pgn`, then import writes the `observations.jsonl`. 
 
-[^18]: **`game_date`:** the column is called `played_on` in the code. HER.45 also uses `game_date`. The code must change to match the spec. #bug
-
 [^19]: One rating can be outside 1600–2199; the average counts. 1660 and 1583 average 1621.5, so the game is in. 
 
 [^20]:  `result` is an ENUM of the three values, which MySQL stores as one byte per row. It cannot get smaller.
 
-[^21]: A bug could also leave NULL, and then a deliberate NULL (the board settles nothing) and a NULL left by a bug would look the same." Also, the code does not do this yet: `final_state` still allows NULL, with no `undefined` value. #bug
+[^21]: Why not NULL: a bug could also leave NULL, and then a deliberate NULL (the board settles nothing) and a NULL left by a bug would look the same. So the column is required (NOT NULL), and `undefined` says it on purpose.
 
 [^22]: Example: White has king and rook, Black has only a king. White's clock runs out. Normally that loses, but Black has nothing left to mate with, so the game is drawn, not won by Black. Lichess records `Termination "Time forfeit"` and `1/2-1/2`. On the board it is no stalemate and no insufficient material (White could still mate), so `final_state` is empty and `stop_reason` is `time`. If Black's clock had run out instead, White would win on time.
 

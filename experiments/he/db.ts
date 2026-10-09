@@ -27,7 +27,7 @@ export async function checkConnection() {
 // Lichess directly. "resigned" is inferred (decisive, no mate, no flag) and may include
 // players who left; "drawn" is an agreed draw, repetition or the 50-move rule.
 export const STOP_REASON = `ENUM('checkmate','stalemate','insufficient','time','drawn','resigned') AS (CASE
-    WHEN final_state IS NOT NULL THEN final_state
+    WHEN final_state <> 'undefined' THEN final_state
     WHEN termination = 'Time forfeit' THEN 'time'
     WHEN result = '1/2-1/2' THEN 'drawn'
     ELSE 'resigned' END) STORED`;
@@ -35,12 +35,12 @@ export const STOP_REASON = `ENUM('checkmate','stalemate','insufficient','time','
 // IDs and moves compare case-sensitively: Lichess IDs mix cases, and bxc4 is not Bxc4.
 export const GAMES_TABLE = `CREATE TABLE IF NOT EXISTS games (
   game_id   CHAR(8) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
-  played_on DATE NOT NULL,
+  game_date DATE NOT NULL,
   white_elo SMALLINT NOT NULL,
   black_elo SMALLINT NOT NULL,
   result    ENUM('1-0','0-1','1/2-1/2') NOT NULL,
   termination VARCHAR(20) NOT NULL,                       -- Lichess's reason: Normal, Time forfeit…
-  final_state ENUM('checkmate','stalemate','insufficient') NULL,  -- empty when the board settles nothing
+  final_state ENUM('checkmate','stalemate','insufficient','undefined') NOT NULL,  -- undefined when the board settles nothing
   stop_reason ${STOP_REASON},
   eco       CHAR(3) CHARACTER SET ascii NOT NULL,             -- Lichess's ECO code, e.g. D30
   opening   VARCHAR(150) NOT NULL,                          -- Lichess's opening name for the whole game
@@ -57,11 +57,11 @@ export async function loadGames(file: string, limit?: number) {
   let read = 0, loaded = 0, batch: GameRecord[] = [];
   const flush = async () => {
     if (!batch.length) return;
-    await connection.query(`INSERT INTO games (game_id, played_on, white_elo, black_elo, result, termination, final_state, eco, opening, uci_moves, san_moves)
-      VALUES ? AS new ON DUPLICATE KEY UPDATE played_on = new.played_on, white_elo = new.white_elo,
+    await connection.query(`INSERT INTO games (game_id, game_date, white_elo, black_elo, result, termination, final_state, eco, opening, uci_moves, san_moves)
+      VALUES ? AS new ON DUPLICATE KEY UPDATE game_date = new.game_date, white_elo = new.white_elo,
       black_elo = new.black_elo, result = new.result, termination = new.termination,
       final_state = new.final_state, eco = new.eco, opening = new.opening, uci_moves = new.uci_moves, san_moves = new.san_moves`,
-      [batch.map(game => [game.gameId, game.playedOn, game.whiteElo, game.blackElo, game.result,
+      [batch.map(game => [game.gameId, game.gameDate, game.whiteElo, game.blackElo, game.result,
         game.termination, game.finalState, game.eco, game.opening, game.uciMoves, game.sanMoves])]);
     loaded += batch.length; batch = [];
   };
