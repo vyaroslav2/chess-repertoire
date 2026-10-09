@@ -133,13 +133,15 @@ HER.42 `stop_reason` is filled in by MySQL from the other columns; no code write
 #note The rows don't hold text: `stop_reason` is an [[enum|ENUM]], so MySQL stores a small number per row (1 byte) and shows the word. It also refuses any value outside the six. That is what a separate table gives, without a join in every query. A separate table pays off when the values carry more data (a description, a group) or change often. 
 
 
-==HER.43 **Game IDs and SAN moves are case-sensitive.** Lichess IDs mix cases, and `bxc4` (pawn) is not `Bxc4` (bishop). MySQL ignores case by default, so these columns override it. 
+
+HER.43 **Game IDs and moves are case-sensitive.** Lichess IDs mix cases, and `bxc4` (pawn) is not `Bxc4` (bishop). MySQL compares text by a collation, a set of comparison rules. The default, `utf8mb4_0900_ai_ci`, ignores case ("ci" = case-insensitive). `game_id` and `san_moves` use `ascii_bin` instead, which compares exact characters. It is set when the table is created. `uci_moves` is always lower case, so case cannot cause a wrong match there. It uses `ascii_bin` too, for size and speed: one byte per character, compared byte by byte. 
 
 
-==🔵//- should it be its own block or just footnotes? -//==
-[^27]
+#note Why `ascii_bin`, not a hash. A hash is case-sensitive (`b` and `B` give different hashes), but it helps only one kind of query: an exact match on the whole value. It keeps no order or structure: the hash of `e2e4 c7c6` says nothing about the hash of `e2e4 c7c6 d2d4`, so "starts with" (`LIKE 'e2e4 c7c6%'`) cannot use it, and hashes sort in random order. `ascii_bin` is a setting on the column, so every query that uses the column compares exact characters: equality, "starts with", sorting, grouping and the primary key. The primary key matters most: with a case-insensitive `game_id`, `abcdEFGH` and `ABCDefgh` would count as the same game, and `load` would overwrite one with the other. Making a hash the key instead would take 32 bytes instead of 8 and a hash on every lookup, and `game_id` would still be stored for reading. `ascii_bin` does the job with no extra column. 
 
-HER.44 **Dates come back as plain text** (`2024-01-01`). ==//- come back to where? -//== Turning them into clock times would shift them a day in some time zones.
+
+
+HER.44 **Dates come back as plain text** (`2024-01-01`). ==//- come back to where? -//== Turning them into clock times //- we don't even need time -// would shift them a day in some time zones.
 
 HER.45 **The date is per row, not per table.** More months and years go into the same table. A query filters by `game_date`.
 
@@ -239,7 +241,7 @@ HER.65 **More data means a new download from byte 0.** There is no "continue": e
 [^25]: Provide an example of how time ended and a player had a rook and king vs king.
 [^26]: 
 
-[^27]: Explain. What columns override it? This deserves it's own place in the spec (HER), rather than my earlier footnote suggestion, right? So what's the solution to this, how do we avoid case-insensitivity?  %%MySQL compares text by a collation, a set of comparison rules. The default, `utf8mb4_0900_ai_ci`, ignores case ("ci" = case-insensitive). `game_id`, `uci_moves` and `san_moves` ==use `ascii_bin`== //- нужен или hash или ascii_bin #question -// instead, which compares exact characters, so b is not B. That is the fix, set when the table is created. And yes, it already has its own block, so [^32] can point here.
+[^27]: 
 
 [^28]: "The code" means our two programs: the importer, which wrote `observations.jsonl`, and the loader, which filled the table. Agreement shows they read each game the same way and did not mix up rows. It cannot catch an error in Lichess's own file, e.g. a wrong result recorded by Lichess: both programs would copy it.
 
