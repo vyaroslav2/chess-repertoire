@@ -163,7 +163,7 @@ HER.52 **2024-01-2500mb in the table.** 49,995 games.
 | `insufficient` | —         | —         | 610   | 610    |
 | `stalemate`    | —         | —         | 289   | 289    |
 
-The 154 time draws are flags where the opponent could not mate. ==//- Provide an example of how time ended and a player had a rook and king vs king. -//==
+The 154 time draws are flags where the opponent could not mate.[^25]
 
 ## Decisions
 
@@ -235,7 +235,8 @@ HER.65 **More data means a new download from byte 0.** There is no "continue": e
 
 
 
-[^25]: Provide an example of how time ended and a player had a rook and king vs king.
+[^25]: Example: White has king and rook, Black has only a king. White's clock runs out. Normally that loses, but Black has nothing left to mate with, so the game is drawn, not won by Black. Lichess records `Termination "Time forfeit"` and `1/2-1/2`. On the board it is no stalemate and no insufficient material (White could still mate), so `final_state` is empty and `stop_reason` is `time`. If Black's clock had run out instead, White would win on time.
+
 [^26]: 
 
 [^27]: 
@@ -314,3 +315,4 @@ HER.65 **More data means a new download from byte 0.** There is no "continue": e
 
  
 
+[^58]: 
