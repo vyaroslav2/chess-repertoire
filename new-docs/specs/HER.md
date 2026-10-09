@@ -49,6 +49,7 @@ HER.11 **A game is kept only if all of these hold.**
 * A finished result[^14] and a valid Lichess game ID.
 * Every move legal.[^15]
 * The game reaches its sampled move (HER.12).
+* ==Postponed:== not ended by Lichess for a rules infraction, read from the `Termination` header (HER.61).
 
 HER.12 **One sampled Black move per game.** A hash of the seed (`he-v1`) and the game ID[^16] picks one Black move number from 2 to 15. The move is picked **before** the game's length is checked. If the game ends before that move, the game is dropped; no other move is picked instead. So every kept game reached its sampled move. In 2024-01-2500mb, 1,277 games were dropped this way.
 Fair side effect: short games are kept less often. A game in which Black makes 5 moves is kept only if it drew move 2–5. A game in which Black makes 15 moves or more is always kept. Why it's fine: the sample is unbiased for each position. A short game can't be observed at moves it never reached.   
@@ -57,16 +58,19 @@ HER.13 **Duplicates are dropped by game ID.**
 
 HER.14 The filter reads games until N are kept (`--limit`). Example: 2024-01-2500mb read 5,712,931 games to keep 50,000:
 
-| Check, in order                                          | Rejected  | Still in  |
-| ------------------------------------------------------ | --------- | --------- |
-|                                                          |           | 5,712,931 |
-| Not rated Rapid or Cla                                   | 4,922,688 | 790,243   |
-| Rating average outside 1                                 | 452,665   | 337,578   |
-| Rating gap 1                                             | 41,499    | 296,079   |
-| O                                                        | 244,802   | 51,277    |
-| Ended before th                                          | 1,277     //- how about adding rules infraction check here? -//  re? -//  here? -  |           |           |
+| Check, in order                     | Rejected  | Still in  |
+| ----------------------------------- | --------- | --------- |
+| Read                                |           | 5,712,931 |
+| Not rated Rapid or Classical        | 4,922,688 | 790,243   |
+| Rating average outside 1600–2199    | 452,665   | 337,578   |
+| Rating gap 100 or more              | 41,499    | 296,079   |
+| Other opening                       | 244,802   | 51,277    |
+| Ended before the sampled move       | 1,277     | 50,000    |
+| Rules infraction (on load, HER.61)  | 5         | 49,995    |
 
 Each game is counted once, in the highest row it fails.
+
+==The last row shows today's code: rules-infraction games are dropped on load, after the filter. Moving that check into the filter is postponed (HER.61). Then the table will end at 50,000, with rules infraction as the filter's last check.==
 
 ## Files
 
@@ -164,7 +168,7 @@ The 154 time draws are flags where the opponent could not mate. ==//- Provide an
 
 HER.60 **Store facts now, filter in queries later.** The table holds every kept game and how it ended. Which games an analysis uses is decided in the query, not by deleting rows. Facts only in the PGN header (`termination`) must be stored on load. Facts that follow from the moves can be added any time.
 
-HER.61 **Rules-infraction games are dropped.** Lichess may have set the result after catching a rule breaker, so it proves nothing. 2024-01-2500mb had 5.
+HER.61 **Rules-infraction games are dropped.** Lichess may have set the result after catching a rule breaker, so it proves nothing. The filter drops them as its last check (HER.11), so they never reach `sample.pgn`, `observations.jsonl` or the table. `load` checks again as a safety net (HER.50). ==Postponed until the spec is finished, so the code does not match this yet: it still checks on load only. 2024-01-2500mb was made that way: its 5 rules-infraction games were dropped on load, so they are still in its `sample.pgn` and `observations.jsonl`.==
 
 HER.62 **No guessed reasons are stored.** Lichess's `Normal` covers mate, resignation, agreed draws and stalemate. "Resigned" and "agreed" are not stored as facts, only inferred in `stop_reason`. ==🔵Repetition and the 50-move rule are not detected: a repetition on the board does not prove that is why the game ended.==
 
