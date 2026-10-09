@@ -141,7 +141,7 @@ HER.43 **Game IDs and moves are case-sensitive.** Lichess IDs mix cases, and `bx
 
 
 
-HER.44 **Dates come back as plain text** (`2024-01-01`). ==//- come back to where? -//== Turning them into clock times //- we don't even need time -// would shift them a day in some time zones.
+HER.44 **`game_date` is a MySQL `DATE`; our code reads it as text.** In MySQL the column is a true date, with no time. When a script reads a row through the mysql2 driver, it gets the text `2024-01-01`, not a JavaScript date. A JavaScript date always carries a clock time and a time zone, so mysql2 would add midnight on the machine's clock. That can move the date to the day before. Example: on a machine set to Moscow time (UTC+3), midnight on 1 January 2025 is 21:00 on 31 December 2024 in UTC. Code working in UTC would put the game in 2024. The connection sets `dateStrings: true` (`db.ts`) to prevent that.
 
 HER.45 **The date is per row, not per table.** More months and years go into the same table. A query filters by `game_date`.
 
