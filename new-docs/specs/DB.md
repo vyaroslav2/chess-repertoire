@@ -1,12 +1,11 @@
 ---
 tags:
-  - "#processed"
-  - sf19-todo
+  - reviewed
 ---
 # DB — What We Store
 
 DB describes everything a run writes down: the two record types the tree is made of and which data is cached. The other specs say *when* something is written. DB says *what the record contains*.
-Each run wipes the tree. What came from an API is saved.
+Each run wipes the tree. What came from an API or from Stockfish is saved.
 
 
 ## Records
@@ -36,10 +35,10 @@ DB.04 **Probability.** Every node carries both.
 DB.05 **Transposition marker.** `transposesTo` — set on a node that arrives at a position an earlier route already owns; it points at that owner. The owner keeps `transposesTo = null` however many routes reach it. See [[TR.excalidraw|TR]].
 
 DB.06 **Opening metadata.** Each node holds `eco`, `openingName`, and a status: `PRESENT` or `VALID_ABSENCE`. A node is one route ending in one ply (DB.01), so this is the name after that ply, on that route.
-1. Explorer returns an opening for the position this node reaches `-->` use it, `PRESENT`. Every Explorer response carries one, whatever the dataset. If more than one was fetched, take Masters, then Elite, then Amateur.
+1. Explorer returns an opening for the position this node reaches `-->` use it, `PRESENT`. Every Explorer response carries one.
 2. It returns none `-->` copy `eco`, `openingName` and status from the parent node.
 3. The root, with no name from Explorer `-->` `VALID_ABSENCE`.
-4. The position this node reaches was never sent to Explorer (the route ends after Black's move, or Black's reply was hardcoded) `-->` fetch it for the name only (Masters), then apply rule 1.
+4. The position this node reaches was never sent to Explorer (the route ends after Black's move, or Black's reply was hardcoded) `-->` fetch it for the name only (Amateur), then apply rule 1.
 
 A node never changes the node above it. Walking a route, the name changes only where Explorer names the new position. In the UI, stepping back and forth through the moves shows each node's own name. `VALID_ABSENCE` shows nothing.
 
@@ -60,16 +59,13 @@ DB.10 **White move fields.**
 
 DB.12 **Mate is never zero.** `mate = 0` is invalid: there is always at least one move left in which to deliver the mate. A negative `mate` means Black mates, a positive one means White does.
 
-DB.13 **Black move fields — the human evidence.** `mastersGames`,[^4] `eliteGames`,[^5] `weightedGames` (see formula [[EW|EW.04]]), `totalMastersGames`[^6], `mastersMoveShare`[^7], `totalEliteGames`[^8], `eliteMoveShare`.[^9] `weightedGames` is used for the score in [[EW|EW.04]].
-
 DB.14 **Black move fields — the engine evidence.** Exactly one of `cp` or `mate` — never both, never neither. Alongside it:
-* `source` — `Lichess Cloud Evaluation`, `ChessDB` or `Local Deep Stockfish`.
-* `selectionMethod` — which path through [[EW]] produced it: the ordinary waterfall, no candidate has enough games, the engine fallback after no human candidate survived, or a hardcoded response. A hardcoded response is taken in [[EW|EW.13]].
-* `moveOrigin` — `Human Move`, `Engine Move` or `Hardcoded Move`.
-* `engineRank` — where the move sat in that engine's list.[^10]
-* `deepVerified` — the chosen response was verified by the final local Stockfish ([[EW|EW.11]]). Checked for every Black response at the end of a run; a single `false` is a hard error ([[S3|S3.12]]).
+* `source` — `Local Stockfish 19`.
+* `selectionMethod` — which path through [[EW]] produced it: Stockfish's baseline ([[EW|EW.09]]) or a hardcoded response ([[EW|EW.13]]).
+* `moveOrigin` — `Engine Move` or `Hardcoded Move`.
+* `engineRank` — `1` if the move is Stockfish's baseline, otherwise `null`.[^4]
 
-DB.15 **`cp` is always from White's point of view.**[^11] A negative `cp` is good for Black. Every source is converted to this convention *before* it is stored, so a stored figure never needs to know which engine produced it.[^12]
+DB.15 **`cp` is always from White's point of view.**[^5] A negative `cp` is good for Black. Stockfish's figures are converted to this convention *before* they are stored.[^6]
 
 ## How a route ends
 
@@ -82,9 +78,9 @@ DB.20 **A move that ends a route carries a `stopReason`.** The root is the only 
 
 DB.30 **Caches survive the wipe.** The tree is rebuilt from scratch on every run; the downloaded data behind it is not fetched again. This is what makes wipe-and-rebuild cheap enough to be the only strategy ([[S2|S2.04]]).
 
-DB.31 **Explorer data** — one row per position, per dataset (Masters, Elite, Amateur), per [[cache-profile|cache profile]]. The dataset is part of the profile, so the key is `positionKey` + profile and nothing else ([[EX|EX.01]]). A position that was fetched and genuinely has no games is stored as an empty result, so it is never asked for twice ([[EX|EX.01]], State B). Each row also holds the `eco` and `openingName` Explorer returned with it.
+DB.31 **Explorer data** — one row per position, per [[cache-profile|cache profile]]. Only the Amateur dataset is fetched ([[EX]]). The dataset is part of the profile, so the key is `positionKey` + profile and nothing else ([[EX|EX.01]]). A position that was fetched and genuinely has no games is stored as an empty result, so it is never asked for twice ([[EX|EX.01]], State B). Each row also holds the `eco` and `openingName` Explorer returned with it.
 
-DB.32 **Engine evaluations** — held in `EngineCache`, stored against that engine's own profile and against the exact `fullFen`, not against `positionKey`. Lichess, ChessDB and local Stockfish each keep their own; they do not share.
+DB.32 **Engine evaluations** — held in `EngineCache`, stored against the local Stockfish profile and against the exact `fullFen`, not against `positionKey`. Only local Stockfish 19 writes it. The Stockfish version is part of the profile, so an eval from another version is never reused.
 
 DB.33 **Opening metadata** — the result of [[DB|DB.06]], stored per route: repertoire + `history`. A rebuilt tree gets its names back without asking Explorer again.
 
@@ -102,23 +98,11 @@ DB.36 **The `Position` table is not a cache.** It maps `positionKey` to the node
 
 [^3]: see glossary [[cumulative-probability|cumProb]]
 
-[^4]: Games in the Masters dataset where this move was played.
+[^4]: Local Stockfish runs with `localStockfishMultiPv = 1`, so it only knows its top move. A hardcoded move that differs from the baseline gets `null`.
 
-[^5]: Games in the Elite dataset where this move was played.
+[^5]: see [[centipawn]]
 
-[^6]: All games in the Masters dataset that reached this position.
-
-[^7]: This move's share of Masters games: `mastersGames / totalMastersGames`.
-
-[^8]: All games in the Elite dataset that reached this position.
-
-[^9]: This move's share of Elite games: `eliteGames / totalEliteGames`.
-
-[^10]: For Lichess and ChessDB, `engineRank` is the move's place in the list they returned, or `null` if it is not in the list. Local Stockfish runs with `localStockfishMultiPv = 1`, so it only knows its top move: `engineRank` is `1` if the move is the baseline move, otherwise `null`.
-
-[^11]: see [[centipawn]]
-
-[^12]: ChessDB reports from the side to move, so its figures are flipped on the way in. It has no way of reporting a mate at all, so a mate arrives as a very large ordinary `cp`.
+[^6]: Stockfish reports from the side to move. Black is to move, so its figures are flipped on the way in.
 
 
 
