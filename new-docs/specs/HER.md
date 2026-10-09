@@ -139,19 +139,16 @@ HER.43 **Game IDs and moves are case-sensitive.** Lichess IDs mix cases, and `bx
 
 #note Why `ascii_bin`, not a hash. A hash is case-sensitive (`b` and `B` give different hashes), but it helps only one kind of query: an exact match on the whole value. It keeps no order or structure: the hash of `e2e4 c7c6` says nothing about the hash of `e2e4 c7c6 d2d4`, so "starts with" (`LIKE 'e2e4 c7c6%'`) cannot use it, and hashes sort in random order. `ascii_bin` is a setting on the column, so every query that uses the column compares exact characters: equality, "starts with", sorting, grouping and the primary key. The primary key matters most: with a case-insensitive `game_id`, `abcdEFGH` and `ABCDefgh` would count as the same game, and `load` would overwrite one with the other. Making a hash the key instead would take 32 bytes instead of 8 and a hash on every lookup, and `game_id` would still be stored for reading. `ascii_bin` does the job with no extra column. 
 
-
-
 HER.44 **`game_date` is a MySQL `DATE`; our code reads it as text.** In MySQL the column is a true date, with no time. When a script reads a row through the mysql2 driver, it gets the text `2024-01-01`, not a JavaScript date. A JavaScript date always carries a clock time and a time zone, so mysql2 would add midnight on the machine's clock. That can move the date to the day before. Example: on a machine set to Moscow time (UTC+3), midnight on 1 January 2025 is 21:00 on 31 December 2024 in UTC. Code working in UTC would put the game in 2024. The connection sets `dateStrings: true` (`db.ts`) to prevent that.
 
-HER.45 **The date is per row, not per table.** More months and years go into the same table. A query filters by `game_date`.
+#note **The date is per row, not per table.** More months and years go into the same table. A query filters by `game_date`.
 
 ## Checks on load
 
 HER.50 **A game is rejected on load if:**
 * the `Result` header and the result after the last move differ;
 * a move is illegal;
-* the final position contradicts the result: checkmate must match the winner; stalemate and insufficient material must be draws;
-* Lichess ended it for a rules infraction (HER.61).
+* the final position contradicts the result: checkmate must match the winner; stalemate and insufficient material must be draws.
 
 HER.51 **Cross-check with the importer.** Every row was compared with `observations.jsonl`, written separately by the importer. For each game, the result and the sampled move (UCI and SAN) must agree. 2024-01-2500mb: 49,995 rows checked, 0 mismatches. Both come from the same PGN, so this checks the code, not Lichess.[^28] To check against Lichess, open `lichess.org/<game_id>`.
 
@@ -172,7 +169,7 @@ The 154 time draws are flags where the opponent could not mate. ==//- Provide an
 
 HER.60 **Store facts now, filter in queries later.** The table holds every kept game and how it ended. Which games an analysis uses is decided in the query, not by deleting rows. Facts only in the PGN header (`termination`) must be stored on load. Facts that follow from the moves can be added any time.
 
-HER.61 **Rules-infraction games are dropped.** Lichess may have set the result after catching a rule breaker, so it proves nothing. The filter drops them as its last check (HER.11), so they never reach `sample.pgn`, `observations.jsonl` or the table. `load` checks again as a safety net (HER.50). ==Postponed until the spec is finished, so the code does not match this yet: it still checks on load only. 2024-01-2500mb was made that way: its 5 rules-infraction games were dropped on load, so they are still in its `sample.pgn` and `observations.jsonl`.==
+HER.61 **Rules-infraction games are dropped.** Lichess may have set the result after catching a rule breaker, so it proves nothing. The filter drops them as its last check (HER.11), so they never reach `sample.pgn`, `observations.jsonl` or the table. `load` does not check again. ==Postponed until the spec is finished, so the code does not match this yet: it still checks on load only. 2024-01-2500mb was made that way: its 5 rules-infraction games were dropped on load, so they are still in its `sample.pgn` and `observations.jsonl`. Once the filter checks, it will be filtered and loaded again from scratch; a sample made before the change must not be loaded.==
 
 HER.62 **No guessed reasons are stored.** Lichess's `Normal` covers mate, resignation, agreed draws and stalemate. "Resigned" and "agreed" are not stored as facts, only inferred in `stop_reason`. ==🔵Repetition and the 50-move rule are not detected: a repetition on the board does not prove that is why the game ended.==
 
