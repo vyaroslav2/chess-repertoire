@@ -13,7 +13,16 @@ All code lives in `experiments/he/`. All data stays in `experiments/he/data/`, w
 
 HER.01 **Source.** A Lichess monthly archive of rated standard games (`.pgn.zst`). For now, the pilot uses the January 2024 archive.
 
-HER.02 **Only the start of the archive is downloaded.** A month is about 32 GB compressed. The archive is in time order, so its start holds the month's earliest games. The pilot downloads the first 2.5 GB. The download asks the server for the first N GB (`--gb`). It then checks that the server answered with HTTP 206 (part of a file) and sent exactly the bytes asked for, not the whole file or another range. If not, it stops. N can be anything from 16 bytes to the whole month; 0.001 (1 MB) suits a quick trial. `npm --prefix experiments/he run download -- --run fit-50k --month 2024-01 --gb 2.5 --limit 50000`. 2.5 GB was a guess at a size big enough for 50,000 kept games. The guess held: the filter reached 50,000 before the [[archive-prefix|prefix]] ran out. The size is a cap, not a promise of 50,000 games. The prefix is a short window of time: ==fit-50k[^3]== covers only 1–2 January 2024.
+HER.02 **Only the start of the archive is downloaded.** A month is about 32 GB compressed. The archive is in time order, so its start holds the month's earliest games. The ==pilot[^50]== downloads the first 2.5 GB. The download asks the server for the first N GB (`--gb`). It then checks that the server answered with HTTP 206 (part of a file) and sent exactly the bytes asked for, not the whole file or another range. If not, it stops. N can be anything from 16 bytes to the whole month; 0.001 (1 MB) suits a quick trial. 2.5 GB was a guess at a size big enough for 50,000 kept games. The guess held: the filter reached 50,000 before the [[archive-prefix|prefix]] ran out. The size is a cap, not a promise of 50,000 games. The prefix is a short window of time: ==2024-01-2500mb[^3]== covers only 1–2 January 2024.
+
+//- I don't like `fit-50k` name for a run. Is there other options? It just confuses me. Do not rewrite it yourself, give me options first. -//
+
+//- the command or command: -//
+`npm --prefix experiments/he run download -- --run 2024-01-2500mb --month 2024-01 --gb 2.5 --limit 50000`. 
+
+`--prefix` //- is a lichess command our own? -//
+// what parameters/arguments are ours and what are not, explain briefly what is each one //
+
 
 HER.03 **Provenance is kept.** The download manifest records the URL, the bytes requested, the archive's total size, ETag[^4] and last-modified date, and the ==prefix's SHA-256[^5]==. A run can then be traced to the exact bytes it came from[^6].
 
@@ -34,12 +43,12 @@ HER.11 **A game is kept only if all of these hold.**[^9]
 * Every move legal.[^15]
 * The game reaches its sampled move (HER.12).
 
-HER.12 **One sampled Black move per game.** A ==hash of the seed (`he-v1`)[^16]== and the ==game ID[^17]== picks one Black move number from 2 to 15. Ход выбирается **до** проверки длины, и если хода нет, другой не подбирают. Так в fit-50k выбросили 1 277 партий. 
+HER.12 **One sampled Black move per game.** A ==hash of the seed (`he-v1`)[^16]== and the ==game ID[^17]== picks one Black move number from 2 to 15. Ход выбирается **до** проверки длины, и если хода нет, другой не подбирают. Так в 2024-01-2500mb выбросили 1 277 партий. 
 Побочный эффект: короткие партии попадают в выборку чуть реже. Партия из 5 ходов выживает, только если ей выпал ход 2–5, а партия из 30 ходов — всегда. If the game ends before that move, the game is dropped. So every kept game reached its sampled move==
 
 HER.13 **Duplicates are dropped by game ID.**
 
-HER.14 The filter reads games until N are kept (`--limit`). Example: fit-50k read 5,712,931 games to keep 50,000:
+HER.14 The filter reads games until N are kept (`--limit`). Example: 2024-01-2500mb read 5,712,931 games to keep 50,000:
 
 | Rejected because                 | Games     |
 | -------------------------------- | --------- |
@@ -57,7 +66,7 @@ HER.20 **Each run writes files.**
 * `runs/<run>/groups.jsonl` — ==win/draw/loss counts per position + move.[^20]==
 * `runs/<run>/manifest.json` — filters, rejection counts and group sizes.[^21]
 
-==HER.21 **Group sizes in fit-50k.** 40,951 position + move groups: 39,313 with one game, 1,472 with 2–9, 136 with 10–49, 25 with 50–199, 5 with 200+.[^22]==
+==HER.21 **Group sizes in 2024-01-2500mb.** 40,951 position + move groups: 39,313 with one game, 1,472 with 2–9, 136 with 10–49, 25 with 50–199, 5 with 200+.[^22]==
 
 ## Load into MySQL
 
@@ -67,7 +76,7 @@ HER.31 **`load` copies `sample.pgn` into the `games` table.** It creates the tab
 
 HER.32 **Loading is safe to repeat.** A game already in the table is overwritten, never doubled. Loading 100 games, then all 50k, needs no clean-up.
 
-HER.33 Speed. About 4,000 games a minute: fit-50k took 19 minutes. This is the step where chess.js replays every move and the result checks run (HER.50); that is the slow part.
+HER.33 Speed. About 4,000 games a minute: 2024-01-2500mb took 19 minutes. This is the step where chess.js replays every move and the result checks run (HER.50); that is the slow part.
 
 ## What a row holds
 
@@ -126,9 +135,9 @@ HER.50 **A game is rejected on load if:**
 * the final position contradicts the result: checkmate must match the winner; stalemate and insufficient material must be draws;
 * Lichess ended it for a rules infraction (HER.61).
 
-HER.51 **Cross-check with the importer.** Every row was compared with `observations.jsonl`, written separately by the importer. For each game, the result and the sampled move (UCI and SAN) must agree. fit-50k: 49,995 rows checked, 0 mismatches. Both come from the same PGN, so this checks the code, not Lichess.[^29] To check against Lichess, open `lichess.org/<game_id>`.
+HER.51 **Cross-check with the importer.** Every row was compared with `observations.jsonl`, written separately by the importer. For each game, the result and the sampled move (UCI and SAN) must agree. 2024-01-2500mb: 49,995 rows checked, 0 mismatches. Both come from the same PGN, so this checks the code, not Lichess.[^29] To check against Lichess, open `lichess.org/<game_id>`.
 
-HER.52 **fit-50k in the table.** 49,995 games.
+HER.52 **2024-01-2500mb in the table.** 49,995 games.
 
 | `stop_reason`  | White won | Black won | Drawn | Games  |
 | -------------- | --------- | --------- | ----- | ------ |
@@ -145,7 +154,7 @@ The 154 time draws are flags where the opponent could not mate. ==//- Provide an
 
 HER.60 **Store facts now, filter in queries later.** The table holds every kept game and how it ended. Which games an analysis uses is decided in the query, not by deleting rows. Facts only in the PGN header (`termination`) must be stored on load. Facts that follow from the moves can be added any time.
 
-HER.61 **Rules-infraction games are dropped.** Lichess may have set the result after catching a rule breaker, so it proves nothing. fit-50k had 5.
+HER.61 **Rules-infraction games are dropped.** Lichess may have set the result after catching a rule breaker, so it proves nothing. 2024-01-2500mb had 5.
 
 HER.62 **No guessed reasons are stored.** Lichess's `Normal` covers mate, resignation, agreed draws and stalemate. "Resigned" and "agreed" are not stored as facts, only inferred in `stop_reason`. ==🔵Repetition and the 50-move rule are not detected: a repetition on the board does not prove that is why the game ended.==
 
@@ -169,7 +178,7 @@ HER.65 **More data means a new download from byte 0.** There is no "continue": e
 
 [^2]: 
 
-[^3]: fit-50k is the run's name: "fit" is the period (2023–24), "50k" the target (`--limit 50000`). Not an estimate: exactly 50,000 games were kept (49,995 after the load). It covers only 1–2 January because the archive is in time order and the first two days already held 50,000 kept games.
+[^3]: `2024-01-2500mb` is the run's name: the month (`--month 2024-01`) and the bytes downloaded (`--gb 2.5`, i.e. 2,500 MB). It was called `fit-50k` until October 2026. Exactly 50,000 games were kept (`--limit 50000`; 49,995 after the load). It covers only 1–2 January because the archive is in time order and the first two days already held 50,000 kept games.
 
 [^4]: ==A version label the server gives a file. If Lichess ever replaces the January file, the label changes, so we would know our copy came from the older version.[^47]==
 
@@ -253,7 +262,7 @@ HER.65 **More data means a new download from byte 0.** There is no "continue": e
 [^40]:
 [^41]: explain %%Where the data came from, recorded so it can be checked.%%
 
-[^42]:==A small JSON file describing a run: the settings used, the source, the counts and whether it finished. Here: `data/downloads/fit-50k/manifest.json`.==
+[^42]:==A small JSON file describing a run: the settings used, the source, the counts and whether it finished. Here: `data/downloads/2024-01-2500mb/manifest.json`.==
 
 [^43]: Should be part of the spec. Write it. 
 
@@ -269,3 +278,4 @@ HER.65 **More data means a new download from byte 0.** There is no "continue": e
 
 [^49]: 
 
+[^50]: what is it?

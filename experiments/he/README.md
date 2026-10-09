@@ -43,7 +43,7 @@ From C:\chess-repertoire, download the first 2.5 decimal GB of January 2024 and
 automatically import up to 50,000 qualifying unique games:
 
 ```powershell
-npm --prefix experiments/he run download -- --run fit-50k --month 2024-01 --gb 2.5 --limit 50000
+npm --prefix experiments/he run download -- --run 2024-01-2500mb --month 2024-01 --gb 2.5 --limit 50000
 ```
 
 For a quick trial use --gb 0.001 (1 MB) and a different run name.
@@ -162,5 +162,5 @@ results differ, if a checkmate or drawn final position contradicts the result, o
 ended it for a rules infraction, or if it has no ECO code or opening name. 50,000 games take about 20 minutes.
 
 ```powershell
-npm --prefix experiments/he run load -- --run fit-50k --limit 100
+npm --prefix experiments/he run load -- --run 2024-01-2500mb --limit 100
 ```
