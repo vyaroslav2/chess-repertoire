@@ -57,23 +57,26 @@ HER.13 **Duplicates are dropped by game ID.**
 
 HER.14 The filter reads games until N are kept (`--limit`). Example: 2024-01-2500mb read 5,712,931 games to keep 50,000:
 
-| Rejected because                 | Games     |
-| -------------------------------- | --------- |
-| Not rated Rapid or Classical     | 4,922,688 |
-| Rating average outside 1600–2199 | 452,665   |
-| Other opening                    | 244,802   |
-| Rating gap 100 or more           | 41,499    |
-| Ended before the sampled move    | 1,277     |
+| Check, in order                                          | Rejected  | Still in  |
+| ------------------------------------------------------ | --------- | --------- |
+|                                                          |           | 5,712,931 |
+| Not rated Rapid or Cla                                   | 4,922,688 | 790,243   |
+| Rating average outside 1                                 | 452,665   | 337,578   |
+| Rating gap 1                                             | 41,499    | 296,079   |
+| O                                                        | 244,802   | 51,277    |
+| Ended before th                                          | 1,277     //- how about adding rules infraction check here? -//  re? -//  here? -  |           |           |
+
+Each game is counted once, in the highest row it fails.
 
 ## Files
 
 HER.20 **Each run writes files.**
 * `downloads/<run>/sample.pgn` — the kept games, full PGN.[^17]
-* `runs/<run>/observations.jsonl` — one row per game: ==🟠the sampled position==[^18], Black's move and the result. 
-* `runs/<run>/groups.jsonl` — ==win/draw/loss counts per position + move.[^19]==
-* `runs/<run>/manifest.json` — filters, rejection counts and group sizes.[^20]
+* ==🔴`runs/<run>/observations.jsonl` — one row per game: the sampled position[^18], Black's move and the result.== 
+* ==🔴`runs/<run>/groups.jsonl` — win/draw/loss counts per position + move.[^19]==
+* `runs/<run>/manifest.json` — filters, rejection counts and group sizes.
 
-==HER.21 **Group sizes in 2024-01-2500mb.** 40,951 position + move groups: 39,313 with one game, 1,472 with 2–9, 136 with 10–49, 25 with 50–199, 5 with 200+.[^21]==
+==🔴HER.21 **Group sizes in 2024-01-2500mb.** 40,951 position + move groups: 39,313 with one game, 1,472 with 2–9, 136 with 10–49, 25 with 50–199, 5 with 200+.[^21]==
 
 ## Load into MySQL
 
@@ -216,7 +219,7 @@ HER.65 **More data means a new download from byte 0.** There is no "continue": e
 
 [^19]: We group ... by `positionKey`: the FEN without the two move counters, exactly the normalised FEN in the glossary. So one position reached by different move orders is one group. Then by move (UCI) and by period. Yes, all three come after filtering: the download filters into `sample.pgn`, then import writes the three files. JSON is one document. JSONL (JSON Lines) is one JSON object per line: easier for long lists, read or added one line at a time. 
 
-[^20]: It records the filter rules used (rating band, speeds, openings, seed…), the input file, how many games were rejected and why, the group sizes (HER.21) and whether the run finished.
+[^20]: 
 
 [^21]: Why do we have them? We should explain in the spec. Wouldn't it be more logical to split into 2-5, 6-10, 11-15 groups? My logic, move number matters. -100cp in the first few moves is not the same as -100 in the middle (potentially, I can't back my words), because it's closer to the end (less moves to equalise in theory). Those 3 bands for start point should be enough. Could be later checked for accuracy, but should not be a spec. A note rather.    ==🟠%%They come from HE item 2: k is fitted separately for groups of 2–9, 10–49, 50–199 and 200+ games, to see whether one k fits all. So the bands are about how many games share a position + move, not move numbers. Agreed: the spec should say why. Your move-number idea is a separate axis. HE already asks to check k across move numbers, and each observation stores its move number, so 2–5, 6–10, 11–15 can be checked later. Agreed: a research note, not spec.%%==
 [^22]: The ID is the game's address on Lichess: lichess.org/1jf1GRFe.
