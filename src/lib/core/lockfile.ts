@@ -1,7 +1,8 @@
 import * as fs from "fs";
 import * as path from "path";
+import { defaultConfig } from "./config";
 
-export const LOCKFILE_PATH = path.resolve(__dirname, "../../..", "generator.lock");
+export const LOCKFILE_PATH = path.resolve(__dirname, "../../..", defaultConfig.lockfileName);
 
 export type LockData = {
   script: string;
@@ -22,21 +23,32 @@ export class LockAcquisitionError extends Error {
   }
 }
 
+export class LockReleaseError extends Error {
+  constructor(message: string, readonly lockPath: string, readonly owner: LockData) {
+    super(message);
+    this.name = "LockReleaseError";
+  }
+}
+
+function reason(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+// LF.07
 function parseLock(raw: string, lockPath: string): LockData {
+  const malformed = () => new LockAcquisitionError("Existing lockfile is malformed. Manual intervention required.", lockPath);
   let value: unknown;
   try {
     value = JSON.parse(raw);
   } catch {
-    throw new LockAcquisitionError(`Existing lockfile is malformed. Manual intervention required. Lock file: ${lockPath}`, lockPath);
+    throw malformed();
   }
-  if (!value || typeof value !== "object") {
-    throw new LockAcquisitionError(`Existing lockfile is malformed. Manual intervention required. Lock file: ${lockPath}`, lockPath);
-  }
+  if (!value || typeof value !== "object") throw malformed();
   const record = value as Record<string, unknown>;
   if (typeof record.script !== "string" || !record.script ||
       typeof record.pid !== "number" || !Number.isInteger(record.pid) || record.pid <= 0 ||
       typeof record.startedAt !== "string" || !record.startedAt || Number.isNaN(Date.parse(record.startedAt))) {
-    throw new LockAcquisitionError(`Existing lockfile has invalid owner data. Manual intervention required. Lock file: ${lockPath}`, lockPath);
+    throw malformed();
   }
   return { script: record.script, pid: record.pid, startedAt: record.startedAt };
 }
@@ -52,14 +64,16 @@ function processIsAlive(pid: number): boolean {
   }
 }
 
+// LF.04
 function refusal(owner: LockData, lockPath: string): LockAcquisitionError {
   return new LockAcquisitionError(
-    `${owner.script} (process ${owner.pid}) has been running since ${owner.startedAt}. Lock file: ${lockPath}`,
+    `${owner.script} (process ${owner.pid}) has been running since ${owner.startedAt} UTC.`,
     lockPath,
     owner
   );
 }
 
+// LF.10
 export function releaseLock(expectedScript: string, lockPath: string = LOCKFILE_PATH): void {
   let owner: LockData;
   try {
@@ -69,7 +83,11 @@ export function releaseLock(expectedScript: string, lockPath: string = LOCKFILE_
     throw error;
   }
   if (owner.script !== expectedScript) {
-    throw new Error(`Cannot release lock owned by ${owner.script}; expected ${expectedScript}. Lock file: ${lockPath}`);
+    throw new LockReleaseError(
+      `[WARNING] Cannot release lock owned by ${owner.script}; expected ${expectedScript}. This may mean another script is running concurrently — check for overlapping runs before continuing.`,
+      lockPath,
+      owner
+    );
   }
   fs.unlinkSync(lockPath);
 }
@@ -77,30 +95,61 @@ export function releaseLock(expectedScript: string, lockPath: string = LOCKFILE_
 export function acquireLock(script: string, lockPath: string = LOCKFILE_PATH): LockHandle {
   if (!script.trim()) throw new Error("Lock owner script name is required");
 
+  const retryLimit = defaultConfig.lockfileRetryLimit;
+  let staleRemovals = 0;
+  let vanishings = 0;
+
   for (;;) {
+    // LF.01: [time] is always UTC.
     const owner: LockData = { script, pid: process.pid, startedAt: new Date().toISOString() };
     let descriptor: number;
     try {
+      // LF.11: exclusive create; never opens an existing file.
       descriptor = fs.openSync(lockPath, "wx");
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== "EEXIST") {
-        throw new LockAcquisitionError(`Unable to create lockfile: ${(error as Error).message}. Lock file: ${lockPath}`, lockPath);
+        // LF.02
+        throw new LockAcquisitionError(`Unable to create lockfile: ${reason(error)}.`, lockPath);
       }
 
       let existing: LockData;
       try {
         existing = parseLock(fs.readFileSync(lockPath, "utf8"), lockPath);
       } catch (readError) {
-        if ((readError as NodeJS.ErrnoException).code === "ENOENT") continue;
-        throw readError;
+        if (readError instanceof LockAcquisitionError) throw readError;
+        if ((readError as NodeJS.ErrnoException).code === "ENOENT") {
+          // LF.06
+          vanishings += 1;
+          if (vanishings >= retryLimit) {
+            throw new LockAcquisitionError(
+              `Unable to acquire lockfile after ${retryLimit} attempts — file kept vanishing during the check. This is not expected. Manual intervention required.`,
+              lockPath
+            );
+          }
+          continue;
+        }
+        // LF.09
+        throw new LockAcquisitionError(`Unable to read existing lockfile: ${reason(readError)}. Manual intervention required.`, lockPath);
       }
       if (processIsAlive(existing.pid)) throw refusal(existing, lockPath);
+
+      // LF.05
+      if (staleRemovals >= retryLimit) {
+        throw new LockAcquisitionError(`Unable to remove lockfile after ${retryLimit} attempts.`, lockPath, existing);
+      }
+      console.log("Stale lockfile -- owner process no longer running. Removing.");
+      staleRemovals += 1;
       try {
         fs.unlinkSync(lockPath);
       } catch (unlinkError) {
         if ((unlinkError as NodeJS.ErrnoException).code !== "ENOENT") {
-          throw new LockAcquisitionError(`Unable to remove stranded lockfile: ${(unlinkError as Error).message}. Lock file: ${lockPath}`, lockPath, existing);
+          // LF.08
+          throw new LockAcquisitionError(
+            `Unable to remove stranded lockfile: ${reason(unlinkError)}. Manual intervention required.`,
+            lockPath,
+            existing
+          );
         }
       }
       continue;
@@ -115,8 +164,12 @@ export function acquireLock(script: string, lockPath: string = LOCKFILE_PATH): L
       fs.closeSync(descriptor);
     }
     if (writeError) {
-      try { fs.unlinkSync(lockPath); } catch { /* best effort: creation failure remains primary */ }
-      throw writeError;
+      // LF.03: clean up the empty file, then stop.
+      try { fs.unlinkSync(lockPath); } catch { /* best effort: write failure remains primary */ }
+      throw new LockAcquisitionError(
+        `Failed to write to newly created lockfile: ${reason(writeError)}. Attempting cleanup of the empty lockfile, then exiting.`,
+        lockPath
+      );
     }
 
     let released = false;

@@ -1,334 +1,204 @@
 import { createHash } from 'crypto';
 
+export type MoveBand = 'early' | 'middle' | 'late';
+export type ProbabilityBand = 'deep' | 'medium' | 'shallow';
+
+// Names and values follow new-docs/generation-config.md.
 export interface Config {
-    moveBands: {
-        earlyThrough: number;
-        middleThrough: number;
+    lockfileName: string;
+    lockfileRetryLimit: number;
+    probabilityTolerance: number;
+    tinyThreshold: number;
+    nodeTouchCountCap: number;
+    // Last full move of each band, inclusive. Later moves use the late band.
+    moveNumberBands: {
+        early: number;
+        middle: number;
     };
-    whiteMoveFiltering: {
-        mainlinePopularity: {
-            early: number;
-            middle: number;
-            late: number;
-        };
+    popularityThresholds: Record<MoveBand, number>;
+    // Lowest cumProb of each band, inclusive. Anything lower is shallow.
+    probabilityBands: {
+        deep: number;
+        medium: number;
     };
-    humanMoves: {
-        mastersWeight: number;
-        minimumWeightedGames: number;
-    };
-    humanExplorerRequest: {
-        masters: {
-            source: string;
-        };
-        elite: {
-            source: string;
-            speeds: string[];
-            ratings: number[];
-        };
-        amateur: {
-            source: string;
-            speeds: string[];
-            ratings: number[];
-        };
-    };
-    smoothing: {
-        anchorGames: number;
-        repertoireSidePrior: number;
-    };
-    engineVerification: {
-        apiToleranceCp: {
-            early: number;
-            middle: number;
-            late: number;
-        };
-        localToleranceCp: {
-            early: number;
-            middle: number;
-            late: number;
-        };
-    };
-    engine: {
-        localVerification: {
-            depth: number;
-            multiPv: number;
-        };
-        localFallback: {
-            depth: number;
-            multiPv: number;
-        };
-        deepVerification: {
-            depth: number;
-            multiPv: number;
-        };
-    };
+    depthBudget: Record<ProbabilityBand, number>;
+    depthCap: number;
+    explorerSpeeds: string[];
+    explorerRatings: number[];
+    apiRetryDelayMs: number;
+    apiRequestGapMs: number;
+    cloudEvalExtraGapMs: number;
+    apiRequestTimeoutMs: number;
+    explorerEliteSpeeds: string[];
+    explorerEliteRatings: number[];
+    mastersWeight: number;
+    minimumWeightedGames: number;
+    lichessCloudEvalMultiPv: number;
+    apiToleranceCp: Record<MoveBand, number>;
+    localToleranceCp: Record<MoveBand, number>;
+    chessDbMaxAbsCp: number;
+    anchorGames: number;
+    repertoireSidePrior: number;
+    localStockfishDepth: number;
+    localStockfishMultiPv: number;
+    hardcodedBlackResponses: string[];
+    // Not in generation-config: the request shapes. Retries, gaps and timeouts follow AR.
     api: {
         wikibooks: {
-            retryAttempts: number;
-            initialRetryDelayMs: number;
-            retryBackoffMultiplier: number;
-            minimumRequestIntervalMs: number;
             maxLagSeconds: number;
-            requestTimeoutMs: number;
             userAgent: string;
-        };
-        lichessCloudEval: {
-            multiPv: number;
-            retryAttempts: number;
-        };
-        lichessExplorer: {
-            retryAttempts: number;
         };
         chessDb: {
             queryMode: "queryall";
-            retryAttempts: number;
         };
-        networkRetryDelayMs: number;
-        rateLimitRetryDelayMs: number;
-        betweenRequestDelayMs: number;
-        requestTimeoutMs: number;
-        retryBackoffMultiplier: number;
-        maximumRetryDelayMs: number;
-    };
-    generation: {
-        commonProbability: number;
-        uncommonProbability: number;
-        commonDepthBudget: number;
-        uncommonDepthBudget: number;
-        rareDepthBudget: number;
     };
 }
 
 export const defaultConfig: Config = {
-    // ---------------------------------------------------------
-    // CORE MOVE BANDS
-    // Defines the boundary move numbers for early and middle bands.
-    // ---------------------------------------------------------
-    moveBands: {
-        earlyThrough: 4,
-        middleThrough: 8
+    lockfileName: "lockfile-never-remove-by-yourself-unless-stale",
+    lockfileRetryLimit: 5,
+    probabilityTolerance: 0.000001,
+    tinyThreshold: 0.0000001,
+    nodeTouchCountCap: 500,
+    moveNumberBands: {
+        early: 4,
+        middle: 8
     },
-
-    // ---------------------------------------------------------
-    // WHITE MOVE FILTERING
-    // Minimum percentage (0.0 to 1.0) of games a move must appear in
-    // to be considered a 'Mainline' for White.
-    // ---------------------------------------------------------
-    whiteMoveFiltering: {
-        mainlinePopularity: {
-            early: 0.05,
-            middle: 0.10,
-            late: 0.15
-        }
+    popularityThresholds: {
+        early: 0.05,
+        middle: 0.10,
+        late: 0.15
     },
-
-    // ---------------------------------------------------------
-    // HUMAN EVIDENCE WEIGHTS
-    // Masters multiplier and the minimum weighted game threshold.
-    // ---------------------------------------------------------
-    humanMoves: {
-        mastersWeight: 5,
-        minimumWeightedGames: 15
+    probabilityBands: {
+        deep: 0.02,
+        medium: 0.005
     },
-
-    // ---------------------------------------------------------
-    // HUMAN EXPLORER REQUEST
-    // Defines the precise dataset parameters queried from Lichess.
-    // These define the explorerRequestProfile for snapshot compatibility.
-    // ---------------------------------------------------------
-    humanExplorerRequest: {
-        masters: {
-            source: "masters"
-        },
-        elite: {
-            source: "lichess",
-            speeds: ["classical", "rapid"],
-            ratings: [2500]
-        },
-        amateur: {
-            source: "lichess",
-            speeds: ["classical", "rapid"],
-            ratings: [1600, 1800, 2000]
-        }
+    depthBudget: {
+        deep: 15,
+        medium: 8,
+        shallow: 5
     },
-
-    // ---------------------------------------------------------
-    // REPERTOIRE-SIDE SMOOTHING
-    // Anchor games and a deliberately cautious prior score for the side
-    // whose repertoire is being built. The current generator uses it for Black.
-    // ---------------------------------------------------------
-    smoothing: {
-        anchorGames: 50,
-        repertoireSidePrior: 0.48
+    depthCap: 5,
+    explorerSpeeds: ["classical", "rapid"],
+    explorerRatings: [1600, 1800, 2000],
+    apiRetryDelayMs: 120_000,
+    apiRequestGapMs: 2_000,
+    cloudEvalExtraGapMs: 10_000,
+    apiRequestTimeoutMs: 30_000,
+    explorerEliteSpeeds: ["classical", "rapid"],
+    explorerEliteRatings: [2500],
+    mastersWeight: 5,
+    minimumWeightedGames: 15,
+    lichessCloudEvalMultiPv: 5,
+    apiToleranceCp: {
+        early: 80,
+        middle: 50,
+        late: 35
     },
-
-    // ---------------------------------------------------------
-    // ENGINE VERIFICATION TOLERANCES (cp)
-    // Maximum centipawn drop allowed compared to the best engine move.
-    // ---------------------------------------------------------
-    engineVerification: {
-        apiToleranceCp: {
-            early: 80,
-            middle: 50,
-            late: 35
-        },
-        localToleranceCp: {
-            early: 95,
-            middle: 60,
-            late: 40
-        }
+    localToleranceCp: {
+        early: 95,
+        middle: 60,
+        late: 40
     },
+    chessDbMaxAbsCp: 1000,
+    anchorGames: 50,
+    repertoireSidePrior: 0.48,
+    localStockfishDepth: 24,
+    localStockfishMultiPv: 1,
+    hardcodedBlackResponses: ["1. e4 c6", "1. d4 d5"],
 
-    // ---------------------------------------------------------
-    // LOCAL STOCKFISH SETTINGS
-    // Search depths and MultiPV line counts by engine role.
-    // ---------------------------------------------------------
-    engine: {
-        localVerification: {
-            depth: 18,
-            multiPv: 15
-        },
-        localFallback: {
-            depth: 18,
-            multiPv: 15
-        },
-        deepVerification: {
-            depth: 24,
-            multiPv: 1
-        }
-    },
-
-    // ---------------------------------------------------------
-    // API LIMITS AND TIMING
-    // Controls retries, rate-limits, and multi-PV for external services.
-    // ---------------------------------------------------------
     api: {
         wikibooks: {
-            retryAttempts: 3,
-            initialRetryDelayMs: 1000,
-            retryBackoffMultiplier: 2,
-            minimumRequestIntervalMs: 1000,
             maxLagSeconds: 5,
-            requestTimeoutMs: 15000,
             userAgent: "chess-repertoire/0.1 (https://github.com/vyaroslav2/chess-repertoire) Wikibooks-opening-enrichment"
         },
-        // Lichess Cloud Evaluation API
-        // Guidance: https://lichess.org/api#tag/Chess-bot/operation/apiCloudEval
-        // Last checked: 2026-08
-        lichessCloudEval: {
-            multiPv: 5,
-            retryAttempts: 10
-        },
-
-        // Lichess Explorer API (Masters and Lichess databases)
-        // Guidance: https://lichess.org/api#tag/Opening-Explorer
-        // Last checked: 2026-08
-        lichessExplorer: {
-            retryAttempts: 10
-        },
-
         // ChessDB request shape used for complete remote result snapshots.
         chessDb: {
-            queryMode: "queryall",
-            retryAttempts: 3
-        },
-
-        // Delay durations (in milliseconds)
-        networkRetryDelayMs: 1000,
-        // Lichess asks API clients to wait a full minute after any HTTP 429.
-        rateLimitRetryDelayMs: 60_000,
-        betweenRequestDelayMs: 1000,
-        requestTimeoutMs: 15000,
-        retryBackoffMultiplier: 2,
-        maximumRetryDelayMs: 30000
-    },
-
-    generation: {
-        commonProbability: 0.02,
-        uncommonProbability: 0.005,
-        commonDepthBudget: 15,
-        uncommonDepthBudget: 8,
-        rareDepthBudget: 5
+            queryMode: "queryall"
+        }
     }
 };
 
+const MOVE_BANDS = ['early', 'middle', 'late'] as const;
+const PROBABILITY_BANDS = ['deep', 'medium', 'shallow'] as const;
+
+function isFraction(value: unknown): boolean {
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+function isNonNegative(value: unknown): boolean {
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+function isPositiveInteger(value: unknown): boolean {
+    return Number.isInteger(value) && (value as number) >= 1;
+}
+
+function isNonEmptyStringList(value: unknown): boolean {
+    return Array.isArray(value) && value.length > 0 && value.every(s => typeof s === 'string' && s.trim() !== '');
+}
+
+function isRatingList(value: unknown): boolean {
+    return Array.isArray(value) && value.length > 0 && value.every(r => Number.isInteger(r) && r > 0);
+}
+
 export function validateConfig(config: Config) {
     if (!config) throw new Error("Config is required");
-    // Validate move bands
-    if (!Number.isInteger(config.moveBands?.earlyThrough) || config.moveBands.earlyThrough < 1) throw new Error("Invalid moveBands.earlyThrough");
-    if (!Number.isInteger(config.moveBands?.middleThrough) || config.moveBands.middleThrough <= config.moveBands.earlyThrough) throw new Error("Invalid moveBands.middleThrough");
 
-    // Validate probabilities
-    for (const key of ['early', 'middle', 'late'] as const) {
-        const val = config.whiteMoveFiltering?.mainlinePopularity?.[key];
-        if (typeof val !== 'number' || val < 0 || val > 1 || !Number.isFinite(val)) throw new Error(`Invalid probability for mainlinePopularity.${key}`);
-    }
-    if (typeof config.smoothing?.repertoireSidePrior !== 'number' || config.smoothing.repertoireSidePrior < 0 || config.smoothing.repertoireSidePrior > 1 || !Number.isFinite(config.smoothing.repertoireSidePrior)) throw new Error("Invalid probability for smoothing.repertoireSidePrior");
+    if (typeof config.lockfileName !== 'string' || config.lockfileName.trim() === '') throw new Error("Invalid lockfileName");
+    if (!isPositiveInteger(config.lockfileRetryLimit)) throw new Error("Invalid lockfileRetryLimit");
+    if (!isFraction(config.probabilityTolerance)) throw new Error("Invalid probabilityTolerance");
+    if (!isFraction(config.tinyThreshold)) throw new Error("Invalid tinyThreshold");
+    if (!isPositiveInteger(config.nodeTouchCountCap)) throw new Error("Invalid nodeTouchCountCap");
 
-    // Validate counts and depths
-    if (!Number.isInteger(config.humanMoves?.mastersWeight) || config.humanMoves.mastersWeight < 1) throw new Error("Invalid humanMoves.mastersWeight");
-    if (!Number.isInteger(config.humanMoves?.minimumWeightedGames) || config.humanMoves.minimumWeightedGames < 1) throw new Error("Invalid humanMoves.minimumWeightedGames");
-    if (!Number.isInteger(config.smoothing?.anchorGames) || config.smoothing.anchorGames < 1) throw new Error("Invalid smoothing.anchorGames");
+    if (!isPositiveInteger(config.moveNumberBands?.early)) throw new Error("Invalid moveNumberBands.early");
+    if (!Number.isInteger(config.moveNumberBands?.middle) || config.moveNumberBands.middle <= config.moveNumberBands.early) throw new Error("Invalid moveNumberBands.middle");
 
-    // Validate human explorer request
-    const her = config.humanExplorerRequest;
-    if (!her) throw new Error("Missing humanExplorerRequest");
-    if (her.masters?.source !== "masters") throw new Error("Invalid humanExplorerRequest.masters.source");
-    if (her.elite?.source !== "lichess") throw new Error("Invalid humanExplorerRequest.elite.source");
-    if (her.amateur?.source !== "lichess") throw new Error("Invalid humanExplorerRequest.amateur.source");
-    if (!Array.isArray(her.elite?.speeds) || her.elite.speeds.length === 0 || her.elite.speeds.some(s => typeof s !== 'string' || s.trim() === '')) throw new Error("Invalid humanExplorerRequest.elite.speeds");
-    if (!Array.isArray(her.elite?.ratings) || her.elite.ratings.length === 0 || her.elite.ratings.some(r => typeof r !== 'number' || !Number.isInteger(r) || r <= 0)) throw new Error("Invalid humanExplorerRequest.elite.ratings");
-    if (!Array.isArray(her.amateur?.speeds) || her.amateur.speeds.length === 0 || her.amateur.speeds.some(s => typeof s !== 'string' || s.trim() === '')) throw new Error("Invalid humanExplorerRequest.amateur.speeds");
-    if (!Array.isArray(her.amateur?.ratings) || her.amateur.ratings.length === 0 || her.amateur.ratings.some(r => typeof r !== 'number' || !Number.isInteger(r) || r <= 0)) throw new Error("Invalid humanExplorerRequest.amateur.ratings");
-
-    // Validate engine tolerances
-    for (const key of ['early', 'middle', 'late'] as const) {
-        const valApi = config.engineVerification?.apiToleranceCp?.[key];
-        if (typeof valApi !== 'number' || valApi < 0 || !Number.isFinite(valApi)) throw new Error(`Invalid apiToleranceCp.${key}`);
-
-        const valLocal = config.engineVerification?.localToleranceCp?.[key];
-        if (typeof valLocal !== 'number' || valLocal < 0 || !Number.isFinite(valLocal)) throw new Error(`Invalid localToleranceCp.${key}`);
+    for (const key of MOVE_BANDS) {
+        if (!isFraction(config.popularityThresholds?.[key])) throw new Error(`Invalid popularityThresholds.${key}`);
+        if (!isNonNegative(config.apiToleranceCp?.[key])) throw new Error(`Invalid apiToleranceCp.${key}`);
+        if (!isNonNegative(config.localToleranceCp?.[key])) throw new Error(`Invalid localToleranceCp.${key}`);
     }
 
-    // Validate engine settings
-    for (const key of ['localVerification', 'localFallback', 'deepVerification'] as const) {
-        const engineSetting = config.engine?.[key];
-        if (!Number.isInteger(engineSetting?.depth) || engineSetting.depth < 1) throw new Error(`Invalid engine.${key}.depth`);
-        if (!Number.isInteger(engineSetting?.multiPv) || engineSetting.multiPv < 1) throw new Error(`Invalid engine.${key}.multiPv`);
+    if (!isFraction(config.probabilityBands?.deep)) throw new Error("Invalid probabilityBands.deep");
+    if (!isFraction(config.probabilityBands?.medium) || config.probabilityBands.medium >= config.probabilityBands.deep) throw new Error("Invalid probabilityBands.medium");
+    for (const key of PROBABILITY_BANDS) {
+        if (!isPositiveInteger(config.depthBudget?.[key])) throw new Error(`Invalid depthBudget.${key}`);
     }
-    if (config.engine.deepVerification.multiPv !== 1) {
-        throw new Error("Invalid engine.deepVerification.multiPv: trusted Local Deep requires MultiPV 1");
+    if (!isPositiveInteger(config.depthCap)) throw new Error("Invalid depthCap");
+
+    if (!isNonEmptyStringList(config.explorerSpeeds)) throw new Error("Invalid explorerSpeeds");
+    if (!isRatingList(config.explorerRatings)) throw new Error("Invalid explorerRatings");
+    if (!isNonEmptyStringList(config.explorerEliteSpeeds)) throw new Error("Invalid explorerEliteSpeeds");
+    if (!isRatingList(config.explorerEliteRatings)) throw new Error("Invalid explorerEliteRatings");
+
+    // Lichess asks API clients to wait at least a full minute after HTTP 429.
+    if (!isNonNegative(config.apiRetryDelayMs) || config.apiRetryDelayMs < 60_000) throw new Error("Invalid apiRetryDelayMs");
+    if (!isNonNegative(config.apiRequestGapMs)) throw new Error("Invalid apiRequestGapMs");
+    if (!isNonNegative(config.cloudEvalExtraGapMs)) throw new Error("Invalid cloudEvalExtraGapMs");
+    if (!isPositiveInteger(config.apiRequestTimeoutMs)) throw new Error("Invalid apiRequestTimeoutMs");
+
+    if (!isPositiveInteger(config.mastersWeight)) throw new Error("Invalid mastersWeight");
+    if (!isPositiveInteger(config.minimumWeightedGames)) throw new Error("Invalid minimumWeightedGames");
+    if (!isPositiveInteger(config.lichessCloudEvalMultiPv)) throw new Error("Invalid lichessCloudEvalMultiPv");
+    if (!isPositiveInteger(config.chessDbMaxAbsCp)) throw new Error("Invalid chessDbMaxAbsCp");
+    if (!isPositiveInteger(config.anchorGames)) throw new Error("Invalid anchorGames");
+    if (!isFraction(config.repertoireSidePrior)) throw new Error("Invalid repertoireSidePrior");
+
+    if (!isPositiveInteger(config.localStockfishDepth)) throw new Error("Invalid localStockfishDepth");
+    if (!isPositiveInteger(config.localStockfishMultiPv)) throw new Error("Invalid localStockfishMultiPv");
+    if (config.localStockfishMultiPv !== 1) {
+        throw new Error("Invalid localStockfishMultiPv: trusted Local Deep requires MultiPV 1");
     }
 
-    // Validate API settings
-    if (!Number.isInteger(config.api?.lichessCloudEval?.multiPv) || config.api.lichessCloudEval.multiPv < 1) throw new Error("Invalid api.lichessCloudEval.multiPv");
-    if (!Number.isInteger(config.api?.lichessCloudEval?.retryAttempts) || config.api.lichessCloudEval.retryAttempts < 1) throw new Error("Invalid api.lichessCloudEval.retryAttempts");
-    if (!Number.isInteger(config.api?.lichessExplorer?.retryAttempts) || config.api.lichessExplorer.retryAttempts < 1) throw new Error("Invalid api.lichessExplorer.retryAttempts");
+    if (!Array.isArray(config.hardcodedBlackResponses) || config.hardcodedBlackResponses.some(s => typeof s !== 'string' || s.trim() === '')) throw new Error("Invalid hardcodedBlackResponses");
+
+    // Validate API settings not yet covered by generation-config
     if (config.api?.chessDb?.queryMode !== "queryall") throw new Error("Invalid api.chessDb.queryMode");
-    if (!Number.isInteger(config.api?.chessDb?.retryAttempts) || config.api.chessDb.retryAttempts < 1) throw new Error("Invalid api.chessDb.retryAttempts");
-
-    if (typeof config.api?.networkRetryDelayMs !== 'number' || config.api.networkRetryDelayMs < 0 || !Number.isFinite(config.api.networkRetryDelayMs)) throw new Error("Invalid api.networkRetryDelayMs");
-    if (typeof config.api?.rateLimitRetryDelayMs !== 'number' || config.api.rateLimitRetryDelayMs < 0 || !Number.isFinite(config.api.rateLimitRetryDelayMs)) throw new Error("Invalid api.rateLimitRetryDelayMs");
-    if (typeof config.api?.betweenRequestDelayMs !== 'number' || config.api.betweenRequestDelayMs < 0 || !Number.isFinite(config.api.betweenRequestDelayMs)) throw new Error("Invalid api.betweenRequestDelayMs");
-    if (!Number.isInteger(config.api?.requestTimeoutMs) || config.api.requestTimeoutMs < 1) throw new Error("Invalid api.requestTimeoutMs");
-    if (typeof config.api?.retryBackoffMultiplier !== 'number' || config.api.retryBackoffMultiplier < 1 || !Number.isFinite(config.api.retryBackoffMultiplier)) throw new Error("Invalid api.retryBackoffMultiplier");
-    if (!Number.isInteger(config.api?.maximumRetryDelayMs) || config.api.maximumRetryDelayMs < 0) throw new Error("Invalid api.maximumRetryDelayMs");
 
     const wikibooks = config.api?.wikibooks;
-    if (!Number.isInteger(wikibooks?.retryAttempts) || wikibooks.retryAttempts < 1) throw new Error("Invalid api.wikibooks.retryAttempts");
-    if (!Number.isInteger(wikibooks?.initialRetryDelayMs) || wikibooks.initialRetryDelayMs < 0) throw new Error("Invalid api.wikibooks.initialRetryDelayMs");
-    if (typeof wikibooks?.retryBackoffMultiplier !== 'number' || wikibooks.retryBackoffMultiplier < 1 || !Number.isFinite(wikibooks.retryBackoffMultiplier)) throw new Error("Invalid api.wikibooks.retryBackoffMultiplier");
-    if (!Number.isInteger(wikibooks?.minimumRequestIntervalMs) || wikibooks.minimumRequestIntervalMs < 0) throw new Error("Invalid api.wikibooks.minimumRequestIntervalMs");
-    if (!Number.isInteger(wikibooks?.maxLagSeconds) || wikibooks.maxLagSeconds < 1) throw new Error("Invalid api.wikibooks.maxLagSeconds");
-    if (!Number.isInteger(wikibooks?.requestTimeoutMs) || wikibooks.requestTimeoutMs < 1) throw new Error("Invalid api.wikibooks.requestTimeoutMs");
+    if (!isPositiveInteger(wikibooks?.maxLagSeconds)) throw new Error("Invalid api.wikibooks.maxLagSeconds");
     if (typeof wikibooks?.userAgent !== "string" || wikibooks.userAgent.trim() === "") throw new Error("Invalid api.wikibooks.userAgent");
-
-    const generation = config.generation;
-    for (const key of ["commonProbability", "uncommonProbability"] as const) {
-        if (typeof generation?.[key] !== "number" || generation[key] < 0 || generation[key] > 1 || !Number.isFinite(generation[key])) throw new Error(`Invalid generation.${key}`);
-    }
-    for (const key of ["commonDepthBudget", "uncommonDepthBudget", "rareDepthBudget"] as const) {
-        if (!Number.isInteger(generation?.[key]) || generation[key] < 1) throw new Error(`Invalid generation.${key}`);
-    }
 }
 
 function canonicalStringify(obj: unknown): string {
@@ -348,16 +218,33 @@ export function computeConfigHash(config: Config): string {
     return createHash('sha256').update(canonical).digest('hex');
 }
 
+export type ExplorerDataset = "MASTERS" | "ELITE" | "AMATEUR";
+
+// DB.31: the dataset is part of the cache profile, so each dataset has its own.
+export function computeExplorerCacheProfile(dataset: ExplorerDataset, config: Config): string {
+    const requestShape = dataset === "MASTERS"
+        ? { dataset, source: "masters" }
+        : dataset === "ELITE"
+            ? { dataset, source: "lichess", speeds: config.explorerEliteSpeeds, ratings: config.explorerEliteRatings }
+            : { dataset, source: "lichess", speeds: config.explorerSpeeds, ratings: config.explorerRatings };
+    return createHash('sha256').update(canonicalStringify(requestShape)).digest('hex');
+}
+
+// The old all-datasets request shape. Only used to carry old Explorer caches over.
 export function computeExplorerRequestProfile(config: Config): string {
-    const canonical = canonicalStringify(config.humanExplorerRequest);
-    return createHash('sha256').update(canonical).digest('hex');
+    const requestShape = {
+        masters: { source: "masters" },
+        elite: { source: "lichess", speeds: config.explorerEliteSpeeds, ratings: config.explorerEliteRatings },
+        amateur: { source: "lichess", speeds: config.explorerSpeeds, ratings: config.explorerRatings }
+    };
+    return createHash('sha256').update(canonicalStringify(requestShape)).digest('hex');
 }
 
 export type RemoteEngineProfileSource = "LICHESS" | "CHESSDB";
 
 export function computeRemoteEngineEvaluationProfile(source: RemoteEngineProfileSource, config: Config): string {
     const requestShape = source === "LICHESS"
-        ? { source, multiPv: config.api.lichessCloudEval.multiPv }
+        ? { source, multiPv: config.lichessCloudEvalMultiPv }
         : { source, queryMode: config.api.chessDb.queryMode };
     return createHash('sha256').update(canonicalStringify(requestShape)).digest('hex');
 }
@@ -365,8 +252,8 @@ export function computeRemoteEngineEvaluationProfile(source: RemoteEngineProfile
 export function computeLocalEngineEvaluationProfile(config: Config): string {
     const searchShape = {
         role: "deep-local",
-        depth: config.engine.deepVerification.depth,
-        multiPv: config.engine.deepVerification.multiPv
+        depth: config.localStockfishDepth,
+        multiPv: config.localStockfishMultiPv
     };
     return createHash('sha256').update(canonicalStringify(searchShape)).digest('hex');
 }
@@ -398,8 +285,14 @@ export function createRuntimeConfig(configSource: Config) {
     };
 }
 
-export function getMoveBand(moveNumber: number, config: Config): 'early' | 'middle' | 'late' {
-    if (moveNumber <= config.moveBands.earlyThrough) return 'early';
-    if (moveNumber <= config.moveBands.middleThrough) return 'middle';
+export function getMoveBand(moveNumber: number, config: Config): MoveBand {
+    if (moveNumber <= config.moveNumberBands.early) return 'early';
+    if (moveNumber <= config.moveNumberBands.middle) return 'middle';
     return 'late';
+}
+
+export function getProbabilityBand(cumProb: number, config: Config): ProbabilityBand {
+    if (cumProb >= config.probabilityBands.deep) return 'deep';
+    if (cumProb >= config.probabilityBands.medium) return 'medium';
+    return 'shallow';
 }

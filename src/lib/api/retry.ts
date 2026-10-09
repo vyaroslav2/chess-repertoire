@@ -1,5 +1,3 @@
-import * as readline from 'readline/promises';
-import { stdin as processStdin, stdout as processStdout } from 'process';
 import { defaultConfig } from '../core/config';
 
 export const GlobalState = {
@@ -15,132 +13,157 @@ export class UserRequestedStopError extends Error {
 
 export const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
-function automaticRetryDelay(baseMs: number, attemptIndex: number): number {
-  return Math.min(
-    defaultConfig.api.maximumRetryDelayMs,
-    baseMs * Math.pow(defaultConfig.api.retryBackoffMultiplier, attemptIndex)
-  );
-}
+/** AR.01: every outside API, and the lane it shares. */
+export type ApiName = "Explorer" | "Cloud Eval" | "ChessDB" | "Wikibooks";
+type LaneName = "Lichess" | "ChessDB" | "Wikibooks";
 
-let lichessRequestQueue = Promise.resolve();
-let nextLichessRequestAt = 0;
-
-async function runInLichessRequestSlot<T>(request: () => Promise<T>): Promise<T> {
-  const previousRequest = lichessRequestQueue;
-  let releaseRequest!: () => void;
-  lichessRequestQueue = new Promise<void>(resolve => {
-    releaseRequest = resolve;
-  });
-
-  await previousRequest;
-  try {
-    const waitMs = Math.max(0, nextLichessRequestAt - Date.now());
-    if (waitMs > 0) {
-      await delay(waitMs);
-    }
-    const startedAt = Date.now();
-    const result = await request();
-    nextLichessRequestAt = Math.max(
-      nextLichessRequestAt,
-      startedAt + defaultConfig.api.betweenRequestDelayMs
-    );
-    return result;
-  } finally {
-    releaseRequest();
-  }
-}
-
-function imposeLichessCooldown(delayMs: number): void {
-  nextLichessRequestAt = Math.max(nextLichessRequestAt, Date.now() + delayMs);
-}
-
-export async function promptUser(query: string): Promise<string> {
-  const rl = readline.createInterface({ input: processStdin, output: processStdout });
-  const answer = await rl.question(query);
-  rl.close();
-  return answer;
-}
-
-type FetchRetryDependencies = {
-  prompt?: (query: string) => Promise<string>;
+const laneOf: Record<ApiName, LaneName> = {
+  "Explorer": "Lichess",
+  "Cloud Eval": "Lichess",
+  "ChessDB": "ChessDB",
+  "Wikibooks": "Wikibooks"
 };
 
-export async function fetchWithRetry(url: string, retryAttempts: number, useToken = true, apiType: 'eval' | 'explorer' | 'chessdb' = 'explorer', dependencies: FetchRetryDependencies = {}): Promise<any> {
-  const headers: any = {};
-  if (apiType !== 'chessdb') {
-    headers['Accept'] = 'application/json';
+type Lane = { queue: Promise<void>; nextRequestAt: number };
+
+let lanes: Record<LaneName, Lane>;
+let apisOff: Set<ApiName>;
+
+/** Fresh lanes and every API on. Called once per process; tests call it between cases. */
+export function resetApiState(): void {
+  lanes = {
+    Lichess: { queue: Promise.resolve(), nextRequestAt: 0 },
+    ChessDB: { queue: Promise.resolve(), nextRequestAt: 0 },
+    Wikibooks: { queue: Promise.resolve(), nextRequestAt: 0 }
+  };
+  apisOff = new Set();
+}
+resetApiState();
+
+/** AR.13: an API that gave up gets no more requests this run. */
+export function isApiOff(api: ApiName): boolean {
+  return apisOff.has(api);
+}
+
+export function lichessHeaders(useToken: boolean): Record<string, string> {
+  const headers: Record<string, string> = { 'Accept': 'application/json' };
+  if (useToken && process.env.LICHESS_API_TOKEN) {
+    headers['Authorization'] = `Bearer ${process.env.LICHESS_API_TOKEN}`;
   }
-  
-  if (useToken && process.env.LICHESS_API_TOKEN && apiType !== 'chessdb') {
-      headers['Authorization'] = `Bearer ${process.env.LICHESS_API_TOKEN}`;
-  }
+  return headers;
+}
 
-  async function handleExhaustedRetries(reason: string): Promise<any> {
-    const isRequiredExplorer = apiType === 'explorer';
-    const cOption = apiType === 'eval' ? `, [c]=Fallback to ChessDB` : ``;
-    const options = isRequiredExplorer
-      ? `(Options: [Enter]=Retry, [s]=Stop)`
-      : `(Options: [Enter]=Retry, [n]=Deny/Skip${cOption}, [s]=Stop script)`;
-    const answer = await (dependencies.prompt ?? promptUser)(`\n[ACTION REQUIRED] ${reason} Switch VPN if needed and press Enter to retry. ${options}: `);
-    const choice = answer.toLowerCase().trim();
+export type ApiResponse =
+  | { kind: "answer"; body: any }  // AR.05
+  | { kind: "nothing" }            // AR.06: Cloud Eval 404
+  | { kind: "off" };               // AR.11: gave up, now or earlier in the run
 
-    if (choice === 's') throw new UserRequestedStopError();
-    if (choice === 'c' && apiType === 'eval') return null;
-    if (choice === 'n' && !isRequiredExplorer) return null;
-    return fetchWithRetry(url, retryAttempts, useToken, apiType, dependencies);
-  }
+type RequestOptions = {
+  body: "json" | "text";
+  headers?: Record<string, string>;
+  fetch?: typeof fetch;
+  wait?: (ms: number) => Promise<void>;
+};
 
-  for (let i = 0; i < retryAttempts; i++) {
-    try {
-      const isLichessRequest = apiType === 'explorer' || apiType === 'eval';
-      // Lichess requires a full cooldown after every 429; do not shorten it via
-      // the ordinary retry-backoff cap used for transient network/server errors.
-      const retryDelayMs = defaultConfig.api.rateLimitRetryDelayMs;
-      const request = async () => {
-        const result = await fetch(url, { headers, signal: AbortSignal.timeout(defaultConfig.api.requestTimeoutMs) });
-        if (isLichessRequest && result.status === 429) imposeLichessCooldown(retryDelayMs);
-        return result;
-      };
-      const response = isLichessRequest
-        ? await runInLichessRequestSlot(request)
-        : await request();
-      if (response.status === 429) {
-        if (i < retryAttempts - 1) {
-            console.log(`[WARNING] Rate limit (429) on ${url}. Pausing all Lichess requests for ${retryDelayMs}ms before retrying (Attempt ${i+1}/${retryAttempts})...`);
-            continue;
-        }
+type Attempt =
+  | { kind: "response"; status: number; headers: Headers; text: string }
+  | { kind: "failed"; reason: string };
 
-        console.log(`\n[WARNING] Rate limit (429) on ${url}`);
-        return handleExhaustedRetries('Rate-limit retries exhausted.');
-      }
-      if (response.status >= 500 && response.status <= 599) {
-        console.log(`[WARNING] Temporary HTTP ${response.status} on ${url}.`);
-        if (i < retryAttempts - 1) {
-          await delay(automaticRetryDelay(defaultConfig.api.networkRetryDelayMs, i));
-          continue;
-        }
-        return handleExhaustedRetries(`HTTP ${response.status} retries exhausted.`);
-      }
-      if (!response.ok) {
-        console.log(`Error ${response.status} on ${url}`);
-        return null;
-      }
-      if (apiType === 'chessdb') {
-        return await response.text();
-      }
-      return await response.json();
-    } catch (e: any) {
-      if (e instanceof UserRequestedStopError) {
-        throw e;
-      }
+/** The AR.07 pause after this attempt, or 0. */
+function pauseAfter(attempt: Attempt): number {
+  return retryableProblem(attempt) ? Math.max(defaultConfig.apiRetryDelayMs, retryAfterMs(attempt)) : 0;
+}
 
-      console.log(`[WARNING] Network error fetching ${url}: ${e.message}`);
-      if (i === retryAttempts - 1) {
-          return handleExhaustedRetries('Network retries exhausted.');
-      }
-      await delay(automaticRetryDelay(defaultConfig.api.networkRetryDelayMs, i));
-      continue;
+/** AR.01-AR.03: one request at a time per lane, with the gap and the timeout. AR.07's pause is set before the lane is released. */
+async function sendThroughLane(api: ApiName, url: string, options: RequestOptions): Promise<Attempt> {
+  const lane = lanes[laneOf[api]];
+  const wait = options.wait ?? delay;
+  const previous = lane.queue;
+  let release!: () => void;
+  lane.queue = new Promise<void>(resolve => { release = resolve; });
+  await previous;
+  let attempt: Attempt = { kind: "failed", reason: "no request sent" };
+  try {
+    const gapMs = lane.nextRequestAt - Date.now();
+    if (gapMs > 0) await wait(gapMs);
+    if (api === "Cloud Eval" && defaultConfig.cloudEvalExtraGapMs > 0) {
+      await wait(defaultConfig.cloudEvalExtraGapMs);
     }
+    const send = options.fetch ?? fetch;
+    try {
+      const response = await send(url, {
+        headers: options.headers,
+        signal: AbortSignal.timeout(defaultConfig.apiRequestTimeoutMs)
+      });
+      const text = await response.text();
+      attempt = { kind: "response", status: response.status, headers: response.headers, text };
+    } catch (e: any) {
+      attempt = e?.name === "TimeoutError"
+        ? { kind: "failed", reason: "a timeout" }
+        : { kind: "failed", reason: `a network error (${e?.message ?? String(e)})` };
+    }
+    return attempt;
+  } finally {
+    const waitMs = Math.max(defaultConfig.apiRequestGapMs, pauseAfter(attempt));
+    lane.nextRequestAt = Math.max(lane.nextRequestAt, Date.now() + waitMs);
+    release();
   }
+}
+
+/** AR.07: the cases worth one retry. Returns the reason, or null. */
+function retryableProblem(attempt: Attempt): string | null {
+  if (attempt.kind === "failed") return attempt.reason;
+  if (attempt.status === 429 || (attempt.status >= 500 && attempt.status <= 599)) return `HTTP ${attempt.status}`;
   return null;
+}
+
+function retryAfterMs(attempt: Attempt): number {
+  if (attempt.kind !== "response") return 0;
+  const header = attempt.headers.get("Retry-After");
+  if (!header) return 0;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const dateMs = Date.parse(header);
+  return Number.isFinite(dateMs) ? Math.max(0, dateMs - Date.now()) : 0;
+}
+
+/** AR.11: Explorer stops the run; the others are turned off. */
+function giveUp(api: ApiName, reason: string, afterRetry: boolean): ApiResponse {
+  if (api === "Explorer") {
+    throw new Error(afterRetry ? `Explorer failed again after retry: ${reason}.` : `Explorer returned ${reason}.`);
+  }
+  apisOff.add(api);
+  if (afterRetry) {
+    console.log(`[WARNING] ${api} failed again after retry: ${reason}. Turned off for the rest of this run.`);
+  }
+  return { kind: "off" };
+}
+
+/** AR: send one request under the shared rules. Only a real answer or a valid "nothing here" comes back to cache (AR.12). */
+export async function requestApi(api: ApiName, url: string, options: RequestOptions): Promise<ApiResponse> {
+  if (apisOff.has(api)) return { kind: "off" };
+
+  let attempt = await sendThroughLane(api, url, options);
+  const problem = retryableProblem(attempt);
+  if (problem) {
+    // sendThroughLane has already paused the lane; the retry waits its turn behind the pause.
+    console.log(`[WARNING] ${api} returned ${problem}. Pausing the ${laneOf[api]} lane for ${Math.ceil(pauseAfter(attempt) / 1000)} s, then retrying once.`);
+    attempt = await sendThroughLane(api, url, options);
+    const again = retryableProblem(attempt);
+    if (again) return giveUp(api, again, true); // AR.08
+  }
+  if (attempt.kind !== "response") throw new Error("unreachable");
+
+  if (attempt.status === 404 && api === "Cloud Eval") return { kind: "nothing" }; // AR.06
+  if (attempt.status < 200 || attempt.status > 299) {
+    console.log(`[WARNING] ${api} returned HTTP ${attempt.status}. Not retrying.`); // AR.09
+    return giveUp(api, `HTTP ${attempt.status}`, false);
+  }
+  if (options.body === "text") return { kind: "answer", body: attempt.text };
+  try {
+    return { kind: "answer", body: JSON.parse(attempt.text) };
+  } catch (e: any) {
+    // AR.10: a hard error, never retried.
+    throw new Error(`${api} returned a malformed answer: ${e.message}`);
+  }
 }

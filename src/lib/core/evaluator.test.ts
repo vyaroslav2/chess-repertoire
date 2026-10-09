@@ -3,8 +3,8 @@ import * as assert from 'node:assert';
 import { Chess } from 'chess.js';
 import { evaluateBlackMove } from './evaluator';
 import { PrismaClient } from '@prisma/client';
-import { createHumanDataSnapshot, getOrCreatePosition, getOrCreatePositionCache } from '../db/operations';
 import { GlobalState } from '../api/retry';
+import { parseFullFen, positionKeyFromFen } from './fen';
 
 const prisma = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
 
@@ -17,24 +17,21 @@ test('Slice 10 Evaluator Tests', async (t) => {
     // Database setup to avoid FK errors during fetch caching
     const user = await prisma.user.create({ data: { username: `evaltest-${Date.now()}` } });
     const repertoire = await prisma.repertoire.create({ data: { title: 'Eval Test', color: 'black', userId: user.id } });
-    const snapshot = await createHumanDataSnapshot(repertoire.id, `snapshot-${Date.now()}`);
     
     // Random position to avoid dev db cache hits
     const fen = "rn1qkb1r/ppp1pppp/5n2/3p4/3P4/5N2/PPP1PPPP/RN1QKB1R b KQkq - 0 3";
     
     // Clear any existing cache for this FEN
-    await prisma.remoteEngineFetch.deleteMany({ where: { fullFen: fen } });
-    await prisma.humanExplorerFetch.deleteMany({ where: { positionKey: fen.split(" ")[0] } });
+    await prisma.engineCache.deleteMany({ where: { fullFen: fen } });
+    await prisma.positionCache.deleteMany({ where: { positionKey: positionKeyFromFen(parseFullFen(fen)) } });
     
-    await getOrCreatePosition(fen);
-    await getOrCreatePositionCache(fen, undefined, []);
 
     try {
       global.fetch = async (url: any) => {
         const urlStr = url.toString();
         // 1. Mock Human Explorer (Empty list so it falls back to Lichess fallback, but returns pvs)
         if (urlStr.includes('explorer.lichess.ovh/masters') || urlStr.includes('explorer.lichess.ovh/lichess')) {
-          return new Response(JSON.stringify({ moves: [] }));
+          return new Response(JSON.stringify({ white: 0, draws: 0, black: 0, moves: [] }));
         }
         
         if (urlStr.includes('lichess.org/api/cloud-eval')) {
@@ -63,7 +60,9 @@ test('Slice 10 Evaluator Tests', async (t) => {
       // We expect evaluateBlackMove to throw when it tries to apply 'e7e5'
       await assert.rejects(
         async () => {
-          await evaluateBlackMove(fen, chess, 2, ["e4", "e5"], snapshot.id);
+          await evaluateBlackMove(fen, chess, 2, ["e4", "e5"], {
+            localSearchRunner: async () => ({ uci: "e7e5", san: "e5", cp: null, mate: -3 })
+          });
         },
         (err: Error) => {
           return err.message.includes("illegal in this position");

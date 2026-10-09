@@ -12,15 +12,15 @@ let toNodeId: string;
 const base = (overrides: Record<string, unknown> = {}) => ({
   fromNodeId, toNodeId, uci: "g8f6", san: "Nf6", cp: -15, mate: null,
   source: "Lichess Cloud Evaluation", selectionMethod: "Ordinary API", moveOrigin: "Human Move",
-  deepVerified: false, localEvaluationProfile: null, weightedCount: 20, ...overrides
+  deepVerified: false, localEvaluationProfile: null, weightedGames: 20, ...overrides
 }) as Parameters<typeof createResponseMove>[0];
 
 before(async () => { await prisma.$connect(); });
 after(async () => { await prisma.$disconnect(); });
 beforeEach(async () => {
   await prisma.repertoirePositionStat.deleteMany(); await prisma.repertoireMove.deleteMany();
-  await prisma.repertoireNode.deleteMany(); await prisma.localEngineCandidate.deleteMany(); await prisma.localEngineBaseline.deleteMany();
-  await prisma.remoteEngineEvalCache.deleteMany(); await prisma.remoteEngineFetch.deleteMany(); await prisma.repertoire.deleteMany(); await prisma.position.deleteMany(); await prisma.user.deleteMany();
+  await prisma.position.deleteMany(); await prisma.repertoireNode.deleteMany(); await prisma.engineCacheEvaluation.deleteMany(); await prisma.engineCache.deleteMany();
+  await prisma.repertoire.deleteMany(); await prisma.user.deleteMany();
   const user = await prisma.user.create({ data: { username: `slice13-${Math.random()}` } });
   const rep = await prisma.repertoire.create({ data: { title: "Slice 13", color: "black", userId: user.id } }); repertoireId = rep.id;
   const from = await createRepertoireNode(rep.id, FEN, "e2e4", 1); fromNodeId = from.id;
@@ -54,7 +54,7 @@ test("RESPONSE legal UCI with unrelated destination FullFen hard-errors without 
   assert.equal(await prisma.repertoireMove.count({ where: { fromNodeId } }), 0);
 });
 
-test("RESPONSE repetition is a terminal move with no destination and retains route probability", async () => {
+test("DB.20 RESPONSE repetition is a terminal move with no destination; its source keeps the probability", async () => {
   const rootChess = new Chess();
   await createRepertoireNode(repertoireId, rootChess.fen(), "", 1, { displayPgn: "" });
   rootChess.move("Nf3"); rootChess.move("Nf6"); rootChess.move("Ng1");
@@ -67,14 +67,13 @@ test("RESPONSE repetition is a terminal move with no destination and retains rou
       toNodeId: null,
       uci: "f6g8",
       san: "Ng8",
-      routeHistory: "g1f3 g8f6 f3g1 f6g8",
       stopReason: "Repetition"
     })
   });
   assert.equal(move.toNodeId, null);
   assert.equal(move.stopReason, "Repetition");
-  assert.equal(move.routeProbability, 0.00002);
-  assert.equal(move.trueProbability, 0.00002);
+  assert.equal(move.moveProb, null);
+  assert.equal((await prisma.repertoireNode.findUniqueOrThrow({ where: { id: source.id } })).cumProb, 0.00002);
 });
 
 test("OPPONENT legal UCI with unrelated destination FullFen hard-errors without writing", async () => {
@@ -97,8 +96,7 @@ test("OPPONENT legal UCI with unrelated destination FullFen hard-errors without 
       toNodeId: wrongDestination.id,
       uci: "e2e4",
       san: "e4",
-      prob: 0.5,
-      trueProbability: 0.5
+      moveProb: 0.5
     }),
     /resulting FullFen does not match/
   );
@@ -150,7 +148,7 @@ test("OPPONENT mismatched supplied repertoireId hard-errors without writing", as
 test("Slice 13 rejects every malformed evaluation and controlled value before writing", async () => {
   const bad = [
     { cp: null, mate: null }, { cp: 1, mate: 2 }, { cp: NaN, mate: null }, { cp: Infinity, mate: null },
-    { cp: null, mate: 1.5 }, { cp: null, mate: 0 }, { source: "Hardcoded Opening" }, { source: undefined },
+    { cp: null, mate: 1.5 }, { cp: null, mate: 0 }, { source: "Hardcoded" }, { source: undefined },
     { selectionMethod: "Guess" }, { moveOrigin: "Guess" }, { uci: "bad" }, { deepVerified: true, localEvaluationProfile: null }
   ];
   for (const override of bad) assert.throws(() => validateResponsePersistence(base(override)), /Invalid RESPONSE/);
@@ -162,8 +160,8 @@ test("Slice 13 persists valid provenance combinations including fallback and har
     { source: "Lichess Cloud Evaluation", selectionMethod: "Ordinary API", moveOrigin: "Human Move" },
     { source: "ChessDB", selectionMethod: "Ordinary API", moveOrigin: "Human Move" },
     { source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Human Move" },
-    { source: "Local Deep Stockfish", selectionMethod: "Local Engine Fallback", moveOrigin: "Engine Move" },
-    { source: "ChessDB", selectionMethod: "Hardcoded Opening", moveOrigin: "Hardcoded Move" }
+    { source: "Local Deep Stockfish", selectionMethod: "Engine Fallback", moveOrigin: "Engine Move" },
+    { source: "ChessDB", selectionMethod: "Hardcoded", moveOrigin: "Hardcoded Move" }
   ] as const) {
     const row = await createResponseMove(base(state));
     assert.equal(row.source, state.source); assert.equal(row.selectionMethod, state.selectionMethod); assert.equal(row.moveOrigin, state.moveOrigin);
@@ -177,26 +175,13 @@ async function seedVerifiedResponse() {
   return createResponseMove(base({ source: "Local Deep Stockfish", deepVerified: true, localEvaluationProfile: PROFILE }));
 }
 
-test("Slice 13 links verification to real Local evidence and invalidates material baseline changes only", async () => {
+test("DB.14 deepVerified needs real Local evidence; the profile is checked, not stored", async () => {
   await assert.rejects(createResponseMove(base({ deepVerified: true, localEvaluationProfile: PROFILE })), /evidence is missing/);
-  await seedVerifiedResponse();
-  await saveLocalEngineBaseline(FEN, PROFILE, { uci: "e7e5", cp: 0, mate: null });
-  assert.equal((await prisma.repertoireMove.findFirstOrThrow({ where: { fromNodeId } })).deepVerified, true);
-  await saveLocalEngineBaseline(FEN, PROFILE, { uci: "e7e5", cp: -1, mate: null });
-  assert.equal((await prisma.repertoireMove.findFirstOrThrow({ where: { fromNodeId } })).deepVerified, false);
+  const move = await seedVerifiedResponse();
+  assert.equal(move.deepVerified, true);
+  assert.ok(!Object.keys(move).includes("localEvaluationProfile"));
 });
 
-test("Slice 13 candidate invalidation is exact by FullFen, UCI and profile", async () => {
-  await seedVerifiedResponse();
-  await saveLocalEngineCandidate(FEN, "g8f6", PROFILE, { uci: "g8f6", cp: 10, mate: null });
-  assert.equal((await prisma.repertoireMove.findFirstOrThrow({ where: { fromNodeId } })).deepVerified, true);
-  await saveLocalEngineCandidate(FEN, "b8c6", PROFILE, { uci: "b8c6", cp: 99, mate: null });
-  assert.equal((await prisma.repertoireMove.findFirstOrThrow({ where: { fromNodeId } })).deepVerified, true);
-  await saveLocalEngineCandidate(FEN, "g8f6", "another-profile", { uci: "g8f6", cp: 99, mate: null });
-  assert.equal((await prisma.repertoireMove.findFirstOrThrow({ where: { fromNodeId } })).deepVerified, true);
-  await saveLocalEngineCandidate(FEN, "g8f6", PROFILE, { uci: "g8f6", cp: 11, mate: null });
-  assert.equal((await prisma.repertoireMove.findFirstOrThrow({ where: { fromNodeId } })).deepVerified, false);
-});
 
 test("Slice 13 remote refresh cannot invalidate Local verification", async () => {
   await seedVerifiedResponse();

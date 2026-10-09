@@ -4,13 +4,11 @@ import { Chess } from 'chess.js';
 import { PrismaClient } from '@prisma/client';
 
 import { evaluateBlackMove } from './evaluator';
-import { computeRemoteEngineEvaluationProfile, defaultConfig } from './config';
+import { computeExplorerCacheProfile, computeRemoteEngineEvaluationProfile, defaultConfig } from './config';
 import { parseFullFen, positionKeyFromFen } from './fen';
 import type { LocalSearchRunner, TrustedLocalEvaluation } from './local-engine';
 import {
-  createHumanDataSnapshot,
-  getOrCreatePosition,
-  saveHumanExplorerBucket,
+  saveExplorerCache,
   saveRemoteEngineResult
 } from '../db/operations';
 
@@ -24,15 +22,14 @@ const mateEval = (uci: string, san: string, mate: number): TrustedLocalEvaluatio
 async function setupPosition(fen: string, mastersMoves: Array<{ uci: string; san: string; games: number; whiteWins: number; draws: number; blackWins: number }>) {
   const user = await prisma.user.create({ data: { username: `slice12-${Date.now()}-${Math.random()}` } });
   const repertoire = await prisma.repertoire.create({ data: { title: 'Slice 12', color: 'black', userId: user.id } });
-  const snapshot = await createHumanDataSnapshot(repertoire.id, `slice12-${Date.now()}-${Math.random()}`);
   const positionKey = positionKeyFromFen(parseFullFen(fen));
-  await getOrCreatePosition(fen);
-  await saveHumanExplorerBucket(snapshot.id, positionKey, 'MASTERS', mastersMoves);
-  await saveHumanExplorerBucket(snapshot.id, positionKey, 'ELITE', []);
-  await saveHumanExplorerBucket(snapshot.id, positionKey, 'AMATEUR', []);
+  const bucket = (moves: typeof mastersMoves) => ({ positionTotalGames: moves.reduce((sum, move) => sum + move.games, 0), eco: null, openingName: null, moves });
+  await saveExplorerCache(positionKey, computeExplorerCacheProfile('MASTERS', defaultConfig), bucket(mastersMoves));
+  await saveExplorerCache(positionKey, computeExplorerCacheProfile('ELITE', defaultConfig), bucket([]));
+  await saveExplorerCache(positionKey, computeExplorerCacheProfile('AMATEUR', defaultConfig), bucket([]));
   await saveRemoteEngineResult(fen, 'LICHESS', computeRemoteEngineEvaluationProfile('LICHESS', defaultConfig), []);
   await saveRemoteEngineResult(fen, 'CHESSDB', computeRemoteEngineEvaluationProfile('CHESSDB', defaultConfig), []);
-  return { user, repertoire, snapshot };
+  return { user, repertoire };
 }
 
 async function cleanup(userId: string, repertoireId: string) {
@@ -41,8 +38,7 @@ async function cleanup(userId: string, repertoireId: string) {
 }
 
 test('Slice 12 B4 Local Deep integration', async (t) => {
-  await prisma.localEngineCandidate.deleteMany();
-  await prisma.localEngineBaseline.deleteMany();
+  await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
 
   await t.test('remote inconclusive invokes LS for same HCM; ACCEPT keeps exact eval/source/deep metadata', async () => {
     const state = await setupPosition(ordinaryFen, [
@@ -51,12 +47,12 @@ test('Slice 12 B4 Local Deep integration', async (t) => {
     const requested: Array<string | undefined> = [];
     const runner: LocalSearchRunner = async (_fen, settings, expected) => {
       requested.push(expected);
-      assert.equal(settings.depth, defaultConfig.engine.deepVerification.depth);
+      assert.equal(settings.depth, defaultConfig.localStockfishDepth);
       assert.equal(settings.multiPv, 1);
       return expected ? cpEval(expected, 'Nbd7', -50) : cpEval('e7e5', 'e5', -100);
     };
     try {
-      const result = await evaluateBlackMove(ordinaryFen, new Chess(ordinaryFen), 3, [], state.snapshot.id, { localSearchRunner: runner });
+      const result = await evaluateBlackMove(ordinaryFen, new Chess(ordinaryFen), 3, [], { localSearchRunner: runner });
       assert.equal(result.selectedMoveSan, 'Nbd7');
       assert.equal(result.selectedEngineCp, -50);
       assert.equal(result.selectedMate, null);
@@ -74,8 +70,7 @@ test('Slice 12 B4 Local Deep integration', async (t) => {
   });
 
   await t.test('valid LS REJECT advances to next HCM and first accepted Local HCM wins', async () => {
-    await prisma.localEngineCandidate.deleteMany();
-    await prisma.localEngineBaseline.deleteMany();
+    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
     const state = await setupPosition(ordinaryFen, [
       { uci: 'b8d7', san: 'Nbd7', games: 300, whiteWins: 50, draws: 50, blackWins: 200 },
       { uci: 'b8c6', san: 'Nc6', games: 250, whiteWins: 60, draws: 50, blackWins: 140 }
@@ -88,7 +83,7 @@ test('Slice 12 B4 Local Deep integration', async (t) => {
       return cpEval('e7e5', 'e5', -100);
     };
     try {
-      const result = await evaluateBlackMove(ordinaryFen, new Chess(ordinaryFen), 3, [], state.snapshot.id, { localSearchRunner: runner });
+      const result = await evaluateBlackMove(ordinaryFen, new Chess(ordinaryFen), 3, [], { localSearchRunner: runner });
       assert.equal(result.selectedMoveSan, 'Nc6');
       assert.equal(result.selectedEngineCp, -50);
       assert.deepEqual(requested, [undefined, 'b8d7', 'b8c6']);
@@ -98,15 +93,14 @@ test('Slice 12 B4 Local Deep integration', async (t) => {
   });
 
   await t.test('LS technical failure stops generation instead of rejecting HCM', async () => {
-    await prisma.localEngineCandidate.deleteMany();
-    await prisma.localEngineBaseline.deleteMany();
+    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
     const state = await setupPosition(ordinaryFen, [
       { uci: 'b8d7', san: 'Nbd7', games: 300, whiteWins: 50, draws: 50, blackWins: 200 }
     ]);
     const runner: LocalSearchRunner = async () => { throw new Error('Stockfish crashed'); };
     try {
       await assert.rejects(
-        evaluateBlackMove(ordinaryFen, new Chess(ordinaryFen), 3, [], state.snapshot.id, { localSearchRunner: runner }),
+        evaluateBlackMove(ordinaryFen, new Chess(ordinaryFen), 3, [], { localSearchRunner: runner }),
         /Stockfish crashed/
       );
     } finally {
@@ -115,8 +109,7 @@ test('Slice 12 B4 Local Deep integration', async (t) => {
   });
 
   await t.test('empty shortlist selects exact Local Deep baseline result', async () => {
-    await prisma.localEngineCandidate.deleteMany();
-    await prisma.localEngineBaseline.deleteMany();
+    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
     const state = await setupPosition(ordinaryFen, []);
     let calls = 0;
     const runner: LocalSearchRunner = async (_fen, _settings, expected) => {
@@ -125,13 +118,14 @@ test('Slice 12 B4 Local Deep integration', async (t) => {
       return cpEval('e7e5', 'e5', -25);
     };
     try {
-      const result = await evaluateBlackMove(ordinaryFen, new Chess(ordinaryFen), 3, [], state.snapshot.id, { localSearchRunner: runner });
+      const result = await evaluateBlackMove(ordinaryFen, new Chess(ordinaryFen), 3, [], { localSearchRunner: runner });
       assert.equal(result.selectedMoveSan, 'e5');
       assert.equal(result.selectedEngineCp, -25);
       assert.equal(result.evalSource, 'Local Deep Stockfish');
       assert.equal(result.deepVerified, true);
-      assert.equal(result.selectionMethod, 'Local Engine Fallback');
+      assert.equal(result.selectionMethod, 'No Qualifying Candidates');
       assert.equal(result.moveOrigin, 'Engine Move');
+      assert.equal(result.engineRank, 1);
       assert.ok(result.localEvaluationProfile);
       assert.equal(calls, 1);
     } finally {
@@ -140,8 +134,7 @@ test('Slice 12 B4 Local Deep integration', async (t) => {
   });
 
   await t.test('all HCMs rejected reuse baseline for final fallback and never return unverified human move', async () => {
-    await prisma.localEngineCandidate.deleteMany();
-    await prisma.localEngineBaseline.deleteMany();
+    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
     const state = await setupPosition(ordinaryFen, [
       { uci: 'b8d7', san: 'Nbd7', games: 300, whiteWins: 50, draws: 50, blackWins: 200 }
     ]);
@@ -151,7 +144,7 @@ test('Slice 12 B4 Local Deep integration', async (t) => {
       return expected ? cpEval(expected, 'Nbd7', 50) : cpEval('e7e5', 'e5', -100);
     };
     try {
-      const result = await evaluateBlackMove(ordinaryFen, new Chess(ordinaryFen), 3, [], state.snapshot.id, { localSearchRunner: runner });
+      const result = await evaluateBlackMove(ordinaryFen, new Chess(ordinaryFen), 3, [], { localSearchRunner: runner });
       assert.equal(result.selectedMoveSan, 'e5');
       assert.equal(result.selectedEngineCp, -100);
       assert.equal(result.deepVerified, true);
@@ -162,28 +155,29 @@ test('Slice 12 B4 Local Deep integration', async (t) => {
   });
 
   await t.test('hardcoded remote absence uses and reuses shared exact-candidate LS cp evidence', async () => {
-    await prisma.localEngineCandidate.deleteMany();
-    await prisma.localEngineBaseline.deleteMany();
+    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
     const first = await setupPosition(e4Fen, []);
     const requested: Array<string | undefined> = [];
     const runner: LocalSearchRunner = async (_fen, _settings, expected) => {
       requested.push(expected);
+      if (expected === undefined) return cpEval('e7e5', 'e5', 0);
       if (expected !== 'c7c6') throw new Error('hardcoded path must request c7c6 only');
       return cpEval('c7c6', 'c6', 42);
     };
     try {
-      const result = await evaluateBlackMove(e4Fen, new Chess(e4Fen), 1, ['e4'], first.snapshot.id, { localSearchRunner: runner });
+      const result = await evaluateBlackMove(e4Fen, new Chess(e4Fen), 1, ['e4'], { localSearchRunner: runner });
       assert.equal(result.selectedMoveSan, 'c6');
       assert.equal(result.selectedEngineCp, 42);
       assert.equal(result.evalSource, 'Local Deep Stockfish');
-      assert.equal(result.deepVerified, false);
-      assert.equal(result.selectionMethod, 'Hardcoded Opening');
+      assert.equal(result.deepVerified, true);
+      assert.equal(result.engineRank, null);
+      assert.equal(result.selectionMethod, 'Hardcoded');
       assert.equal(result.moveOrigin, 'Hardcoded Move');
-      assert.deepEqual(requested, ['c7c6']);
+      assert.deepEqual(requested, [undefined, 'c7c6']);
 
       const second = await setupPosition(e4Fen, []);
       try {
-        const cached = await evaluateBlackMove(e4Fen, new Chess(e4Fen), 1, ['e4'], second.snapshot.id, {
+        const cached = await evaluateBlackMove(e4Fen, new Chess(e4Fen), 1, ['e4'], {
           localSearchRunner: async () => { throw new Error('compatible candidate cache was ignored'); }
         });
         assert.equal(cached.selectedEngineCp, 42);
@@ -196,10 +190,10 @@ test('Slice 12 B4 Local Deep integration', async (t) => {
   });
 
   await t.test('hardcoded Local mate remains explicit and wrong returned root hard-errors', async () => {
-    await prisma.localEngineCandidate.deleteMany();
+    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
     const mateState = await setupPosition(e4Fen, []);
     try {
-      const mate = await evaluateBlackMove(e4Fen, new Chess(e4Fen), 1, ['e4'], mateState.snapshot.id, {
+      const mate = await evaluateBlackMove(e4Fen, new Chess(e4Fen), 1, ['e4'], {
         localSearchRunner: async () => mateEval('c7c6', 'c6', -4)
       });
       assert.equal(mate.selectedEngineCp, null);
@@ -209,11 +203,11 @@ test('Slice 12 B4 Local Deep integration', async (t) => {
       await cleanup(mateState.user.id, mateState.repertoire.id);
     }
 
-    await prisma.localEngineCandidate.deleteMany();
+    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
     const wrongState = await setupPosition(e4Fen, []);
     try {
       await assert.rejects(
-        evaluateBlackMove(e4Fen, new Chess(e4Fen), 1, ['e4'], wrongState.snapshot.id, {
+        evaluateBlackMove(e4Fen, new Chess(e4Fen), 1, ['e4'], {
           localSearchRunner: async () => cpEval('e7e5', 'e5', 0)
         }),
         /requested c7c6 but returned e7e5/

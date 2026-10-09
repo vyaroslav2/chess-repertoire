@@ -5,7 +5,8 @@ import {
   createOpponentMove,
   createRepertoireNode,
   createResponseMove,
-  prisma
+  prisma,
+  saveLocalEngineBaseline
 } from "../db/operations";
 import { parseFullFen, positionKeyFromFen } from "./fen";
 import {
@@ -21,6 +22,15 @@ import {
   type GeneratorQueueItem,
   type PendingCanonicalContinuations
 } from "./generator";
+
+// S3.12: every Black response must be deepVerified, which needs local Stockfish evidence.
+function deepVerified<T extends (fen: string, ...rest: any[]) => Promise<any>>(evaluator: T) {
+  return (async (fen: string, ...rest: any[]) => {
+    const result = await evaluator(fen, ...rest);
+    await saveLocalEngineBaseline(fen, "test-local", { uci: result.selectedUci, cp: result.cp, mate: result.mate });
+    return { ...result, deepVerified: true, localEvaluationProfile: "test-local" };
+  }) as T;
+}
 
 describe("Slice 17 OPPONENT set reconciliation", () => {
   const initialFullFen = new Chess().fen();
@@ -45,8 +55,8 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     await prisma.user.deleteMany({ where: { id: userId } });
   });
 
-  async function createNode(fullFen: string, pgn: string, cumulativeProb = 1) {
-    return createRepertoireNode(repertoireId, fullFen, pgn, cumulativeProb);
+  async function createNode(fullFen: string, pgn: string, cumProb = 1) {
+    return createRepertoireNode(repertoireId, fullFen, pgn, cumProb);
   }
 
   function expectedSource(node: {
@@ -54,24 +64,27 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     repertoireId: string;
     fullFen: string;
     positionKey: string;
-    pgn: string;
-    cumulativeProb: number;
+    displayPgn: string;
+    routeProb: number;
+    cumProb: number;
   }): ExpectedOpponentSource {
     return {
       id: node.id,
       repertoireId: node.repertoireId,
       fullFen: node.fullFen,
       positionKey: node.positionKey,
-      pgn: node.pgn,
-      cumulativeProb: node.cumulativeProb
+      displayPgn: node.displayPgn,
+      routeProb: node.routeProb,
+      cumProb: node.cumProb
     };
   }
 
   function candidates(source: ExpectedOpponentSource, rows: Array<{ san: string; probability: number; uci?: string }>) {
     return canonicalizeOpponentCandidates({
       sourceFullFen: source.fullFen,
-      sourcePgn: source.pgn,
-      sourceCumulativeProb: source.cumulativeProb,
+      sourcePgn: source.displayPgn,
+      sourceRouteProb: source.routeProb,
+      sourceCumProb: source.cumProb,
       candidates: rows
     });
   }
@@ -87,7 +100,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     const destination = await createNode(
       candidate.destinationFullFen,
       input.destinationPgn ?? candidate.destinationPgn,
-      input.destinationCumulativeProb ?? candidate.trueProbability
+      input.destinationCumulativeProb ?? candidate.routeProb
     );
     const edge = await createOpponentMove({
       repertoireId,
@@ -95,8 +108,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
       toNodeId: destination.id,
       uci: candidate.uci,
       san: candidate.san,
-      prob: candidate.prob,
-      trueProbability: candidate.trueProbability
+      moveProb: candidate.moveProb
     });
     return { candidate, destination, edge };
   }
@@ -114,7 +126,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     const chess = new Chess(source.fullFen);
     const move = chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] });
     assert.ok(move);
-    const destination = await createNode(chess.fen(), `${source.pgn} ${move.san}`.trim(), source.cumulativeProb);
+    const destination = await createNode(chess.fen(), `${source.displayPgn} ${move.san}`.trim(), source.cumProb);
     const response = await createResponseMove({
       fromNodeId: source.id,
       toNodeId: destination.id,
@@ -127,7 +139,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
       moveOrigin: "Human Move",
       deepVerified: false,
       localEvaluationProfile: null,
-      weightedCount: 10
+      weightedGames: 10
     });
     const stat = await prisma.repertoirePositionStat.create({
       data: {
@@ -151,14 +163,13 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     const stored = await prisma.repertoireMove.findUniqueOrThrow({ where: { id: e4.edge.id } });
     assert.equal(stored.id, e4.edge.id);
     assert.equal(stored.toNodeId, e4.destination.id);
-    assert.equal(stored.prob, 0.6);
-    assert.equal(stored.trueProbability, 0.3);
+    assert.equal(stored.moveProb, 0.6);
     assert.ok(await prisma.repertoireMove.findUnique({ where: { id: response.response.id } }));
     assert.ok(await prisma.repertoireNode.findUnique({ where: { id: response.destination.id } }));
     assert.equal((await prisma.repertoirePositionStat.findUniqueOrThrow({ where: { id: response.stat.id } })).reps, 4);
   });
 
-  it("adds an ordinary UCI branch with exact FullFen/PositionKey and adds a transposition without overwriting canonical history", async () => {
+  it("TR.08: adds an ordinary UCI branch with exact FullFen/PositionKey, and a transposition as its own pointer node", async () => {
     const source = await createNode(initialFullFen, "", 1);
     const [e4, d4] = candidates(expectedSource(source), [
       { san: "e4", probability: 0.4 },
@@ -172,11 +183,16 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     const e4Node = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: e4Branch.destinationNodeId! } });
     assert.equal(e4Node.fullFen, e4.destinationFullFen);
     assert.equal(e4Node.positionKey, e4.destinationPositionKey);
-    assert.equal(e4Node.pgn, "e4");
+    assert.equal(e4Node.displayPgn, "e4");
     const d4Branch = result.branches.find(branch => branch.uci === "d2d4")!;
-    assert.equal(d4Branch.destinationNodeId, externalD4.id);
     assert.equal(d4Branch.isTransposition, true);
-    assert.equal((await prisma.repertoireNode.findUniqueOrThrow({ where: { id: externalD4.id } })).pgn, "external canonical d4");
+    assert.equal(d4Branch.ownerNodeId, externalD4.id);
+    const pointer = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: d4Branch.destinationNodeId! } });
+    assert.notEqual(pointer.id, externalD4.id);
+    assert.equal(pointer.displayPgn, "d4");
+    assert.equal(pointer.transposesTo, externalD4.id);
+    assert.equal((await prisma.repertoireMove.findUniqueOrThrow({ where: { id: d4Branch.edgeId } })).stopReason, "Transposition");
+    assert.equal((await prisma.repertoireNode.findUniqueOrThrow({ where: { id: externalD4.id } })).displayPgn, "external canonical d4");
   });
 
   it("removes an owned obsolete branch and descendants without collateral damage to a retained sibling", async () => {
@@ -231,8 +247,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
       toNodeId: owner.destination.id,
       uci: incomingCandidate.uci,
       san: incomingCandidate.san,
-      prob: incomingCandidate.prob,
-      trueProbability: incomingCandidate.trueProbability
+      moveProb: incomingCandidate.moveProb
     });
     const continuation = await attachResponse(owner.destination, "c7c5");
 
@@ -262,8 +277,8 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
       nodeId: continuation.destination.id,
       fen: continuation.destination.fullFen,
       currentMoveNumber: 2,
-      cumulativeProb: 0.4,
-      history: continuation.destination.pgn.split(" "),
+      cumProb: 0.4,
+      history: continuation.destination.displayPgn.split(" "),
       responseSourceNodeId: obsolete.destination.id
     };
     const queue = [queueItem];
@@ -289,14 +304,14 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     assert.throws(() => candidates(expectedSource(source), [{ san: "Ke9", probability: 0.2 }]), /Illegal OPPONENT candidate/);
 
     const e4 = await createOpponentBranch({ source, san: "e4", probability: 0.4 });
-    await prisma.repertoireMove.update({ where: { id: e4.edge.id }, data: { prob: null } });
+    await prisma.repertoireMove.update({ where: { id: e4.edge.id }, data: { moveProb: null } });
     const expected = await readExpectedOpponentEdges(source.id);
     await assert.rejects(reconcileOpponentBranches({
       repertoireId,
       expectedSource: expectedSource(source),
       expectedStoredEdges: expected,
       recomputedCandidates: []
-    }), /Invalid OPPONENT stored prob/);
+    }), /Invalid OPPONENT stored moveProb/);
     assert.ok(await prisma.repertoireMove.findUnique({ where: { id: e4.edge.id } }));
     assert.ok(await prisma.repertoireNode.findUnique({ where: { id: e4.destination.id } }));
   });
@@ -312,7 +327,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     await assert.rejects(reconcileOpponentBranches({
       repertoireId, expectedSource: expectedSource(source), expectedStoredEdges: expected, recomputedCandidates: current
     }), /edge .* changed/);
-    assert.equal((await prisma.repertoireMove.findUniqueOrThrow({ where: { id: e4.edge.id } })).prob, 0.4);
+    assert.equal((await prisma.repertoireMove.findUniqueOrThrow({ where: { id: e4.edge.id } })).moveProb, 0.4);
     assert.ok(await prisma.repertoireNode.findUnique({ where: { id: d4.destination.id } }));
 
     await prisma.repertoireMove.update({ where: { id: d4.edge.id }, data: { uci: "d2d4" } });
@@ -320,7 +335,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     await assert.rejects(reconcileOpponentBranches({
       repertoireId, expectedSource: expectedSource(source), expectedStoredEdges: expected, recomputedCandidates: current
     }), /edge count changed/);
-    assert.equal((await prisma.repertoireMove.findUniqueOrThrow({ where: { id: e4.edge.id } })).prob, 0.4);
+    assert.equal((await prisma.repertoireMove.findUniqueOrThrow({ where: { id: e4.edge.id } })).moveProb, 0.4);
   });
 
   it("detects destination, extra-edge, source-FullFen, and ownership races", async () => {
@@ -338,7 +353,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     await prisma.repertoireMove.update({ where: { id: e4.edge.id }, data: { toNodeId: e4.destination.id } });
 
     const extra = await createOpponentMove({
-      repertoireId, fromNodeId: source.id, toNodeId: d4Node.id, uci: "d2d4", san: "d4", prob: 0.3, trueProbability: 0.3
+      repertoireId, fromNodeId: source.id, toNodeId: d4Node.id, uci: "d2d4", san: "d4", moveProb: 0.3
     });
     await assert.rejects(reconcileOpponentBranches({
       repertoireId, expectedSource: expectedSource(source), expectedStoredEdges: expected, recomputedCandidates: current
@@ -349,12 +364,11 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     changedChess.move("c4");
     const changedFen = parseFullFen(changedChess.fen());
     const changedKey = positionKeyFromFen(changedFen);
-    await prisma.position.upsert({ where: { positionKey: changedKey }, update: {}, create: { positionKey: changedKey } });
     await prisma.repertoireNode.update({ where: { id: source.id }, data: { fullFen: changedFen, positionKey: changedKey } });
     await assert.rejects(reconcileOpponentBranches({
       repertoireId, expectedSource: expectedSource(source), expectedStoredEdges: expected, recomputedCandidates: current
     }), /canonical state changed/);
-    assert.equal((await prisma.repertoireMove.findUniqueOrThrow({ where: { id: e4.edge.id } })).prob, 0.4);
+    assert.equal((await prisma.repertoireMove.findUniqueOrThrow({ where: { id: e4.edge.id } })).moveProb, 0.4);
   });
 
   it("rejects cross-repertoire stored ownership before any sibling update", async () => {
@@ -370,7 +384,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
       expectedStoredEdges: expected,
       recomputedCandidates: candidates(expectedSource(source), [{ san: "e4", probability: 0.6 }])
     }), /edge .* changed/);
-    assert.equal((await prisma.repertoireMove.findUniqueOrThrow({ where: { id: e4.edge.id } })).prob, 0.4);
+    assert.equal((await prisma.repertoireMove.findUniqueOrThrow({ where: { id: e4.edge.id } })).moveProb, 0.4);
     assert.ok(await prisma.repertoireNode.findUnique({ where: { id: d4.destination.id } }));
   });
 
@@ -427,16 +441,18 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
       { san: "c4", uci: "c2c4", games: 20, white: 10, draws: 5, black: 5 }
     ];
 
-    const summary = await generateRepertoire(initialFullFen, 1, {
+    const summary = await generateRepertoire(initialFullFen, {
       repertoireId,
-      fetchDatabases: (async () => [
+      // Only the root has White moves; the positions after Black's reply have none.
+      fetchDatabases: (async (fen: string) => [
         { moves: [], totalGames: 0, opening: undefined },
         { moves: [], totalGames: 0 },
-        { moves: humanRows, totalGames: 100 }
+        fen === initialFullFen
+          ? { moves: humanRows, totalGames: 90, positionTotalGames: 100, unaccountedShare: 0.1 }
+          : { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0 }
       ]) as any,
       fetchOpeningMetadata: async () => null,
-      responseEvaluator: responseEvaluator as any,
-      ensurePositionCache: (async () => ({})) as any,
+      responseEvaluator: deepVerified(responseEvaluator) as any,
       ensureNodeWikibooks: (async () => ({ status: "CACHED", text: null })) as any,
       wait: async () => undefined
     });
@@ -444,7 +460,6 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     const generatedNodes = await prisma.repertoireNode.findMany({ where: { repertoireId } });
     assert.ok(generatedNodes.length > 0);
     assert.ok(generatedNodes.every(node => node.openingMetadataStatus === "PRESENT" || node.openingMetadataStatus === "VALID_ABSENCE"));
-    assert.ok(generatedNodes.every(node => node.openingMetadataSource === "LICHESS_MASTERS"));
     const e4Leaf = generatedNodes.find(node => node.history === "e2e4 c7c5");
     assert.equal(e4Leaf?.eco, "B00");
     assert.equal(e4Leaf?.openingName, "King's Pawn Game");
@@ -456,7 +471,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     });
     assert.deepEqual(rootEdges.map(edge => edge.uci), ["c2c4", "e2e4", "g1f3"]);
     assert.notEqual(rebuiltRoot.id, root.id, "a rerun must delete and rebuild the tree");
-    assert.equal((await prisma.repertoireNode.findUniqueOrThrow({ where: { id: rootEdges.find(edge => edge.uci === "c2c4")!.toNodeId! } })).pgn, "c4");
+    assert.equal((await prisma.repertoireNode.findUniqueOrThrow({ where: { id: rootEdges.find(edge => edge.uci === "c2c4")!.toNodeId! } })).displayPgn, "c4");
     assert.equal(await prisma.repertoireMove.findUnique({ where: { id: d4.edge.id } }), null);
     assert.equal(await prisma.repertoireNode.findUnique({ where: { id: d4.destination.id } }), null);
     assert.equal(await prisma.repertoireNode.findUnique({ where: { id: d4Response.destination.id } }), null);
@@ -499,7 +514,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
 
     const a_to_x = await createOpponentBranch({ source: nodeA, san: "Nc3", probability: 0.5 });
     const nodeX = a_to_x.destination;
-    await prisma.repertoireNode.update({ where: { id: nodeX.id }, data: { pgn: "Nf3 Nf6 Nc3" } });
+    await prisma.repertoireNode.update({ where: { id: nodeX.id }, data: { displayPgn: "Nf3 Nf6 Nc3" } });
     const x_resp = await attachResponse(nodeX, "d7d5", -10, 2);
 
     // B -> X (transposition)
@@ -510,17 +525,16 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
         toNodeId: nodeX.id,
         san: "Nf3",
         uci: "g1f3",
-        prob: 0.5,
-        trueProbability: 0.5,
+        moveProb: 0.5,
         playerTurn: "OPPONENT"
       }
     });
 
     const mockDatabases = async (fen: string) => {
-      if (fen === root.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [{ san: "Nc3", uci: "b1c3", games: 50 }, { san: "Nf3", uci: "g1f3", games: 50 }], totalGames: 100 }] as any;
-      if (fen === nodeB.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [{ san: "Nf3", uci: "g1f3", games: 100 }], totalGames: 100 }] as any;
-      if (fen === nodeA.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [], totalGames: 0 }] as any;
-      return [{ moves: [] }, { moves: [] }, { moves: [], totalGames: 0 }] as any;
+      if (fen === root.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [{ san: "Nc3", uci: "b1c3", games: 50 }, { san: "Nf3", uci: "g1f3", games: 50 }], totalGames: 100, positionTotalGames: 100, unaccountedShare: 0 }] as any;
+      if (fen === nodeB.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [{ san: "Nf3", uci: "g1f3", games: 100 }], totalGames: 100, positionTotalGames: 100, unaccountedShare: 0 }] as any;
+      if (fen === nodeA.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0 }] as any;
+      return [{ moves: [] }, { moves: [] }, { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0 }] as any;
     };
 
     let reprocessedB = false;
@@ -535,15 +549,14 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     };
 
     // Force B to be processed first by queueing order
-    await prisma.repertoireMove.update({ where: { id: nc3_edge.edge.id }, data: { prob: 0.6, trueProbability: 0.6 } as any });
-    await prisma.repertoireMove.update({ where: { id: nf3_edge.edge.id }, data: { prob: 0.4, trueProbability: 0.4 } as any });
+    await prisma.repertoireMove.update({ where: { id: nc3_edge.edge.id }, data: { moveProb: 0.6} as any });
+    await prisma.repertoireMove.update({ where: { id: nf3_edge.edge.id }, data: { moveProb: 0.4} as any });
 
-    await generateRepertoire(root.fullFen, 3, {
+    await generateRepertoire(root.fullFen, {
       repertoireId,
       fetchDatabases: mockDatabases,
       fetchOpeningMetadata: async () => null,
-      responseEvaluator: mockEvaluator as any,
-      ensurePositionCache: (async () => ({})) as any,
+      responseEvaluator: deepVerified(mockEvaluator) as any,
       ensureNodeWikibooks: (async () => ({ status: "CACHED", text: null })) as any,
       wait: async () => undefined
     });
@@ -553,7 +566,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     const newB_X = await prisma.repertoireMove.findFirst({ where: { fromNodeId: rebuiltB.id, san: "Nf3" }});
     assert.ok(newB_X);
     const newX = await prisma.repertoireNode.findUnique({ where: { id: newB_X.toNodeId! }});
-    assert.strictEqual(newX?.pgn, "Nc3 Nf6 Nf3");
+    assert.strictEqual(newX?.displayPgn, "Nc3 Nf6 Nf3");
   });
 
   it("A processed first and deleting X, then B processed later creates fresh canonical X", async () => {
@@ -572,7 +585,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     // A -> X: 2. Nc3
     const a_to_x = await createOpponentBranch({ source: nodeA, san: "Nc3", probability: 0.5 });
     const nodeX = a_to_x.destination;
-    await prisma.repertoireNode.update({ where: { id: nodeX.id }, data: { pgn: "Nf3 Nf6 Nc3" } });
+    await prisma.repertoireNode.update({ where: { id: nodeX.id }, data: { displayPgn: "Nf3 Nf6 Nc3" } });
     const x_resp = await attachResponse(nodeX, "d7d5", -10, 2);
 
     // B -> X (transposition)
@@ -583,17 +596,16 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
         toNodeId: nodeX.id,
         san: "Nf3",
         uci: "g1f3",
-        prob: 0.5,
-        trueProbability: 0.5,
+        moveProb: 0.5,
         playerTurn: "OPPONENT"
       }
     });
 
     const mockDatabases = async (fen: string) => {
-      if (fen === root.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [{ san: "Nf3", uci: "g1f3", games: 50 }, { san: "Nc3", uci: "b1c3", games: 50 }], totalGames: 100 }] as any;
-      if (fen === nodeB.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [{ san: "Nf3", uci: "g1f3", games: 100 }], totalGames: 100 }] as any;
-      if (fen === nodeA.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [], totalGames: 0 }] as any;
-      return [{ moves: [] }, { moves: [] }, { moves: [], totalGames: 0 }] as any;
+      if (fen === root.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [{ san: "Nf3", uci: "g1f3", games: 50 }, { san: "Nc3", uci: "b1c3", games: 50 }], totalGames: 100, positionTotalGames: 100, unaccountedShare: 0 }] as any;
+      if (fen === nodeB.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [{ san: "Nf3", uci: "g1f3", games: 100 }], totalGames: 100, positionTotalGames: 100, unaccountedShare: 0 }] as any;
+      if (fen === nodeA.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0 }] as any;
+      return [{ moves: [] }, { moves: [] }, { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0 }] as any;
     };
 
     let reprocessedB = false;
@@ -614,12 +626,11 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
       return { selectedUci: "e7e5", selectedMoveSan: "e5", cp: 0, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Lichess Cloud Evaluation", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false, localEvaluationProfile: null };
     };
 
-    await generateRepertoire(root.fullFen, 3, {
+    await generateRepertoire(root.fullFen, {
       repertoireId,
       fetchDatabases: mockDatabases,
       fetchOpeningMetadata: async () => null,
-      responseEvaluator: mockEvaluator as any,
-      ensurePositionCache: (async () => ({})) as any,
+      responseEvaluator: deepVerified(mockEvaluator) as any,
       ensureNodeWikibooks: (async () => ({ status: "CACHED", text: null })) as any,
       wait: async () => undefined
     });
@@ -629,6 +640,6 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     const newB_X = await prisma.repertoireMove.findFirst({ where: { fromNodeId: rebuiltB.id, san: "Nf3" }});
     assert.ok(newB_X);
     const newX = await prisma.repertoireNode.findUnique({ where: { id: newB_X.toNodeId! }});
-    assert.strictEqual(newX?.pgn, "Nc3 Nf6 Nf3");
+    assert.strictEqual(newX?.displayPgn, "Nc3 Nf6 Nf3");
   });
 });

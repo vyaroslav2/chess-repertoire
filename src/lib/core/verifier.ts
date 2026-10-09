@@ -71,9 +71,9 @@ export function verifyOrdinaryCpSnapshot(
 export function getCpTolerance(moveNumber: number, isLocalEngine = false): number {
     const band = getMoveBand(moveNumber, defaultConfig);
     if (isLocalEngine) {
-        return defaultConfig.engineVerification.localToleranceCp[band];
+        return defaultConfig.localToleranceCp[band];
     }
-    return defaultConfig.engineVerification.apiToleranceCp[band];
+    return defaultConfig.apiToleranceCp[band];
 }
 
 export function verifyLocalOrdinaryCp(

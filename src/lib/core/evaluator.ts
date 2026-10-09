@@ -1,25 +1,27 @@
 import { Chess } from "chess.js";
 import { readRemoteEngineResult, saveRemoteEngineResult, type RemoteEngineEvaluation } from "../db/operations";
-import { fetchWithRetry, delay, GlobalState } from "../api/retry";
+import { isApiOff, lichessHeaders, requestApi } from "../api/retry";
 import {
   getCpTolerance,
   verifyOrdinaryCpSnapshot,
-  type OrdinaryCpSnapshotEntry
+  type OrdinaryCpSnapshotEntry,
+  type PvDecision
 } from "./verifier";
 import {
   getOrCreateLocalBaseline,
   getOrCreateLocalCandidate,
   verifyLocalCandidate,
   runTrustedLocalSearch,
-  type LocalSearchRunner
+  type LocalSearchRunner,
+  type TrustedLocalEvaluation
 } from "./local-engine";
-import { analyseLichessMateSnapshot, verifyCandidateAgainstLichessMate, type LichessMateContext } from "./lichess-mate";
+import { analyseLichessMateSnapshot, verifyCandidateAgainstLichessMate } from "./lichess-mate";
 
 import { parseFullFen } from "./fen";
 import { computeRemoteEngineEvaluationProfile, defaultConfig, getMoveBand } from "./config";
 import type { ResponseEvaluationSource, ResponseMoveOrigin, ResponseSelectionMethod } from "../db/operations";
 
-function compareRemoteEvaluationsForBlack(a: RemoteEngineEvaluation, b: RemoteEngineEvaluation): number {
+export function compareRemoteEvaluationsForBlack(a: RemoteEngineEvaluation, b: RemoteEngineEvaluation): number {
   const category = (evaluation: RemoteEngineEvaluation) =>
     evaluation.mate !== null ? (evaluation.mate < 0 ? 0 : 2) : 1;
   const categoryDifference = category(a) - category(b);
@@ -34,12 +36,6 @@ function compareRemoteEvaluationsForBlack(a: RemoteEngineEvaluation, b: RemoteEn
     return a.cp - b.cp;
   }
   return a.uci.localeCompare(b.uci);
-}
-
-function toLegacyEnginePvs(evaluations: RemoteEngineEvaluation[]) {
-  return [...evaluations]
-    .sort(compareRemoteEvaluationsForBlack)
-    .map(evaluation => ({ cp: evaluation.cp, mate: evaluation.mate, moves: evaluation.uci }));
 }
 
 function toOrdinaryCpSnapshot(evaluations: RemoteEngineEvaluation[]): OrdinaryCpSnapshotEntry[] | null {
@@ -57,7 +53,7 @@ export function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: numbe
     const amateurGames = amateurData.games ?? (amateurData.white + amateurData.draws + amateurData.black);
     const probability = totalAmateurGames > 0 ? amateurGames / totalAmateurGames : 0;
     const band = getMoveBand(currentMoveNumber, defaultConfig);
-    const requiredProbability = defaultConfig.whiteMoveFiltering.mainlinePopularity[band];
+    const requiredProbability = defaultConfig.popularityThresholds[band];
     const include = totalAmateurGames > 0 && probability >= requiredProbability;
 
     return {
@@ -71,18 +67,35 @@ export function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: numbe
     };
 }
 
+// HM.04: every returned move is kept in the list; `include` false marks a dropped move.
+// HM.05: most popular first, ties alphabetically by SAN.
 export function selectWhiteCandidates(currentMoveNumber: number, amateurList: any[], totalAmateurGames: number) {
   return amateurList
     .map(move => ({
       san: move.san,
       ...shouldIncludeWhiteMove(move.san, currentMoveNumber, amateurList, totalAmateurGames)
     }))
-    .filter(move => move.include);
+    .sort((a, b) => b.probability - a.probability || a.san.localeCompare(b.san));
 }
 
-import { fetchAllDatabases } from "../api/lichess";
-import { buildBlackHumanShortlist } from "./black-human-shortlist";
+import { fetchAllDatabases, pickExplorerOpening, type ExplorerOpening } from "../api/lichess";
+import { buildBlackHumanShortlist, type BlackHumanCandidate } from "./black-human-shortlist";
 
+/**
+ * EW.13: Black's move from the first `hardcodedBlackResponses` line that the route
+ * follows up to and including White's last move. The match is on the route, not the position.
+ */
+export function findHardcodedResponse(routeSan: readonly string[], lines: readonly string[]): string | null {
+  if (routeSan.length % 2 === 0) return null; // the route must end with White's move
+  for (const line of lines) {
+    const moves = line.replace(/\d+\.+/g, " ").split(/\s+/)
+      .filter(move => move !== "" && !["1-0", "0-1", "1/2-1/2", "*"].includes(move));
+    if (moves.length > routeSan.length && routeSan.every((san, index) => san === moves[index])) {
+      return moves[routeSan.length];
+    }
+  }
+  return null;
+}
 
 export type EvaluateBlackMoveDependencies = {
   localSearchRunner?: LocalSearchRunner;
@@ -96,13 +109,17 @@ export type SelectedResponseResult = {
   source: ResponseEvaluationSource;
   selectionMethod: ResponseSelectionMethod;
   moveOrigin: ResponseMoveOrigin;
+  /** DB.14: the move's place in the list of the engine that accepted it. */
+  engineRank?: number | null;
   deepVerified: boolean;
   localEvaluationProfile: string | null;
   selectedStats: any;
-  candidateMoves: ReturnType<typeof buildBlackHumanShortlist>;
-  enginePvs: any[];
-  openingMetadata?: { eco?: string | null; name?: string | null } | null;
-  openingMetadataRetrieval?: "CACHE" | "FRESH";
+  candidateMoves: BlackHumanCandidate[];
+  /** DB.06 rule 1: the opening Explorer returned for this position: Masters, then Elite, then Amateur. Rule 4 for a hardcoded reply. */
+  openingMetadata: ExplorerOpening | null | "NOT_FETCHED";
+  /** DB.13: all games in each dataset that reached this position. */
+  totalMastersGames: number | null;
+  totalEliteGames: number | null;
   /** @deprecated diagnostic compatibility; persistence uses source/cp/mate. */
   evalSource: ResponseEvaluationSource;
   /** @deprecated diagnostic compatibility; persistence uses cp. */
@@ -111,39 +128,74 @@ export type SelectedResponseResult = {
   selectedMate: number | null;
 };
 
+type RankedEvaluation = RemoteEngineEvaluation & { rank: number | null };
+type RemoteSnapshot = { source: "Lichess Cloud Evaluation" | "ChessDB"; evaluations: RankedEvaluation[] };
+
+type EngineChoice = {
+  uci: string;
+  cp: number | null;
+  mate: number | null;
+  source: ResponseEvaluationSource;
+  engineRank: number | null;
+  deepVerified: boolean;
+  localEvaluationProfile: string | null;
+  /** The API answer the move was chosen from; EW.11 checks it against local Stockfish. */
+  apiSnapshot: RemoteSnapshot | null;
+};
+
+function topForBlack(evaluations: RankedEvaluation[]): RankedEvaluation {
+  return [...evaluations].sort((a, b) =>
+    compareRemoteEvaluationsForBlack({ ...a, uci: "" }, { ...b, uci: "" }) ||
+    (a.rank ?? Infinity) - (b.rank ?? Infinity) || a.uci.localeCompare(b.uci))[0];
+}
+
+function evaluationText(evaluation: { cp: number | null; mate: number | null }): string {
+  return evaluation.mate !== null ? `mate ${evaluation.mate}` : `cp ${evaluation.cp}`;
+}
+
+function choiceFromSnapshot(snapshot: RemoteSnapshot, uci: string): EngineChoice {
+  const evaluation = snapshot.evaluations.find(item => item.uci === uci);
+  if (!evaluation) throw new Error(`${snapshot.source} has no evaluation for ${uci}`);
+  return {
+    uci, cp: evaluation.cp, mate: evaluation.mate, source: snapshot.source, engineRank: evaluation.rank,
+    deepVerified: false, localEvaluationProfile: null, apiSnapshot: snapshot
+  };
+}
+
+function legalSan(chess: Chess, uci: string): string {
+  let move;
+  try {
+    move = chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci.length === 5 ? uci[4] : undefined });
+  } catch {
+    throw new Error(`Engine move '${uci}' is illegal in this position.`);
+  }
+  if (!move || move.lan !== uci) throw new Error(`Engine move '${uci}' is illegal in this position.`);
+  chess.undo();
+  return move.san;
+}
+
 export async function evaluateBlackMove(
   fen: string,
   chess: Chess,
   moveNumber: number,
   previousMovesSan: string[],
-  snapshotId: string,
   dependencies: EvaluateBlackMoveDependencies = {}
 ): Promise<SelectedResponseResult> {
   const fullFen = parseFullFen(fen);
   const localSearchRunner = dependencies.localSearchRunner ?? runTrustedLocalSearch;
-  let evalSource: ResponseEvaluationSource = 'Lichess Cloud Evaluation';
 
-  // 1. Check Explorer Cache via lichess.ts
-  const [mastersData, eliteData] = await fetchAllDatabases(fen, snapshotId);
-  
-  // 2. Compute Black human candidate shortlist (B1)
-  const candidateMoves = buildBlackHumanShortlist(mastersData.moves || [], eliteData.moves || [], defaultConfig);
-
+  // EW.07: Lichess Cloud Eval, from EngineCache first. Null when off, given up or no evals found.
   const lichessProfile = computeRemoteEngineEvaluationProfile("LICHESS", defaultConfig);
-  const chessDbProfile = computeRemoteEngineEvaluationProfile("CHESSDB", defaultConfig);
-
-  // 2. Resolve Lichess for position
-  let lichessResult = await readRemoteEngineResult(fullFen, "LICHESS", lichessProfile);
-  let lichessUnavailable = false;
-
-  if (lichessResult.status === "missing") {
-    // Ordinary flow without GlobalState.lichessCloudEvals bypass
-    try {
-      const cloudUrl = `https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(fullFen)}&multiPv=${defaultConfig.api.lichessCloudEval.multiPv}`;
-      const cloudData = await fetchWithRetry(cloudUrl, defaultConfig.api.lichessCloudEval.retryAttempts, false, 'eval');
-      
-      if (cloudData && !cloudData.error) {
-        if (!Array.isArray(cloudData.pvs)) throw new Error("Malformed successful Lichess engine snapshot");
+  let lichessSnapshot: RemoteSnapshot | null | undefined;
+  const resolveLichess = async (): Promise<RemoteSnapshot | null> => {
+    if (lichessSnapshot !== undefined) return lichessSnapshot;
+    let lichessResult = await readRemoteEngineResult(fullFen, "LICHESS", lichessProfile);
+    if (lichessResult.status === "missing" && !isApiOff("Cloud Eval")) {
+      const cloudUrl = `https://lichess.org/api/cloud-eval?fen=${encodeURIComponent(fullFen)}&multiPv=${defaultConfig.lichessCloudEvalMultiPv}`;
+      const cloud = await requestApi("Cloud Eval", cloudUrl, { body: "json", headers: lichessHeaders(false) });
+      if (cloud.kind === "answer") {
+        const cloudData = cloud.body;
+        if (!cloudData || !Array.isArray(cloudData.pvs)) throw new Error("Malformed successful Lichess engine snapshot");
         const evaluations: RemoteEngineEvaluation[] = cloudData.pvs.map((pv: any) => ({
           uci: typeof pv.moves === "string" ? pv.moves.split(" ")[0] : "",
           cp: pv.cp === undefined ? null : pv.cp,
@@ -151,293 +203,264 @@ export async function evaluateBlackMove(
         }));
         await saveRemoteEngineResult(fullFen, "LICHESS", lichessProfile, evaluations);
         lichessResult = await readRemoteEngineResult(fullFen, "LICHESS", lichessProfile);
-      } else {
-        lichessUnavailable = true;
+      } else if (cloud.kind === "nothing") {
+        // AR.06: no cloud evaluation is a valid answer, cached as empty.
         await saveRemoteEngineResult(fullFen, "LICHESS", lichessProfile, []);
         lichessResult = await readRemoteEngineResult(fullFen, "LICHESS", lichessProfile);
       }
-    } catch (e: any) {
-      if (e instanceof Error && (e.message.startsWith("Malformed successful") || e.message.startsWith("Invalid remote engine result"))) throw e;
-      console.log("Error fetching Lichess engine eval:", e.message);
-      lichessUnavailable = true;
+      // AR.12: a give-up is never cached.
     }
-  }
+    lichessSnapshot = lichessResult.status === "success"
+      ? { source: "Lichess Cloud Evaluation", evaluations: lichessResult.evaluations }
+      : null;
+    return lichessSnapshot;
+  };
 
-  let lichessMateContext: LichessMateContext = { kind: "NO_MATE" };
-  let lichessOrdinarySnapshot: OrdinaryCpSnapshotEntry[] | null = null;
-  let lichessPvs: any[] = [];
-
-  if (lichessResult.status === "success") {
-    lichessMateContext = analyseLichessMateSnapshot(lichessResult.evaluations);
-    lichessOrdinarySnapshot = toOrdinaryCpSnapshot(lichessResult.evaluations);
-    lichessPvs = toLegacyEnginePvs(lichessResult.evaluations);
-  }
-
-  // 3. Lazy ChessDB resolver
-  let chessDbResult = await readRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile);
-  let chessDbUnavailable = false;
-  let chessDbOrdinarySnapshot: OrdinaryCpSnapshotEntry[] | null = null;
-  
-  if (chessDbResult.status === "success") {
-    chessDbOrdinarySnapshot = toOrdinaryCpSnapshot(chessDbResult.evaluations);
-  }
-
-  const ensureChessDb = async () => {
-    if (chessDbResult.status !== "missing" || chessDbUnavailable) return;
-    const chessdbUrl = `https://www.chessdb.cn/cdb.php?action=${defaultConfig.api.chessDb.queryMode}&board=${encodeURIComponent(fullFen)}`;
-    try {
-      const text = await fetchWithRetry(chessdbUrl, defaultConfig.api.chessDb.retryAttempts, false, 'chessdb');
-      if (text !== null) {
-        const evaluations: RemoteEngineEvaluation[] = text.includes("move:")
-          ? text.split("|").filter((row: string) => row.includes("move:")).map((row: string) => {
-              const match = row.match(/move:([^,]+),score:([^,]+)/);
-              if (!match || !/^-?\d+$/.test(match[2])) throw new Error("Malformed successful ChessDB engine snapshot");
-              return { uci: match[1], cp: -Number(match[2]), mate: null };
-            })
-          : [];
+  // EW.08: ChessDB, from EngineCache first. Null when off, given up, no evals found, or hiding a mate.
+  const chessDbProfile = computeRemoteEngineEvaluationProfile("CHESSDB", defaultConfig);
+  let chessDbSnapshot: RemoteSnapshot | null | undefined;
+  const resolveChessDb = async (): Promise<RemoteSnapshot | null> => {
+    if (chessDbSnapshot !== undefined) return chessDbSnapshot;
+    let chessDbResult = await readRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile);
+    if (chessDbResult.status === "missing" && !isApiOff("ChessDB")) {
+      const chessdbUrl = `https://www.chessdb.cn/cdb.php?action=${defaultConfig.api.chessDb.queryMode}&board=${encodeURIComponent(fullFen)}`;
+      const chessDb = await requestApi("ChessDB", chessdbUrl, { body: "text" });
+      // AR.12: a give-up is never cached.
+      if (chessDb.kind === "answer") {
+        const text: string = chessDb.body.trim();
+        let evaluations: RemoteEngineEvaluation[];
+        if (text === "unknown") {
+          evaluations = []; // AR.06
+        } else if (text.includes("move:")) {
+          evaluations = text.split("|").filter(row => row.includes("move:")).map(row => {
+            const match = row.match(/move:([^,]+),score:([^,]+)/);
+            if (!match || !/^-?\d+$/.test(match[2])) throw new Error("Malformed successful ChessDB engine snapshot");
+            return { uci: match[1], cp: -Number(match[2]), mate: null };
+          });
+        } else {
+          // AR.10: anything else is a malformed answer.
+          throw new Error(`Malformed successful ChessDB engine snapshot: ${text.slice(0, 80)}`);
+        }
         await saveRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile, evaluations);
         chessDbResult = await readRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile);
-        if (chessDbResult.status === "success") {
-          chessDbOrdinarySnapshot = toOrdinaryCpSnapshot(chessDbResult.evaluations);
-        }
-      } else {
-        chessDbUnavailable = true;
-        await saveRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile, []);
-        chessDbResult = await readRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile);
       }
-    } catch (e: any) {
-      if (e instanceof Error && (e.message.startsWith("Malformed successful") || e.message.startsWith("Invalid remote engine result"))) throw e;
-      console.log("Error fetching ChessDB engine eval:", e.message);
-      chessDbUnavailable = true;
     }
+    // EW.08: a score this large may be a hidden mate. The answer stays cached as received.
+    const hidesMate = chessDbResult.status === "success" && chessDbResult.evaluations.some(evaluation =>
+      evaluation.cp !== null && Math.abs(evaluation.cp) >= defaultConfig.chessDbMaxAbsCp);
+    chessDbSnapshot = chessDbResult.status === "success" && !hidesMate
+      ? { source: "ChessDB", evaluations: chessDbResult.evaluations }
+      : null;
+    return chessDbSnapshot;
   };
 
-  // 4. Verification loop helper
-  let selectedMoveSan: string | null = null;
-  let selectedUci: string | null = null;
-  let selectedStats: any = null;
-  let selectedEngineCp: number | null = null;
-  let selectedMate: number | null = null;
-  let deepVerified = false;
-  let localEvaluationProfile: string | null = null;
-  let selectionMethod: ResponseSelectionMethod = "Ordinary API";
-  let moveOrigin: ResponseMoveOrigin = "Human Move";
+  const localChoice = (evaluation: TrustedLocalEvaluation, baselineUci: string, evaluationProfile: string): EngineChoice => ({
+    uci: evaluation.uci, cp: evaluation.cp, mate: evaluation.mate, source: "Local Deep Stockfish",
+    // DB.14: local Stockfish only knows its top move.
+    engineRank: evaluation.uci === baselineUci ? 1 : null,
+    deepVerified: true, localEvaluationProfile: evaluationProfile, apiSnapshot: null
+  });
 
-  const evaluateCandidateThroughWaterfall = async (candidate: any, isHardcoded: boolean = false) => {
-    const lan = candidate.uci || (() => { const mr = chess.move(candidate.san); chess.undo(); return mr.lan; })();
-    
-    if (isHardcoded) {
-      if (!lichessUnavailable && lichessResult.status === "success") {
-        const found = lichessResult.evaluations.find(e => e.uci === lan);
-        if (found) return { source: "Lichess Cloud Evaluation", cp: found.cp, mate: found.mate };
-      }
-      
-      await ensureChessDb();
-      if (!chessDbUnavailable && chessDbResult.status === "success") {
-        const found = chessDbResult.evaluations.find(e => e.uci === lan);
-        if (found) return { source: "ChessDB", cp: found.cp, mate: found.mate };
-      }
-
-      console.log(`\n[DEEP SEARCH] Resolving exact Local Deep evidence for hardcoded move ${lan}...`);
-      const exactLocal = await getOrCreateLocalCandidate(fullFen, lan, defaultConfig, localSearchRunner);
-      return {
-        source: "Local Deep Stockfish",
-        cp: exactLocal.evaluation.cp,
-        mate: exactLocal.evaluation.mate,
-        localEvaluationProfile: exactLocal.evaluationProfile,
-        deepVerified: false
-      };
+  const finish = (input: {
+    choice: EngineChoice;
+    selectionMethod: ResponseSelectionMethod;
+    moveOrigin: ResponseMoveOrigin;
+    selectedStats: BlackHumanCandidate | null;
+    candidateMoves: BlackHumanCandidate[];
+    openingMetadata: SelectedResponseResult["openingMetadata"];
+    totalMastersGames: number | null;
+    totalEliteGames: number | null;
+  }): SelectedResponseResult => {
+    const { choice } = input;
+    // EW.12: exactly one of cp or mate.
+    if ((choice.cp === null) === (choice.mate === null)) {
+      throw new Error(`Chosen Black move ${choice.uci} must carry exactly one of cp or mate at ${fullFen}`);
     }
-
-    const currentTolerance = getCpTolerance(moveNumber, false);
-
-    // Lichess B3 Mate
-    if (lichessMateContext.kind === "FORCED_MATE") {
-      const mateDecision = verifyCandidateAgainstLichessMate(lan, lichessMateContext);
-      if (mateDecision === "ACCEPT") {
-        return { source: "Lichess Cloud Evaluation", cp: null, mate: lichessMateContext.fallbackMate };
-      }
-      return { decision: "REJECT" }; // Do not go to ChessDB if Lichess mate rejects!
-    }
-
-    // Lichess Ordinary CP
-    let lichessDecision = 'INCONCLUSIVE';
-    if (!lichessUnavailable && lichessOrdinarySnapshot !== null) {
-      if (lichessResult.status === "success" && lichessResult.evaluations.length === 0) {
-        // Successful empty is inconclusive
-      } else {
-        lichessDecision = verifyOrdinaryCpSnapshot(lan, lichessOrdinarySnapshot, currentTolerance);
-      }
-    }
-    
-    if (lichessDecision === "ACCEPT") {
-      return { source: "Lichess Cloud Evaluation", cp: lichessOrdinarySnapshot!.find(entry => entry.uci === lan)!.cp, mate: null };
-    }
-    if (lichessDecision === "REJECT") return { decision: "REJECT" };
-
-    // ChessDB Ordinary CP
-    await ensureChessDb();
-    let chessDbDecision = 'INCONCLUSIVE';
-    if (!chessDbUnavailable && chessDbOrdinarySnapshot !== null) {
-      if (chessDbResult.status === "success" && chessDbResult.evaluations.length === 0) {
-        // Successful empty is inconclusive
-      } else {
-        chessDbDecision = verifyOrdinaryCpSnapshot(lan, chessDbOrdinarySnapshot, currentTolerance);
-      }
-    }
-    
-    if (chessDbDecision === "ACCEPT") {
-      return { source: "ChessDB", cp: chessDbOrdinarySnapshot!.find(entry => entry.uci === lan)!.cp, mate: null };
-    }
-    if (chessDbDecision === "REJECT") return { decision: "REJECT" };
-
-    // Local Deep Stockfish: unrestricted baseline plus exact target evidence.
-    console.log(`\n[DEEP SEARCH] Verifying ${lan} with trusted Local Deep evidence...`);
-    const localTolerance = getCpTolerance(moveNumber, true);
-    const localResult = await verifyLocalCandidate(fullFen, lan, localTolerance, defaultConfig, localSearchRunner);
-    if (localResult.decision === 'ACCEPT') {
-      return {
-        source: "Local Deep Stockfish",
-        cp: localResult.candidate.cp,
-        mate: localResult.candidate.mate,
-        localEvaluationProfile: localResult.evaluationProfile,
-        deepVerified: true
-      };
-    }
-
-    return { decision: "REJECT" };
+    return {
+      selectedUci: choice.uci,
+      selectedMoveSan: legalSan(chess, choice.uci),
+      cp: choice.cp,
+      mate: choice.mate,
+      source: choice.source,
+      selectionMethod: input.selectionMethod,
+      moveOrigin: input.moveOrigin,
+      engineRank: choice.engineRank,
+      deepVerified: choice.deepVerified,
+      localEvaluationProfile: choice.localEvaluationProfile,
+      selectedStats: input.selectedStats,
+      candidateMoves: input.candidateMoves,
+      openingMetadata: input.openingMetadata,
+      totalMastersGames: input.totalMastersGames,
+      totalEliteGames: input.totalEliteGames,
+      evalSource: choice.source,
+      selectedEngineCp: choice.cp,
+      selectedMate: choice.mate
+    };
   };
 
-  // 5. Hardcoded moves
-  if (moveNumber === 1 && previousMovesSan.length === 1) {
-    const whiteFirstMove = previousMovesSan[0];
-    let forcedSan: string | null = null;
-    if (whiteFirstMove === "e4") forcedSan = "c6";
-    else if (whiteFirstMove === "d4") forcedSan = "d5";
+  // EW.13: a hardcoded response. No Explorer, no filtering, no scoring, no candidate loop.
+  const hardcodedSan = findHardcodedResponse(previousMovesSan, defaultConfig.hardcodedBlackResponses);
+  if (hardcodedSan !== null) {
+    let hardcodedMove;
+    try { hardcodedMove = chess.move(hardcodedSan); } catch { hardcodedMove = null; }
+    if (!hardcodedMove) throw new Error(`Hardcoded response ${hardcodedSan} is illegal after ${previousMovesSan.join(" ")}`);
+    chess.undo();
+    const uci = hardcodedMove.lan;
 
-    if (forcedSan) {
-      const candidate = candidateMoves.find(m => m.san === forcedSan) || { san: forcedSan, uci: forcedSan === "c6" ? "c7c6" : "d7d5" };
-      const res = await evaluateCandidateThroughWaterfall(candidate, true);
-      selectedMoveSan = forcedSan;
-      selectedUci = candidate.uci;
-      selectionMethod = "Hardcoded Opening";
-      moveOrigin = "Hardcoded Move";
-      selectedStats = candidateMoves.find(m => m.san === forcedSan) || null;
-      if (res.source) {
-        selectedEngineCp = res.cp;
-        selectedMate = res.mate;
-        evalSource = res.source as ResponseEvaluationSource;
-        deepVerified = res.deepVerified ?? false;
-        localEvaluationProfile = res.localEvaluationProfile ?? null;
-      } else {
-        throw new Error(`Hardcoded forced response ${forcedSan} was rejected by all available engines.`);
-      }
-    }
-  }
-
-  // 6. Normal waterfall
-  if (!selectedMoveSan) {
-    for (const candidate of candidateMoves) {
-      const res = await evaluateCandidateThroughWaterfall(candidate);
-      if (res.source) {
-        selectedMoveSan = candidate.san;
-        selectedUci = candidate.uci;
-        selectedStats = candidate;
-        selectedEngineCp = res.cp;
-        selectedMate = res.mate;
-        evalSource = res.source as ResponseEvaluationSource;
-        deepVerified = res.deepVerified ?? false;
-        localEvaluationProfile = res.localEvaluationProfile ?? null;
+    // The eval is for the record only: the first found of Lichess, ChessDB, local Stockfish.
+    let choice: EngineChoice | null = null;
+    for (const resolve of [resolveLichess, resolveChessDb]) {
+      const snapshot = await resolve();
+      if (snapshot?.evaluations.some(evaluation => evaluation.uci === uci)) {
+        choice = choiceFromSnapshot(snapshot, uci);
         break;
       }
     }
+    // Every Black response is verified by local Stockfish; a hardcoded one is never rejected on it.
+    const baselineResult = await getOrCreateLocalBaseline(fullFen, defaultConfig, localSearchRunner);
+    const localEvaluation = baselineResult.evaluation.uci === uci
+      ? baselineResult.evaluation
+      : (await getOrCreateLocalCandidate(fullFen, uci, defaultConfig, localSearchRunner)).evaluation;
+    const local = localChoice(localEvaluation, baselineResult.evaluation.uci, baselineResult.evaluationProfile);
+    choice = choice
+      ? { ...choice, deepVerified: true, localEvaluationProfile: baselineResult.evaluationProfile }
+      : local;
+
+    return finish({
+      choice,
+      selectionMethod: "Hardcoded",
+      moveOrigin: "Hardcoded Move",
+      selectedStats: null,
+      candidateMoves: [],
+      // DB.06 rule 4: this position was never sent to Explorer.
+      openingMetadata: "NOT_FETCHED",
+      totalMastersGames: null,
+      totalEliteGames: null
+    });
   }
 
-  // 7. Fallbacks (when all HCMs rejected or empty shortlist)
-  if (!selectedMoveSan && lichessMateContext.kind === "FORCED_MATE") {
-    const lan = lichessMateContext.fallbackUci;
-    const fromSq = lan.substring(0, 2);
-    const toSq = lan.substring(2, 4);
-    const promotion = lan.length === 5 ? lan[4] : undefined;
-    
-    let moveResult;
-    try {
-      moveResult = chess.move({ from: fromSq, to: toSq, promotion } as any);
-    } catch(e) {
-      throw new Error(`Failed to apply Lichess mate fallback move '${lan}': ${e}`);
+  // EW.02 - EW.04: Explorer from cache, filtered by minimumWeightedGames and scored.
+  const [mastersData, eliteData, amateurData] = await fetchAllDatabases(fen);
+  const shortlist = buildBlackHumanShortlist(mastersData.moves || [], eliteData.moves || [], defaultConfig);
+
+  // EW.05: moves still tied on score and weighted games are ordered by local Stockfish, then alphabetically.
+  const candidateMoves: BlackHumanCandidate[] = [];
+  for (let start = 0; start < shortlist.length;) {
+    let end = start + 1;
+    while (end < shortlist.length && shortlist[end].blackScore === shortlist[start].blackScore &&
+           shortlist[end].weightedGames === shortlist[start].weightedGames) end++;
+    const tied = shortlist.slice(start, end);
+    if (tied.length > 1) {
+      const localEvaluations = new Map<string, TrustedLocalEvaluation>();
+      for (const candidate of tied) {
+        localEvaluations.set(candidate.uci, (await getOrCreateLocalCandidate(fullFen, candidate.uci, defaultConfig, localSearchRunner)).evaluation);
+      }
+      tied.sort((a, b) => compareRemoteEvaluationsForBlack(localEvaluations.get(a.uci)!, localEvaluations.get(b.uci)!));
+    }
+    candidateMoves.push(...tied);
+    start = end;
+  }
+
+  const apiTolerance = getCpTolerance(moveNumber, false);
+  const ordinaryDecision = (snapshot: RemoteSnapshot, uci: string): PvDecision => {
+    const ordinary = toOrdinaryCpSnapshot(snapshot.evaluations);
+    return ordinary === null ? "INCONCLUSIVE" : verifyOrdinaryCpSnapshot(uci, ordinary, apiTolerance);
+  };
+
+  // EW.07 - EW.10 for one candidate. A REJECT sends us back to EW.06 for the next one.
+  const runWaterfall = async (uci: string): Promise<EngineChoice | "REJECT"> => {
+    const lichess = await resolveLichess();
+    if (lichess) {
+      const mateContext = analyseLichessMateSnapshot(lichess.evaluations);
+      if (mateContext.kind === "FORCED_MATE") {
+        return verifyCandidateAgainstLichessMate(uci, mateContext) === "ACCEPT" ? choiceFromSnapshot(lichess, uci) : "REJECT";
+      }
+      const decision = ordinaryDecision(lichess, uci);
+      if (decision === "ACCEPT") return choiceFromSnapshot(lichess, uci);
+      if (decision === "REJECT") return "REJECT";
     }
 
-    if (!moveResult) {
-      throw new Error(`Lichess mate fallback move '${lan}' is illegal in this position.`);
+    const chessDb = await resolveChessDb();
+    if (chessDb) {
+      const decision = ordinaryDecision(chessDb, uci);
+      if (decision === "ACCEPT") return choiceFromSnapshot(chessDb, uci);
+      if (decision === "REJECT") return "REJECT";
     }
 
-    chess.undo();
-    selectedMoveSan = moveResult.san;
-    selectedUci = lan;
-    selectedMate = lichessMateContext.fallbackMate;
-    selectedStats = candidateMoves.find(m => m.san === selectedMoveSan) || null;
-    evalSource = "Lichess Cloud Evaluation";
+    console.log(`\n[DEEP SEARCH] Verifying ${uci} with trusted Local Deep evidence...`);
+    const local = await verifyLocalCandidate(fullFen, uci, getCpTolerance(moveNumber, true), defaultConfig, localSearchRunner);
+    if (local.decision === "REJECT") return "REJECT";
+    return localChoice(local.candidate, local.baseline.uci, local.evaluationProfile);
+  };
+
+  let choice: EngineChoice | null = null;
+  let selectedStats: BlackHumanCandidate | null = null;
+  for (const candidate of candidateMoves) {
+    const result = await runWaterfall(candidate.uci);
+    if (result !== "REJECT") {
+      choice = result;
+      selectedStats = candidate;
+      break;
+    }
+  }
+
+  // EW.03 and EW.10: no candidate qualified or passed --> the top engine move: Lichess, then ChessDB, then local Stockfish.
+  let selectionMethod: ResponseSelectionMethod = "Ordinary API";
+  let moveOrigin: ResponseMoveOrigin = "Human Move";
+  if (!choice) {
+    selectionMethod = candidateMoves.length === 0 ? "No Qualifying Candidates" : "Engine Fallback";
     moveOrigin = "Engine Move";
+    for (const resolve of [resolveLichess, resolveChessDb]) {
+      const snapshot = await resolve();
+      if (snapshot && snapshot.evaluations.length > 0) {
+        choice = choiceFromSnapshot(snapshot, topForBlack(snapshot.evaluations).uci);
+        break;
+      }
+    }
+    if (!choice) {
+      console.log(`\n[DEEP SEARCH] Resolving Local Deep Stockfish fallback baseline...`);
+      const baselineResult = await getOrCreateLocalBaseline(fullFen, defaultConfig, localSearchRunner);
+      choice = localChoice(baselineResult.evaluation, baselineResult.evaluation.uci, baselineResult.evaluationProfile);
+    }
+    selectedStats = candidateMoves.find(candidate => candidate.uci === choice!.uci) ?? null;
   }
 
-  if (!selectedMoveSan) {
-    // Local Deep fallback reuses the same exact baseline/profile used by HCM checks.
-    console.log(`\n[DEEP SEARCH] Resolving Local Deep Stockfish fallback baseline...`);
+  // EW.11: a move chosen by either API is checked against local Stockfish before it is kept.
+  if (choice.apiSnapshot) {
+    const apiBaseline = topForBlack(choice.apiSnapshot.evaluations);
     const baselineResult = await getOrCreateLocalBaseline(fullFen, defaultConfig, localSearchRunner);
     const baseline = baselineResult.evaluation;
-    if (baseline) {
-      const lan = baseline.uci;
-      const fromSq = lan.substring(0, 2);
-      const toSq = lan.substring(2, 4);
-      const promotion = lan.length === 5 ? lan[4] : undefined;
-      let moveResult;
-      try {
-        moveResult = chess.move({ from: fromSq, to: toSq, promotion } as any);
-      } catch(e) {
-        throw new Error(`Failed to apply local fallback move '${lan}': ${e}`);
-      }
-      
-      if (!moveResult) {
-        throw new Error(`Local fallback move '${lan}' is illegal in this position.`);
-      }
-      
-      chess.undo();
-      selectedMoveSan = moveResult.san;
-      selectedUci = lan;
-      selectedEngineCp = baseline.cp;
-      selectedMate = baseline.mate;
-      selectedStats = candidateMoves.find(m => m.san === selectedMoveSan) || null;
-      evalSource = "Local Deep Stockfish";
-      deepVerified = true;
-      localEvaluationProfile = baselineResult.evaluationProfile;
-      selectionMethod = "Local Engine Fallback";
-      moveOrigin = "Engine Move";
+    const stockfish = baseline.uci === choice.uci
+      ? baseline
+      : (await getOrCreateLocalCandidate(fullFen, choice.uci, defaultConfig, localSearchRunner)).evaluation;
+
+    let vetoed: boolean;
+    if (choice.mate !== null) {
+      // EW.11d and the mate cases: only the same mate as Stockfish's baseline passes.
+      vetoed = baseline.mate !== choice.mate;
+    } else if (baseline.mate !== null || stockfish.mate !== null) {
+      vetoed = true; // EW.11c
     } else {
-      throw new Error(`Local Deep Stockfish fallback returned zero usable results for position ${fullFen}.`);
+      vetoed = stockfish.cp! - baseline.cp! > getCpTolerance(moveNumber, true); // EW.11a, EW.11b
     }
+    if (vetoed) {
+      console.warn("[WARNING] Stockfish vetoed the API engine chosen move.");
+      console.warn(`chosenResponse=${legalSan(chess, choice.uci)} (${choice.uci}); selectionMethod=${selectionMethod}; moveOrigin=${moveOrigin}; engineRank=${choice.engineRank}; ` +
+        `${choice.source} eval=${evaluationText(choice)}; ${choice.source} baseline=${apiBaseline.uci} ${evaluationText(apiBaseline)}; ` +
+        `Stockfish eval=${evaluationText(stockfish)}; Stockfish baseline=${baseline.uci} ${evaluationText(baseline)}`);
+      throw new Error(`Stockfish vetoed the API engine chosen move ${choice.uci} at ${fullFen}`);
+    }
+    choice = { ...choice, deepVerified: true, localEvaluationProfile: baselineResult.evaluationProfile };
   }
 
-  if (!selectedMoveSan || !selectedUci) {
-    throw new Error(`evaluateBlackMove failed to select a move for position ${fullFen}.`);
-  }
-
-  return {
-    selectedUci,
-    selectedMoveSan,
-    cp: selectedEngineCp,
-    mate: selectedMate,
-    source: evalSource,
+  return finish({
+    choice,
     selectionMethod,
     moveOrigin,
-    deepVerified,
-    localEvaluationProfile,
-    evalSource,
-    selectedEngineCp,
-    selectedMate,
     selectedStats,
     candidateMoves,
-    openingMetadata: mastersData.opening,
-    openingMetadataRetrieval: mastersData.retrieval,
-    enginePvs: lichessPvs.length > 0 ? lichessPvs : (chessDbOrdinarySnapshot ? toLegacyEnginePvs((chessDbResult as any).evaluations) : []) 
-  };
+    openingMetadata: pickExplorerOpening([mastersData, eliteData, amateurData]),
+    totalMastersGames: mastersData.positionTotalGames,
+    totalEliteGames: eliteData.positionTotalGames
+  });
 }

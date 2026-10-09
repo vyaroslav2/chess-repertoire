@@ -3,6 +3,18 @@ import { after, before, test } from "node:test";
 import { Chess } from "chess.js";
 import { createRepertoireNode, prisma } from "../db/operations";
 import { captureRebuildOpeningMetadataCache, restoreRebuildOpeningMetadataState } from "./generator";
+import { pickExplorerOpening } from "../api/lichess";
+
+test("DB.06 rule 1 takes Masters, then Elite, then Amateur", () => {
+  const masters = { opening: { eco: "B10", name: "Caro-Kann Defense" } };
+  const elite = { opening: { eco: "B12", name: "Caro-Kann Defense: Advance Variation" } };
+  const amateur = { opening: { eco: "B13", name: "Caro-Kann Defense: Exchange Variation" } };
+  const none = { opening: null };
+  assert.deepEqual(pickExplorerOpening([masters, elite, amateur]), masters.opening);
+  assert.deepEqual(pickExplorerOpening([none, elite, amateur]), elite.opening);
+  assert.deepEqual(pickExplorerOpening([none, none, amateur]), amateur.opening);
+  assert.equal(pickExplorerOpening([none, none, none]), null);
+});
 
 let userId: string;
 let repertoireId: string;
@@ -21,11 +33,10 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-test("opening metadata and valid absence survive rebuild only for the same exact history", async () => {
+test("DB.33 opening metadata and valid absence survive rebuild only for the same exact history", async () => {
   const root = await createRepertoireNode(repertoireId, new Chess().fen(), "", 1, {
     displayPgn: "",
-    openingMetadataStatus: "VALID_ABSENCE",
-    openingMetadataSource: "LICHESS_MASTERS"
+    openingMetadataStatus: "VALID_ABSENCE"
   });
   const chess = new Chess();
   chess.move("e4"); chess.move("c6");
@@ -33,8 +44,7 @@ test("opening metadata and valid absence survive rebuild only for the same exact
     displayPgn: "e4 c6",
     eco: "B10",
     openingName: "Caro-Kann Defense",
-    openingMetadataStatus: "PRESENT",
-    openingMetadataSource: "LICHESS_MASTERS"
+    openingMetadataStatus: "PRESENT"
   });
 
   const cache = await captureRebuildOpeningMetadataCache(repertoireId);
@@ -53,32 +63,29 @@ test("opening metadata and valid absence survive rebuild only for the same exact
     prisma.repertoireNode.findUniqueOrThrow({ where: { id: otherHistory.id } })
   ]);
   assert.equal(restoredRoot.openingMetadataStatus, "VALID_ABSENCE");
-  assert.equal(restoredRoot.openingMetadataSource, "LICHESS_MASTERS");
   assert.equal(restoredLine.eco, "B10");
   assert.equal(restoredLine.openingName, "Caro-Kann Defense");
-  assert.equal(restoredLine.openingMetadataSource, "LICHESS_MASTERS");
   assert.equal(untouched.openingMetadataStatus, null);
 });
 
-test("opening values cannot be stored without checked state and source", async () => {
+test("DB.06 opening values cannot be stored without a status", async () => {
   await assert.rejects(
     createRepertoireNode(repertoireId, new Chess().fen(), "invalid-opening", 1, {
       eco: "A00",
       openingName: "Invalid"
     }),
-    /requires source LICHESS_MASTERS/
+    /status is missing/
   );
 });
 
-test("an interrupted rebuild cannot erase opening metadata for a later exact history", async () => {
+test("DB.33 an interrupted rebuild cannot erase opening metadata for a later exact history", async () => {
   const chess = new Chess();
   chess.move("d4"); chess.move("d5");
   await createRepertoireNode(repertoireId, chess.fen(), "d2d4 d7d5", 0.2, {
     displayPgn: "d4 d5",
     eco: "D00",
     openingName: "Queen's Pawn Game",
-    openingMetadataStatus: "PRESENT",
-    openingMetadataSource: "LICHESS_MASTERS"
+    openingMetadataStatus: "PRESENT"
   });
 
   await captureRebuildOpeningMetadataCache(repertoireId);
@@ -92,24 +99,21 @@ test("an interrupted rebuild cannot erase opening metadata for a later exact his
   assert.equal(await restoreRebuildOpeningMetadataState(rebuilt.id, nextCache), true);
   const restored = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: rebuilt.id } });
   assert.equal(restored.openingName, "Queen's Pawn Game");
-  assert.equal(restored.openingMetadataSource, "LICHESS_MASTERS");
 });
 
-test("a cached false absence inherits the latest named parent history", async () => {
+test("DB.06 rule 2 a cached absence copies its named parent", async () => {
   const chess = new Chess();
   chess.move("e4"); chess.move("c6"); chess.move("Bc4");
   await createRepertoireNode(repertoireId, chess.fen(), "e2e4 c7c6 f1c4", 0.1, {
     displayPgn: "e4 c6 Bc4",
     eco: "B10",
     openingName: "Caro-Kann Defense: Hillbilly Attack",
-    openingMetadataStatus: "PRESENT",
-    openingMetadataSource: "LICHESS_MASTERS"
+    openingMetadataStatus: "PRESENT"
   });
   chess.move("d5");
   await createRepertoireNode(repertoireId, chess.fen(), "e2e4 c7c6 f1c4 d7d5", 0.1, {
     displayPgn: "e4 c6 Bc4 d5",
-    openingMetadataStatus: "VALID_ABSENCE",
-    openingMetadataSource: "LICHESS_MASTERS"
+    openingMetadataStatus: "VALID_ABSENCE"
   });
 
   const cache = await captureRebuildOpeningMetadataCache(repertoireId);

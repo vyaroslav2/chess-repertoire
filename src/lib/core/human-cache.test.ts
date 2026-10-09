@@ -3,61 +3,43 @@ import assert from 'node:assert';
 import { PrismaClient } from '@prisma/client';
 import { parseFullFen, positionKeyFromFen } from './fen';
 import {
-  saveHumanExplorerBucket,
-  readHumanExplorerBucket,
-  getOrCreatePosition,
-  getOrCreateHumanDataSnapshot,
-  createRepertoireNode,
-  HumanDatabaseType
+  saveExplorerCache,
+  readExplorerCache,
+  type ExplorerMoveRow,
+  type HumanDatabaseType
 } from '../db/operations';
 import { fetchAllDatabases } from '../api/lichess';
-import { defaultConfig, computeExplorerRequestProfile } from './config';
+import { defaultConfig, computeExplorerCacheProfile } from './config';
 
 const prisma = new PrismaClient({
   datasourceUrl: process.env.DATABASE_URL
 });
 
-test('Slice 5 Human Cache Rewrite Tests', async (t) => {
-  // Clean DB
-  await prisma.repertoirePositionStat.deleteMany();
-  await prisma.repertoireMove.deleteMany();
-  await prisma.repertoireNode.deleteMany();
-  await prisma.explorerMoveCache.deleteMany();
-  await prisma.humanExplorerFetch.deleteMany();
-  await prisma.humanDataSnapshot.deleteMany();
-  await prisma.position.deleteMany();
-  await prisma.repertoire.deleteMany();
-  await prisma.user.deleteMany();
+const profile = (dataset: HumanDatabaseType) => computeExplorerCacheProfile(dataset, defaultConfig);
+const read = (positionKey: string, dataset: HumanDatabaseType) => readExplorerCache(positionKey, profile(dataset));
+const save = (positionKey: string, dataset: HumanDatabaseType, moves: ExplorerMoveRow[]) =>
+  saveExplorerCache(positionKey, profile(dataset), {
+    positionTotalGames: moves.reduce((sum, move) => sum + move.games, 0), eco: null, openingName: null, moves
+  });
 
-  const user = await prisma.user.create({ data: { username: "test_slice5_user" } });
-  const rep = await prisma.repertoire.create({ data: { title: "Test Rep", color: "white", userId: user.id } });
-  const reqProfile = computeExplorerRequestProfile(defaultConfig);
-  const snap = await getOrCreateHumanDataSnapshot(rep.id, reqProfile);
-  const snapshotId = snap.id;
+test('DB.31 Explorer cache', async (t) => {
+  await prisma.positionCache.deleteMany();
 
   const fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
   const posKey = positionKeyFromFen(parseFullFen(fen));
-  await getOrCreatePosition(fen);
 
-  await t.test('1-3. ExplorerMoveCache belongs to snapshot + pos, unique identity', async () => {
-    const moves = [{
-      uci: "e2e4", san: "e4", games: 100, whiteWins: 30, draws: 40, blackWins: 30
-    }];
-    await saveHumanExplorerBucket(snapshotId, posKey, "MASTERS", moves);
-
-    const row = await prisma.explorerMoveCache.findFirst({
-      where: { snapshotId, positionKey: posKey, databaseType: "MASTERS", uci: "e2e4" }
+  await t.test('DB.31 one row per position per dataset profile', async () => {
+    await save(posKey, "MASTERS", [{ uci: "e2e4", san: "e4", games: 100, whiteWins: 30, draws: 40, blackWins: 30 }]);
+    const row = await prisma.positionCache.findUniqueOrThrow({
+      where: { positionKey_cacheProfile: { positionKey: posKey, cacheProfile: profile("MASTERS") } },
+      include: { moves: true }
     });
-    assert.ok(row);
-    assert.strictEqual(row.san, "e4");
-
-    // Identity is unique
-    const count = await prisma.explorerMoveCache.count();
-    assert.strictEqual(count, 1);
+    assert.deepStrictEqual(row.moves.map(move => move.san), ["e4"]);
+    assert.strictEqual(await prisma.positionCache.count(), 1);
   });
 
-  await t.test('8. successful non-empty result writes all rows + marker atomically', async () => {
-    const res = await readHumanExplorerBucket(snapshotId, posKey, "MASTERS");
+  await t.test('DB.31 a successful non-empty result reads back as success', async () => {
+    const res = await read(posKey, "MASTERS");
     assert.strictEqual(res.status, "success");
     if (res.status === "success") {
       assert.strictEqual(res.moves.length, 1);
@@ -65,36 +47,21 @@ test('Slice 5 Human Cache Rewrite Tests', async (t) => {
     }
   });
 
-  await t.test('9. successful empty result writes zero rows + marker and no _EMPTY_', async () => {
-    await saveHumanExplorerBucket(snapshotId, posKey, "ELITE", []);
-    const res = await readHumanExplorerBucket(snapshotId, posKey, "ELITE");
-    assert.strictEqual(res.status, "empty");
-    const count = await prisma.explorerMoveCache.count({
-      where: { snapshotId, positionKey: posKey, databaseType: "ELITE" }
-    });
-    assert.strictEqual(count, 0); // No _EMPTY_ row
+  await t.test('DB.31 a fetched position with no games is stored as empty (State B)', async () => {
+    await save(posKey, "ELITE", []);
+    assert.strictEqual((await read(posKey, "ELITE")).status, "empty");
   });
 
-  await t.test('10. refreshing exact bucket deletes stale old rows', async () => {
-    const moves = [{
-      uci: "d2d4", san: "d4", games: 50, whiteWins: 20, draws: 20, blackWins: 10
-    }];
-    await saveHumanExplorerBucket(snapshotId, posKey, "MASTERS", moves);
-    const res = await readHumanExplorerBucket(snapshotId, posKey, "MASTERS");
-    if (res.status === "success") {
-      assert.strictEqual(res.moves.length, 1);
-      assert.strictEqual(res.moves[0].uci, "d2d4", "Replaced e2e4 with d2d4");
-    } else {
-      assert.fail("Should be success");
-    }
+  await t.test('DB.31 saving the same position and profile replaces the old row', async () => {
+    await save(posKey, "MASTERS", [{ uci: "d2d4", san: "d4", games: 50, whiteWins: 20, draws: 20, blackWins: 10 }]);
+    const res = await read(posKey, "MASTERS");
+    if (res.status !== "success") return assert.fail("Should be success");
+    assert.deepStrictEqual(res.moves.map(move => move.uci), ["d2d4"]);
   });
 
-  await t.test('invalid direct bucket writes preserve trusted rows and marker', async () => {
-    const before = await readHumanExplorerBucket(snapshotId, posKey, "MASTERS");
+  await t.test('DB.31 invalid writes leave the trusted row alone', async () => {
+    const before = await read(posKey, "MASTERS");
     assert.strictEqual(before.status, "success");
-    const markerBefore = await prisma.humanExplorerFetch.findUniqueOrThrow({
-      where: { snapshotId_positionKey_databaseType: { snapshotId, positionKey: posKey, databaseType: "MASTERS" } }
-    });
 
     const valid = { uci: "e2e4", san: "e4", games: 6, whiteWins: 2, draws: 2, blackWins: 2 };
     const invalidRows = [
@@ -110,77 +77,56 @@ test('Slice 5 Human Cache Rewrite Tests', async (t) => {
       { ...valid, blackWins: 1.5 },
       { ...valid, games: 7 }
     ];
-
     for (const invalid of invalidRows) {
-      await assert.rejects(saveHumanExplorerBucket(snapshotId, posKey, "MASTERS", [valid, invalid]));
+      await assert.rejects(save(posKey, "MASTERS", [valid, invalid]));
     }
+    await assert.rejects(saveExplorerCache(posKey, profile("MASTERS"), { positionTotalGames: -1, eco: null, openingName: null, moves: [] }));
 
-    const after = await readHumanExplorerBucket(snapshotId, posKey, "MASTERS");
-    assert.deepStrictEqual(after, before, "invalid writes must not replace any trusted rows");
-    const markerAfter = await prisma.humanExplorerFetch.findUnique({
-      where: { snapshotId_positionKey_databaseType: { snapshotId, positionKey: posKey, databaseType: "MASTERS" } }
-    });
-    assert.deepStrictEqual(markerAfter, markerBefore, "invalid writes must preserve the successful fetch marker");
+    assert.deepStrictEqual(await read(posKey, "MASTERS"), before, "invalid writes must not replace any trusted rows");
   });
 
-  await t.test('11. refreshing one database bucket does not affect other database buckets', async () => {
-    const eRes = await readHumanExplorerBucket(snapshotId, posKey, "ELITE");
-    assert.strictEqual(eRes.status, "empty", "ELITE bucket remains empty");
+  await t.test('DB.31 each dataset is cached on its own', async () => {
+    assert.strictEqual((await read(posKey, "ELITE")).status, "empty");
+    assert.strictEqual((await read(posKey, "AMATEUR")).status, "missing");
+    assert.strictEqual((await read(posKey, "MASTERS")).status, "success");
   });
 
-  await t.test('13. deleting snapshot deletes human move rows', async () => {
-    const snap2 = await getOrCreateHumanDataSnapshot(rep.id, "some_other_profile");
-    await saveHumanExplorerBucket(snap2.id, posKey, "MASTERS", [{
-      uci: "c2c4", san: "c4", games: 10, whiteWins: 5, draws: 3, blackWins: 2
-    }]);
-
-    let c = await prisma.explorerMoveCache.count({ where: { snapshotId: snap2.id } });
-    assert.strictEqual(c, 1);
-
-    await prisma.humanDataSnapshot.delete({ where: { id: snap2.id } });
-    c = await prisma.explorerMoveCache.count({ where: { snapshotId: snap2.id } });
-    assert.strictEqual(c, 0);
-  });
-
-  await t.test('14. deleting snapshot/human rows does not delete Position/RepertoireNode', async () => {
-    const p = await prisma.position.findUnique({ where: { positionKey: posKey } });
-    assert.ok(p, "Position still exists");
-  });
-
-  await t.test('15. read API distinguishes missing/empty/success', async () => {
-    const rMiss = await readHumanExplorerBucket(snapshotId, posKey, "AMATEUR");
-    assert.strictEqual(rMiss.status, "missing");
-
-    const rEmpty = await readHumanExplorerBucket(snapshotId, posKey, "ELITE");
-    assert.strictEqual(rEmpty.status, "empty");
-
-    const rSucc = await readHumanExplorerBucket(snapshotId, posKey, "MASTERS");
-    assert.strictEqual(rSucc.status, "success");
+  await t.test('DB.31 fetchAllDatabases stores the position total, eco and openingName', async () => {
+    const originalFetch = global.fetch;
+    await prisma.positionCache.deleteMany();
+    let calls = 0;
+    global.fetch = async () => {
+      calls++;
+      return new Response(JSON.stringify({
+        white: 12, draws: 5, black: 3,
+        moves: [{ san: "e4", white: 10, draws: 5, black: 2 }],
+        opening: { eco: "A00", name: "Start position" }
+      }));
+    };
+    try {
+      const [fresh] = await fetchAllDatabases(fen, ["MASTERS"]);
+      assert.strictEqual(fresh.positionTotalGames, 20);
+      assert.strictEqual(fresh.totalGames, 17);
+      assert.deepStrictEqual(fresh.opening, { eco: "A00", name: "Start position" });
+      const [cached] = await fetchAllDatabases(fen, ["MASTERS"]);
+      assert.strictEqual(calls, 1, "cached dataset causes no second request");
+      assert.strictEqual(cached.retrieval, "CACHE");
+      assert.strictEqual(cached.positionTotalGames, 20);
+      assert.deepStrictEqual(cached.opening, { eco: "A00", name: "Start position" });
+    } finally {
+      global.fetch = originalFetch;
+    }
   });
 
   await t.test('API Fetch Tests (Mocked)', async () => {
     const originalFetch = global.fetch;
     let fetchCalls: string[] = [];
 
-    // Helper to test a malformed response
     async function testMalformedResponse(responseBody: any, label: string) {
+      await prisma.positionCache.deleteMany();
       global.fetch = async () => new Response(JSON.stringify(responseBody));
-      const fenTest = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-      await getOrCreatePosition(fenTest);
-      const malformedSnapshot = await getOrCreateHumanDataSnapshot(rep.id, `malformed-${label}`);
-      let t = false;
-      try {
-        await fetchAllDatabases(fenTest, malformedSnapshot.id);
-      } catch (e) {
-        t = true;
-      }
-      assert.ok(t, `Expected error for ${label}`);
-      const result = await readHumanExplorerBucket(malformedSnapshot.id, posKey, "MASTERS");
-      assert.strictEqual(result.status, "missing", `${label} must not create a marker`);
-      const rows = await prisma.explorerMoveCache.count({
-        where: { snapshotId: malformedSnapshot.id, positionKey: posKey, databaseType: "MASTERS" }
-      });
-      assert.strictEqual(rows, 0, `${label} must not leave rows`);
+      await assert.rejects(fetchAllDatabases(fen), Error, `Expected error for ${label}`);
+      assert.strictEqual((await read(posKey, "MASTERS")).status, "missing", `${label} must not create a row`);
     }
 
     await testMalformedResponse({}, "missing moves field");
@@ -190,21 +136,21 @@ test('Slice 5 Human Cache Rewrite Tests', async (t) => {
     await testMalformedResponse({ moves: [{ san: "e4", white: -1, draws: 5, black: 2 }] }, "negative statistic");
     await testMalformedResponse({ moves: [{ san: "e4", white: 10.5, draws: 5, black: 2 }] }, "non-integer statistic");
     await testMalformedResponse({ moves: [{ san: "e4", white: 10, draws: 5, black: 2 }, { san: "invalid_move", white: 1, draws: 1, black: 1 }] }, "one bad SAN among valid moves");
+    await testMalformedResponse({ white: 0, draws: 0, black: 0, moves: [], opening: { eco: "A00" } }, "opening without a name");
+    await testMalformedResponse({ moves: [] }, "missing position totals");
 
-    // Test F public shape on fresh fetch and cache hit
+    // Public shape on fresh fetch and cache hit
+    await prisma.positionCache.deleteMany();
     let shapeFetchCalls = 0;
     global.fetch = async () => {
       shapeFetchCalls++;
       return new Response(JSON.stringify({
+        white: 10, draws: 5, black: 2,
         moves: [{ san: "e4", white: 10, draws: 5, black: 2 }]
       }));
     };
-    const fenShape = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-    await getOrCreatePosition(fenShape);
-    const shapeSnapshot = await getOrCreateHumanDataSnapshot(rep.id, "public-shape");
 
-    // Fresh fetch
-    const [mResFresh] = await fetchAllDatabases(fenShape, shapeSnapshot.id);
+    const [mResFresh] = await fetchAllDatabases(fen);
     assert.strictEqual(mResFresh.moves[0].uci, "e2e4", "ordinary legal SAN converts to authoritative UCI");
     assert.strictEqual(mResFresh.moves[0].white, 10);
     assert.strictEqual(mResFresh.moves[0].draws, 5);
@@ -213,174 +159,86 @@ test('Slice 5 Human Cache Rewrite Tests', async (t) => {
     assert.strictEqual((mResFresh.moves[0] as any).whiteWins, undefined, "Internal row shape leaked on fresh fetch");
     assert.strictEqual(shapeFetchCalls, 3, "fresh fetch requests all three missing groups");
 
-    // Cache hit
-    const [mResCached] = await fetchAllDatabases(fenShape, shapeSnapshot.id);
-    assert.strictEqual(mResCached.moves[0].white, 10);
-    assert.strictEqual(mResCached.moves[0].draws, 5);
-    assert.strictEqual(mResCached.moves[0].black, 2);
-    assert.strictEqual(mResCached.moves[0].games, 17);
+    const [mResCached] = await fetchAllDatabases(fen);
     assert.strictEqual((mResCached.moves[0] as any).whiteWins, undefined, "Internal row shape leaked on cache hit");
     assert.deepStrictEqual(mResCached.moves, mResFresh.moves, "fresh and cached buckets have the same public shape");
     assert.strictEqual(shapeFetchCalls, 3, "cached groups cause no HTTP requests or request-layer spacing");
 
-    // White expansion needs Masters metadata and Amateur moves only; it must not create
-    // an Elite bucket merely because the shared Explorer helper is used.
-    const whiteOnlySnapshot = await getOrCreateHumanDataSnapshot(rep.id, "masters-amateur-only");
+    // White expansion needs Masters and Amateur only; it must not create an Elite row.
+    await prisma.positionCache.deleteMany();
     shapeFetchCalls = 0;
-    const whiteOnlyResults = await fetchAllDatabases(fenShape, whiteOnlySnapshot.id, ["MASTERS", "AMATEUR"]);
+    const whiteOnlyResults = await fetchAllDatabases(fen, ["MASTERS", "AMATEUR"]);
     assert.strictEqual(shapeFetchCalls, 2, "White-only retrieval requests Masters and Amateur, not Elite");
     assert.strictEqual(whiteOnlyResults[1].retrieval, "SKIPPED");
-    assert.strictEqual((await readHumanExplorerBucket(whiteOnlySnapshot.id, posKey, "ELITE")).status, "missing");
+    assert.strictEqual((await read(posKey, "ELITE")).status, "missing");
 
     // Only an explicit moves: [] is a successful empty source result.
-    const emptySnapshot = await getOrCreateHumanDataSnapshot(rep.id, "explicit-empty");
-    global.fetch = async () => new Response(JSON.stringify({ moves: [] }));
-    const emptyResults = await fetchAllDatabases(fenShape, emptySnapshot.id);
+    await prisma.positionCache.deleteMany();
+    global.fetch = async () => new Response(JSON.stringify({ white: 0, draws: 0, black: 0, moves: [] }));
+    const emptyResults = await fetchAllDatabases(fen);
     assert.ok(emptyResults.every(result => result.moves.length === 0));
-    assert.strictEqual((await readHumanExplorerBucket(emptySnapshot.id, posKey, "MASTERS")).status, "empty");
+    assert.strictEqual((await read(posKey, "MASTERS")).status, "empty");
 
-    // Reset global fetch for subsequent tests
+    // Illegal/malformed SAN causes complete result rejection and writes nothing.
     global.fetch = async (url: any) => {
       fetchCalls.push(url.toString());
-
       if (url.toString().includes("masters")) {
         return new Response(JSON.stringify({
+          white: 11, draws: 6, black: 3,
           moves: [
             { san: "e4", white: 10, draws: 5, black: 2 },
-            { san: "invalid_move", white: 1, draws: 1, black: 1 } // Will cause error
+            { san: "invalid_move", white: 1, draws: 1, black: 1 }
           ]
         }));
       }
-
-      if (url.toString().includes("speeds=") && url.toString().includes("ELITE")) {
-        return new Response("Error", { status: 404 });
-      }
-
-      return new Response(JSON.stringify({ moves: [] }));
+      return new Response(JSON.stringify({ white: 0, draws: 0, black: 0, moves: [] }));
     };
-
-    // 6, 7. Illegal/malformed SAN causes complete result rejection
-    let threw = false;
-    const fen5 = "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2"; // e4 e5
-    await getOrCreatePosition(fen5);
-    try {
-      await fetchAllDatabases(fen5, snapshotId);
-    } catch (e) {
-      threw = true;
-    }
-    assert.ok(threw, "Malformed SAN threw an error");
-
-    // Check that marker wasn't written for MASTERS (because it failed)
-    // Wait, MASTERS was already "success" for this snapshot/pos from the previous tests.
-    // Let's use a new fen.
     const fen6 = "rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq c6 0 2"; // e4 c5
-    await getOrCreatePosition(fen6);
-
-    threw = false;
-    try {
-      await fetchAllDatabases(fen6, snapshotId);
-    } catch(e) {
-      threw = true;
-    }
-    assert.ok(threw);
-
+    await assert.rejects(fetchAllDatabases(fen6));
     const posKey6 = positionKeyFromFen(parseFullFen(fen6));
-    const mRes = await readHumanExplorerBucket(snapshotId, posKey6, "MASTERS");
-    assert.strictEqual(mRes.status, "missing", "Marker not written on parse failure");
+    assert.strictEqual((await read(posKey6, "MASTERS")).status, "missing", "Nothing written on parse failure");
 
-    // 17. failed required source throws rather than becoming empty
-    // ELITE mock returns a non-retryable failure. Let's mock MASTERS to be valid.
+    // A failed required source throws rather than becoming empty.
     global.fetch = async (url: any) => {
-      if (url.toString().includes("masters")) return new Response(JSON.stringify({ moves: [] }));
+      if (url.toString().includes("masters")) return new Response(JSON.stringify({ white: 0, draws: 0, black: 0, moves: [] }));
       if (url.toString().includes("ratings=2500")) return new Response("Error", { status: 404 }); // Elite
-      return new Response(JSON.stringify({ moves: [] }));
+      return new Response(JSON.stringify({ white: 0, draws: 0, black: 0, moves: [] }));
     };
-
     const fen3 = "rnbqkbnr/pppp1ppp/8/4p3/8/5N2/PPPPPPPP/RNBQKB1R b KQkq - 1 2";
-    await getOrCreatePosition(fen3);
     const posKey3 = positionKeyFromFen(parseFullFen(fen3));
+    await assert.rejects(fetchAllDatabases(fen3));
+    assert.strictEqual((await read(posKey3, "MASTERS")).status, "empty", "Masters succeeded and was empty");
+    assert.strictEqual((await read(posKey3, "ELITE")).status, "missing", "Elite failed and remains missing");
 
-    threw = false;
-    try {
-      await fetchAllDatabases(fen3, snapshotId);
-    } catch(e) {
-      threw = true;
-    }
-    assert.ok(threw, "Fetch error throws");
-
-    // 18. failed source does not create fetch marker
-    const mRes3 = await readHumanExplorerBucket(snapshotId, posKey3, "MASTERS");
-    assert.strictEqual(mRes3.status, "empty", "Masters succeeded and was empty");
-    const eRes3 = await readHumanExplorerBucket(snapshotId, posKey3, "ELITE");
-    assert.strictEqual(eRes3.status, "missing", "Elite failed and remains missing");
-
-    // A failed Amateur request must not become a successful empty bucket after
-    // Masters and Elite have already succeeded.
-    const amateurFailureSnapshot = await getOrCreateHumanDataSnapshot(rep.id, "amateur-failure-after-successes");
+    // AR.11, AR.12: a failed Amateur request throws and must not become a successful empty row after Masters and Elite succeed.
+    await prisma.positionCache.deleteMany();
     global.fetch = async (url: any) => {
       if (url.toString().includes("ratings=1600")) return new Response("Error", { status: 404 });
-      return new Response(JSON.stringify({ moves: [] }));
+      return new Response(JSON.stringify({ white: 0, draws: 0, black: 0, moves: [] }));
     };
+    await assert.rejects(fetchAllDatabases(fen3), /Explorer returned HTTP 404\./);
+    assert.strictEqual((await read(posKey3, "MASTERS")).status, "empty", "Masters successful empty response remains cached");
+    assert.strictEqual((await read(posKey3, "ELITE")).status, "empty", "Elite successful empty response remains cached");
+    assert.strictEqual((await read(posKey3, "AMATEUR")).status, "missing", "Failed Amateur request must not create a row");
 
-    await assert.rejects(
-      fetchAllDatabases(fen3, amateurFailureSnapshot.id),
-      /Required Lichess Explorer AMATEUR request failed/
-    );
-    assert.strictEqual(
-      (await readHumanExplorerBucket(amateurFailureSnapshot.id, posKey3, "MASTERS")).status,
-      "empty",
-      "Masters successful empty response remains cached"
-    );
-    assert.strictEqual(
-      (await readHumanExplorerBucket(amateurFailureSnapshot.id, posKey3, "ELITE")).status,
-      "empty",
-      "Elite successful empty response remains cached"
-    );
-    assert.strictEqual(
-      (await readHumanExplorerBucket(amateurFailureSnapshot.id, posKey3, "AMATEUR")).status,
-      "missing",
-      "Failed Amateur request must not create a successful-fetch marker"
-    );
-
-    // 16. when Masters and Elite are cached but Amateur missing, F fetches only Amateur
+    // When Masters and Elite are cached but Amateur is missing, only Amateur is fetched.
     global.fetch = async (url: any) => {
       fetchCalls.push(url.toString());
-      return new Response(JSON.stringify({ moves: [{ san: "Nc6", white: 1, draws: 1, black: 1 }] }));
+      return new Response(JSON.stringify({ white: 1, draws: 1, black: 1, moves: [{ san: "Nc6", white: 1, draws: 1, black: 1 }] }));
     };
-
     fetchCalls = [];
-    // Provide Elite
-    await saveHumanExplorerBucket(snapshotId, posKey3, "ELITE", []);
-    // Now MASTERS and ELITE are cached (empty), AMATEUR is missing.
-    await fetchAllDatabases(fen3, snapshotId);
-
-    // It should have only fetched AMATEUR
+    await fetchAllDatabases(fen3);
     assert.strictEqual(fetchCalls.length, 1);
     assert.ok(fetchCalls[0].includes("ratings=1600"));
-    // Actually just check it only made 1 network call
 
-    // 5. promotion SAN converts to UCI with promotion piece
-    // 19. exact FullFen is used for SAN conversion
+    // Promotion SAN converts to UCI with the promotion piece, from the exact FullFen.
     const fen4 = "4k3/3P4/8/8/8/8/8/4K3 w - - 0 1";
-    await getOrCreatePosition(fen4);
     const posKey4 = positionKeyFromFen(parseFullFen(fen4));
-
-    global.fetch = async (url: any) => {
-      return new Response(JSON.stringify({ moves: [{ san: "d8=Q+", white: 1, draws: 0, black: 0 }] }));
-    };
-
-    await fetchAllDatabases(fen4, snapshotId);
-
-    const mRes4 = await readHumanExplorerBucket(snapshotId, posKey4, "MASTERS");
-    if (mRes4.status === "success") {
-       assert.strictEqual(mRes4.moves[0].uci, "d7d8q");
-    } else {
-       assert.fail("Should be success");
-    }
-
-    // 20. no _EMPTY_ row exists anywhere in new ExplorerMoveCache writes
-    const emptyCount = await prisma.explorerMoveCache.count({ where: { san: "_EMPTY_" } });
-    assert.strictEqual(emptyCount, 0);
+    global.fetch = async () => new Response(JSON.stringify({ white: 1, draws: 0, black: 0, moves: [{ san: "d8=Q+", white: 1, draws: 0, black: 0 }] }));
+    await fetchAllDatabases(fen4);
+    const mRes4 = await read(posKey4, "MASTERS");
+    if (mRes4.status !== "success") return assert.fail("Should be success");
+    assert.strictEqual(mRes4.moves[0].uci, "d7d8q");
 
     global.fetch = originalFetch;
   });

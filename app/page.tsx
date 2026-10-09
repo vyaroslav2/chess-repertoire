@@ -1,13 +1,16 @@
 import React from "react";
 export const dynamic = "force-dynamic";
 import SrsTrainer from "../components/SrsTrainer";
-import { fetchDuePositions } from "./actions";
+import { fetchDemoPositions } from "./actions";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
 export default async function Home() {
-  const rep = await prisma.repertoire.findFirst();
+  const rep = await prisma.repertoire.findFirst({
+    where: { stats: { some: {} } },
+    orderBy: { title: "asc" },
+  });
   
   if (!rep) {
     return (
@@ -18,13 +21,13 @@ export default async function Home() {
     );
   }
 
-  const dueStats = await fetchDuePositions(rep.id);
+  const demoStats = await fetchDemoPositions(rep.id);
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", 
     background: "#161512", 
     gap: "20px", padding: "20px" }}>
-      <SrsTrainer dueStats={dueStats} />
+      <SrsTrainer dueStats={demoStats} demoMode />
     </div>
   );
 }

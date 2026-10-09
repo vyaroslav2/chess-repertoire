@@ -1,0 +1,836 @@
+{
+  "source": {
+    "database": "lichess",
+    "speeds": [
+      "classical",
+      "rapid"
+    ],
+    "ratings": [
+      1600,
+      1800,
+      2000
+    ]
+  },
+  "fetchedAt": "2026-09-11 22:31:11",
+  "positions": [
+    {
+      "path": "",
+      "key": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -",
+      "totalGames": 522241689,
+      "moves": [
+        {
+          "san": "e4",
+          "uci": "e2e4",
+          "games": 336233901,
+          "white": 165592974,
+          "draws": 16237761,
+          "black": 154403166
+        },
+        {
+          "san": "d4",
+          "uci": "d2d4",
+          "games": 128902013,
+          "white": 64663025,
+          "draws": 6778763,
+          "black": 57460225
+        },
+        {
+          "san": "c4",
+          "uci": "c2c4",
+          "games": 17778327,
+          "white": 9005411,
+          "draws": 959958,
+          "black": 7812958
+        },
+        {
+          "san": "Nf3",
+          "uci": "g1f3",
+          "games": 14285145,
+          "white": 7256166,
+          "draws": 784548,
+          "black": 6244431
+        },
+        {
+          "san": "e3",
+          "uci": "e2e3",
+          "games": 5544754,
+          "white": 2510679,
+          "draws": 249162,
+          "black": 2784913
+        },
+        {
+          "san": "f4",
+          "uci": "f2f4",
+          "games": 4411588,
+          "white": 2202893,
+          "draws": 214842,
+          "black": 1993853
+        },
+        {
+          "san": "g3",
+          "uci": "g2g3",
+          "games": 4356347,
+          "white": 2064028,
+          "draws": 221495,
+          "black": 2070824
+        },
+        {
+          "san": "b3",
+          "uci": "b2b3",
+          "games": 4220935,
+          "white": 2062276,
+          "draws": 207501,
+          "black": 1951158
+        },
+        {
+          "san": "b4",
+          "uci": "b2b4",
+          "games": 2341661,
+          "white": 1197476,
+          "draws": 111626,
+          "black": 1032559
+        },
+        {
+          "san": "d3",
+          "uci": "d2d3",
+          "games": 1533208,
+          "white": 689420,
+          "draws": 75357,
+          "black": 768431
+        },
+        {
+          "san": "Nc3",
+          "uci": "b1c3",
+          "games": 1436528,
+          "white": 696244,
+          "draws": 70089,
+          "black": 670195
+        },
+        {
+          "san": "g4",
+          "uci": "g2g4",
+          "games": 1197282,
+          "white": 582575,
+          "draws": 47243,
+          "black": 567464
+        }
+      ],
+      "opening": null
+    },
+    {
+      "path": "d4 d5",
+      "key": "rnbqkbnr/ppp1pppp/8/3p4/3P4/8/PPP1PPPP/RNBQKBNR w KQkq -",
+      "totalGames": 59860820,
+      "moves": [
+        {
+          "san": "c4",
+          "uci": "c2c4",
+          "games": 25845895,
+          "white": 13626704,
+          "draws": 1378972,
+          "black": 10840219
+        },
+        {
+          "san": "Bf4",
+          "uci": "c1f4",
+          "games": 11691973,
+          "white": 5958194,
+          "draws": 627153,
+          "black": 5106626
+        },
+        {
+          "san": "Nf3",
+          "uci": "g1f3",
+          "games": 9346789,
+          "white": 4781827,
+          "draws": 533873,
+          "black": 4031089
+        },
+        {
+          "san": "e3",
+          "uci": "e2e3",
+          "games": 4920195,
+          "white": 2414474,
+          "draws": 264966,
+          "black": 2240755
+        },
+        {
+          "san": "Nc3",
+          "uci": "b1c3",
+          "games": 3411839,
+          "white": 1671385,
+          "draws": 164770,
+          "black": 1575684
+        },
+        {
+          "san": "e4",
+          "uci": "e2e4",
+          "games": 1671295,
+          "white": 863083,
+          "draws": 66192,
+          "black": 742020
+        },
+        {
+          "san": "Bg5",
+          "uci": "c1g5",
+          "games": 911413,
+          "white": 479466,
+          "draws": 44098,
+          "black": 387849
+        },
+        {
+          "san": "g3",
+          "uci": "g2g3",
+          "games": 604236,
+          "white": 296609,
+          "draws": 33763,
+          "black": 273864
+        },
+        {
+          "san": "c3",
+          "uci": "c2c3",
+          "games": 563781,
+          "white": 264260,
+          "draws": 33073,
+          "black": 266448
+        },
+        {
+          "san": "h3",
+          "uci": "h2h3",
+          "games": 390546,
+          "white": 185499,
+          "draws": 20610,
+          "black": 184437
+        },
+        {
+          "san": "f4",
+          "uci": "f2f4",
+          "games": 372378,
+          "white": 187886,
+          "draws": 20678,
+          "black": 163814
+        },
+        {
+          "san": "b3",
+          "uci": "b2b3",
+          "games": 130480,
+          "white": 60445,
+          "draws": 6461,
+          "black": 63574
+        }
+      ],
+      "opening": {
+        "eco": "D00",
+        "name": "Queen's Pawn Game"
+      }
+    },
+    {
+      "path": "d4 d5 Nf3 Nf6",
+      "key": "rnbqkb1r/ppp1pppp/5n2/3p4/3P4/5N2/PPP1PPPP/RNBQKB1R w KQkq -",
+      "totalGames": 4881832,
+      "moves": [
+        {
+          "san": "e3",
+          "uci": "e2e3",
+          "games": 1164970,
+          "white": 564934,
+          "draws": 70830,
+          "black": 529206
+        },
+        {
+          "san": "Bf4",
+          "uci": "c1f4",
+          "games": 1148159,
+          "white": 568338,
+          "draws": 74662,
+          "black": 505159
+        },
+        {
+          "san": "c4",
+          "uci": "c2c4",
+          "games": 943459,
+          "white": 486270,
+          "draws": 60081,
+          "black": 397108
+        },
+        {
+          "san": "g3",
+          "uci": "g2g3",
+          "games": 525528,
+          "white": 261181,
+          "draws": 36773,
+          "black": 227574
+        },
+        {
+          "san": "Bg5",
+          "uci": "c1g5",
+          "games": 376027,
+          "white": 180802,
+          "draws": 23156,
+          "black": 172069
+        },
+        {
+          "san": "Nc3",
+          "uci": "b1c3",
+          "games": 302223,
+          "white": 127577,
+          "draws": 15442,
+          "black": 159204
+        },
+        {
+          "san": "h3",
+          "uci": "h2h3",
+          "games": 147804,
+          "white": 68906,
+          "draws": 9175,
+          "black": 69723
+        },
+        {
+          "san": "c3",
+          "uci": "c2c3",
+          "games": 118917,
+          "white": 56907,
+          "draws": 8390,
+          "black": 53620
+        },
+        {
+          "san": "Nbd2",
+          "uci": "b1d2",
+          "games": 77161,
+          "white": 37068,
+          "draws": 4417,
+          "black": 35676
+        },
+        {
+          "san": "b3",
+          "uci": "b2b3",
+          "games": 37306,
+          "white": 17295,
+          "draws": 2248,
+          "black": 17763
+        },
+        {
+          "san": "a3",
+          "uci": "a2a3",
+          "games": 25548,
+          "white": 11725,
+          "draws": 1515,
+          "black": 12308
+        },
+        {
+          "san": "Ne5",
+          "uci": "f3e5",
+          "games": 14730,
+          "white": 6106,
+          "draws": 673,
+          "black": 7951
+        }
+      ],
+      "opening": {
+        "eco": "D02",
+        "name": "Queen's Pawn Game: Symmetrical Variation"
+      }
+    },
+    {
+      "path": "d4 d5 Nf3 Nf6 c4 e6",
+      "key": "rnbqkb1r/ppp2ppp/4pn2/3p4/2PP4/5N2/PP2PPPP/RNBQKB1R w KQkq -",
+      "totalGames": 2275961,
+      "moves": [
+        {
+          "san": "Nc3",
+          "uci": "b1c3",
+          "games": 910816,
+          "white": 467747,
+          "draws": 58695,
+          "black": 384374
+        },
+        {
+          "san": "g3",
+          "uci": "g2g3",
+          "games": 450546,
+          "white": 242129,
+          "draws": 31932,
+          "black": 176485
+        },
+        {
+          "san": "Bg5",
+          "uci": "c1g5",
+          "games": 399596,
+          "white": 198056,
+          "draws": 25113,
+          "black": 176427
+        },
+        {
+          "san": "e3",
+          "uci": "e2e3",
+          "games": 242400,
+          "white": 116163,
+          "draws": 15476,
+          "black": 110761
+        },
+        {
+          "san": "cxd5",
+          "uci": "c4d5",
+          "games": 109337,
+          "white": 52293,
+          "draws": 6968,
+          "black": 50076
+        },
+        {
+          "san": "Bf4",
+          "uci": "c1f4",
+          "games": 62530,
+          "white": 30415,
+          "draws": 3609,
+          "black": 28506
+        },
+        {
+          "san": "a3",
+          "uci": "a2a3",
+          "games": 52447,
+          "white": 24567,
+          "draws": 2946,
+          "black": 24934
+        },
+        {
+          "san": "c5",
+          "uci": "c4c5",
+          "games": 24670,
+          "white": 10363,
+          "draws": 1213,
+          "black": 13094
+        },
+        {
+          "san": "Nbd2",
+          "uci": "b1d2",
+          "games": 9560,
+          "white": 4796,
+          "draws": 608,
+          "black": 4156
+        },
+        {
+          "san": "Qc2",
+          "uci": "d1c2",
+          "games": 5662,
+          "white": 2860,
+          "draws": 352,
+          "black": 2450
+        },
+        {
+          "san": "h3",
+          "uci": "h2h3",
+          "games": 4341,
+          "white": 2044,
+          "draws": 215,
+          "black": 2082
+        },
+        {
+          "san": "b3",
+          "uci": "b2b3",
+          "games": 4056,
+          "white": 1760,
+          "draws": 241,
+          "black": 2055
+        }
+      ],
+      "opening": null
+    },
+    {
+      "path": "d4 d5 Nf3 Nf6 g3 e6",
+      "key": "rnbqkb1r/ppp2ppp/4pn2/3p4/3P4/5NP1/PPP1PP1P/RNBQKB1R w KQkq -",
+      "totalGames": 312016,
+      "moves": [
+        {
+          "san": "Bg2",
+          "uci": "f1g2",
+          "games": 288454,
+          "white": 146163,
+          "draws": 21101,
+          "black": 121190
+        },
+        {
+          "san": "c4",
+          "uci": "c2c4",
+          "games": 7400,
+          "white": 3851,
+          "draws": 474,
+          "black": 3075
+        },
+        {
+          "san": "Bg5",
+          "uci": "c1g5",
+          "games": 6873,
+          "white": 3098,
+          "draws": 570,
+          "black": 3205
+        },
+        {
+          "san": "a3",
+          "uci": "a2a3",
+          "games": 2112,
+          "white": 999,
+          "draws": 142,
+          "black": 971
+        },
+        {
+          "san": "c3",
+          "uci": "c2c3",
+          "games": 2096,
+          "white": 1017,
+          "draws": 165,
+          "black": 914
+        },
+        {
+          "san": "Nbd2",
+          "uci": "b1d2",
+          "games": 1394,
+          "white": 656,
+          "draws": 97,
+          "black": 641
+        },
+        {
+          "san": "Nc3",
+          "uci": "b1c3",
+          "games": 1163,
+          "white": 482,
+          "draws": 53,
+          "black": 628
+        },
+        {
+          "san": "e3",
+          "uci": "e2e3",
+          "games": 709,
+          "white": 281,
+          "draws": 33,
+          "black": 395
+        },
+        {
+          "san": "Ne5",
+          "uci": "f3e5",
+          "games": 600,
+          "white": 244,
+          "draws": 30,
+          "black": 326
+        },
+        {
+          "san": "Bf4",
+          "uci": "c1f4",
+          "games": 537,
+          "white": 243,
+          "draws": 36,
+          "black": 258
+        },
+        {
+          "san": "b3",
+          "uci": "b2b3",
+          "games": 451,
+          "white": 218,
+          "draws": 36,
+          "black": 197
+        },
+        {
+          "san": "Bh3",
+          "uci": "f1h3",
+          "games": 227,
+          "white": 73,
+          "draws": 10,
+          "black": 144
+        }
+      ],
+      "opening": null
+    },
+    {
+      "path": "d4 d5 Nf3 Nf6 c4 e6 g3 Be7",
+      "key": "rnbqk2r/ppp1bppp/4pn2/3p4/2PP4/5NP1/PP2PP1P/RNBQKB1R w KQkq -",
+      "totalGames": 118840,
+      "moves": [
+        {
+          "san": "Bg2",
+          "uci": "f1g2",
+          "games": 115229,
+          "white": 59462,
+          "draws": 9008,
+          "black": 46759
+        },
+        {
+          "san": "Nc3",
+          "uci": "b1c3",
+          "games": 1243,
+          "white": 611,
+          "draws": 80,
+          "black": 552
+        },
+        {
+          "san": "cxd5",
+          "uci": "c4d5",
+          "games": 967,
+          "white": 467,
+          "draws": 70,
+          "black": 430
+        },
+        {
+          "san": "Nbd2",
+          "uci": "b1d2",
+          "games": 363,
+          "white": 165,
+          "draws": 39,
+          "black": 159
+        },
+        {
+          "san": "Qc2",
+          "uci": "d1c2",
+          "games": 360,
+          "white": 199,
+          "draws": 26,
+          "black": 135
+        },
+        {
+          "san": "c5",
+          "uci": "c4c5",
+          "games": 141,
+          "white": 59,
+          "draws": 7,
+          "black": 75
+        },
+        {
+          "san": "e3",
+          "uci": "e2e3",
+          "games": 128,
+          "white": 48,
+          "draws": 11,
+          "black": 69
+        },
+        {
+          "san": "b3",
+          "uci": "b2b3",
+          "games": 119,
+          "white": 47,
+          "draws": 15,
+          "black": 57
+        },
+        {
+          "san": "Bg5",
+          "uci": "c1g5",
+          "games": 115,
+          "white": 47,
+          "draws": 1,
+          "black": 67
+        },
+        {
+          "san": "Ne5",
+          "uci": "f3e5",
+          "games": 70,
+          "white": 33,
+          "draws": 1,
+          "black": 36
+        },
+        {
+          "san": "Bf4",
+          "uci": "c1f4",
+          "games": 65,
+          "white": 32,
+          "draws": 4,
+          "black": 29
+        },
+        {
+          "san": "a3",
+          "uci": "a2a3",
+          "games": 40,
+          "white": 16,
+          "draws": 1,
+          "black": 23
+        }
+      ],
+      "opening": null
+    },
+    {
+      "path": "Nf3 d5",
+      "key": "rnbqkbnr/ppp1pppp/8/3p4/8/5N2/PPPPPPPP/RNBQKB1R w KQkq -",
+      "totalGames": 5274731,
+      "moves": [
+        {
+          "san": "d4",
+          "uci": "d2d4",
+          "games": 2016667,
+          "white": 1007368,
+          "draws": 114427,
+          "black": 894872
+        },
+        {
+          "san": "g3",
+          "uci": "g2g3",
+          "games": 1055149,
+          "white": 547923,
+          "draws": 60446,
+          "black": 446780
+        },
+        {
+          "san": "c4",
+          "uci": "c2c4",
+          "games": 859131,
+          "white": 463178,
+          "draws": 46550,
+          "black": 349403
+        },
+        {
+          "san": "e4",
+          "uci": "e2e4",
+          "games": 498964,
+          "white": 262243,
+          "draws": 19698,
+          "black": 217023
+        },
+        {
+          "san": "e3",
+          "uci": "e2e3",
+          "games": 293411,
+          "white": 147951,
+          "draws": 16141,
+          "black": 129319
+        },
+        {
+          "san": "b3",
+          "uci": "b2b3",
+          "games": 222306,
+          "white": 114843,
+          "draws": 12521,
+          "black": 94942
+        },
+        {
+          "san": "d3",
+          "uci": "d2d3",
+          "games": 164140,
+          "white": 79863,
+          "draws": 8823,
+          "black": 75454
+        },
+        {
+          "san": "Nc3",
+          "uci": "b1c3",
+          "games": 74601,
+          "white": 30933,
+          "draws": 3417,
+          "black": 40251
+        },
+        {
+          "san": "c3",
+          "uci": "c2c3",
+          "games": 44023,
+          "white": 21051,
+          "draws": 2382,
+          "black": 20590
+        },
+        {
+          "san": "h3",
+          "uci": "h2h3",
+          "games": 21932,
+          "white": 9602,
+          "draws": 1102,
+          "black": 11228
+        },
+        {
+          "san": "b4",
+          "uci": "b2b4",
+          "games": 14752,
+          "white": 7379,
+          "draws": 786,
+          "black": 6587
+        },
+        {
+          "san": "Ne5",
+          "uci": "f3e5",
+          "games": 9655,
+          "white": 3643,
+          "draws": 404,
+          "black": 5608
+        }
+      ],
+      "opening": {
+        "eco": "A06",
+        "name": "Zukertort Opening"
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "san": "d4",
+      "move": "d4",
+      "games": 128902013,
+      "positionTotalGames": 522241689,
+      "shareOfPosition": 24.682444108746747,
+      "positionPath": ""
+    },
+    {
+      "san": "Nf3",
+      "move": "Nf3",
+      "games": 14285145,
+      "positionTotalGames": 522241689,
+      "shareOfPosition": 2.735351332704502,
+      "positionPath": ""
+    },
+    {
+      "san": "d4 d5 Nf3",
+      "move": "Nf3",
+      "games": 9346789,
+      "positionTotalGames": 59860820,
+      "shareOfPosition": 15.614201409202213,
+      "positionPath": "d4 d5"
+    },
+    {
+      "san": "d4 d5 Nf3 Nf6 c4",
+      "move": "c4",
+      "games": 943459,
+      "positionTotalGames": 4881832,
+      "shareOfPosition": 19.325921088640495,
+      "positionPath": "d4 d5 Nf3 Nf6"
+    },
+    {
+      "san": "d4 d5 Nf3 Nf6 g3",
+      "move": "g3",
+      "games": 525528,
+      "positionTotalGames": 4881832,
+      "shareOfPosition": 10.764975115899114,
+      "positionPath": "d4 d5 Nf3 Nf6"
+    },
+    {
+      "san": "d4 d5 Nf3 Nf6 c4 e6 g3",
+      "move": "g3",
+      "games": 450546,
+      "positionTotalGames": 2275961,
+      "shareOfPosition": 19.795857661884366,
+      "positionPath": "d4 d5 Nf3 Nf6 c4 e6"
+    },
+    {
+      "san": "d4 d5 Nf3 Nf6 g3 e6 c4",
+      "move": "c4",
+      "games": 7400,
+      "positionTotalGames": 312016,
+      "shareOfPosition": 2.371673247525768,
+      "positionPath": "d4 d5 Nf3 Nf6 g3 e6"
+    },
+    {
+      "san": "d4 d5 Nf3 Nf6 c4 e6 g3 Be7 Bg2",
+      "move": "Bg2",
+      "games": 115229,
+      "positionTotalGames": 118840,
+      "shareOfPosition": 96.9614607876136,
+      "positionPath": "d4 d5 Nf3 Nf6 c4 e6 g3 Be7"
+    },
+    {
+      "san": "d4 d5 Nf3 Nf6 c4 e6 g3 Be7 Nc3",
+      "move": "Nc3",
+      "games": 1243,
+      "positionTotalGames": 118840,
+      "shareOfPosition": 1.0459441265567149,
+      "positionPath": "d4 d5 Nf3 Nf6 c4 e6 g3 Be7"
+    },
+    {
+      "san": "Nf3 d5 d4",
+      "move": "d4",
+      "games": 2016667,
+      "positionTotalGames": 5274731,
+      "shareOfPosition": 38.23260371002806,
+      "positionPath": "Nf3 d5"
+    }
+  ]
+}

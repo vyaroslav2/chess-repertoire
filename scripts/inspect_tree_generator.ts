@@ -13,13 +13,14 @@ import { fetchAllDatabases, fetchMastersOpeningMetadata } from "../src/lib/api/l
 import {
   ensureRepertoireNodeWikibooks,
   prisma,
-  readHumanExplorerBucket,
+  readExplorerCache,
   readRemoteEngineResult,
   type HumanDatabaseType,
   type RemoteEngineEvaluation
 } from "../src/lib/db/operations";
 import { buildBlackHumanShortlist } from "../src/lib/core/black-human-shortlist";
 import {
+  computeExplorerCacheProfile,
   computeRemoteEngineEvaluationProfile,
   computeLocalEngineEvaluationProfile,
   defaultConfig,
@@ -82,23 +83,23 @@ function percentage(part: number, total: number): string {
 function printConfiguration(): void {
   console.log(`\n${line()}\nDIAGNOSTIC RUN CONFIGURATION\n${line()}`);
   console.log("Generation depth cap: 3 full moves (testing run).");
-  console.log(`Dynamic depth budgets: common=${defaultConfig.generation.commonDepthBudget}, uncommon=${defaultConfig.generation.uncommonDepthBudget}, rare=${defaultConfig.generation.rareDepthBudget} full moves.`);
-  console.log(`Dynamic probability bands: common >= ${(defaultConfig.generation.commonProbability * 100).toFixed(2)}%; uncommon >= ${(defaultConfig.generation.uncommonProbability * 100).toFixed(2)}% and < ${(defaultConfig.generation.commonProbability * 100).toFixed(2)}%; rare < ${(defaultConfig.generation.uncommonProbability * 100).toFixed(2)}%.`);
-  console.log(`Move-number bands: early through ${defaultConfig.moveBands.earlyThrough}; middle through ${defaultConfig.moveBands.middleThrough}; later moves use the late band.`);
-  console.log(`White Amateur popularity thresholds: early=${(defaultConfig.whiteMoveFiltering.mainlinePopularity.early * 100).toFixed(2)}%, middle=${(defaultConfig.whiteMoveFiltering.mainlinePopularity.middle * 100).toFixed(2)}%, late=${(defaultConfig.whiteMoveFiltering.mainlinePopularity.late * 100).toFixed(2)}%.`);
-  console.log(`API CP tolerances: early=${defaultConfig.engineVerification.apiToleranceCp.early}, middle=${defaultConfig.engineVerification.apiToleranceCp.middle}, late=${defaultConfig.engineVerification.apiToleranceCp.late}.`);
-  console.log(`Local CP tolerances: early=${defaultConfig.engineVerification.localToleranceCp.early}, middle=${defaultConfig.engineVerification.localToleranceCp.middle}, late=${defaultConfig.engineVerification.localToleranceCp.late}.`);
-  console.log(`Black minimum weighted games: ${defaultConfig.humanMoves.minimumWeightedGames}; Masters weight: ${defaultConfig.humanMoves.mastersWeight}.`);
-  console.log(`Repertoire-side smoothing: anchor games=${defaultConfig.smoothing.anchorGames}; cautious prior score=${(defaultConfig.smoothing.repertoireSidePrior * 100).toFixed(2)}%. In this Black repertoire, that is a ${(defaultConfig.smoothing.repertoireSidePrior * 100).toFixed(2)}% Black score (equivalently ${(100 - defaultConfig.smoothing.repertoireSidePrior * 100).toFixed(2)}% White score).`);
-  console.log(`Lichess Cloud: MultiPV=${defaultConfig.api.lichessCloudEval.multiPv}; retries=${defaultConfig.api.lichessCloudEval.retryAttempts}. ChessDB retries=${defaultConfig.api.chessDb.retryAttempts}.`);
-  console.log(`Lichess request gate: one in-flight request at a time; minimum ${defaultConfig.api.betweenRequestDelayMs}ms between request starts; any HTTP 429 pauses all Lichess requests for at least ${defaultConfig.api.rateLimitRetryDelayMs}ms.`);
-  console.log(`Local Deep Stockfish: depth=${defaultConfig.engine.deepVerification.depth}; MultiPV=${defaultConfig.engine.deepVerification.multiPv}.`);
-  console.log(`Explorer filters (fixed for this run): Elite speeds=${defaultConfig.humanExplorerRequest.elite.speeds.join(",")}, ratings=${defaultConfig.humanExplorerRequest.elite.ratings.join(",")}; Amateur speeds=${defaultConfig.humanExplorerRequest.amateur.speeds.join(",")}, ratings=${defaultConfig.humanExplorerRequest.amateur.ratings.join(",")}.`);
+  console.log(`Dynamic depth budgets: deep=${defaultConfig.depthBudget.deep}, medium=${defaultConfig.depthBudget.medium}, shallow=${defaultConfig.depthBudget.shallow} full moves.`);
+  console.log(`Dynamic probability bands: deep >= ${(defaultConfig.probabilityBands.deep * 100).toFixed(2)}%; medium >= ${(defaultConfig.probabilityBands.medium * 100).toFixed(2)}% and < ${(defaultConfig.probabilityBands.deep * 100).toFixed(2)}%; shallow < ${(defaultConfig.probabilityBands.medium * 100).toFixed(2)}%.`);
+  console.log(`Move-number bands: early through ${defaultConfig.moveNumberBands.early}; middle through ${defaultConfig.moveNumberBands.middle}; later moves use the late band.`);
+  console.log(`White Amateur popularity thresholds: early=${(defaultConfig.popularityThresholds.early * 100).toFixed(2)}%, middle=${(defaultConfig.popularityThresholds.middle * 100).toFixed(2)}%, late=${(defaultConfig.popularityThresholds.late * 100).toFixed(2)}%.`);
+  console.log(`API CP tolerances: early=${defaultConfig.apiToleranceCp.early}, middle=${defaultConfig.apiToleranceCp.middle}, late=${defaultConfig.apiToleranceCp.late}.`);
+  console.log(`Local CP tolerances: early=${defaultConfig.localToleranceCp.early}, middle=${defaultConfig.localToleranceCp.middle}, late=${defaultConfig.localToleranceCp.late}.`);
+  console.log(`Black minimum weighted games: ${defaultConfig.minimumWeightedGames}; Masters weight: ${defaultConfig.mastersWeight}.`);
+  console.log(`Repertoire-side smoothing: anchor games=${defaultConfig.anchorGames}; cautious prior score=${(defaultConfig.repertoireSidePrior * 100).toFixed(2)}%. In this Black repertoire, that is a ${(defaultConfig.repertoireSidePrior * 100).toFixed(2)}% Black score (equivalently ${(100 - defaultConfig.repertoireSidePrior * 100).toFixed(2)}% White score).`);
+  console.log(`Lichess Cloud: MultiPV=${defaultConfig.lichessCloudEvalMultiPv}.`);
+  console.log(`API lanes: one request at a time per host; ${defaultConfig.apiRequestGapMs}ms after each answer; Cloud Eval waits ${defaultConfig.cloudEvalExtraGapMs}ms more; a 429, 5xx, network error or timeout pauses the lane for at least ${defaultConfig.apiRetryDelayMs}ms, then retries once.`);
+  console.log(`Local Deep Stockfish: depth=${defaultConfig.localStockfishDepth}; MultiPV=${defaultConfig.localStockfishMultiPv}.`);
+  console.log(`Explorer filters (fixed for this run): Elite speeds=${defaultConfig.explorerEliteSpeeds.join(",")}, ratings=${defaultConfig.explorerEliteRatings.join(",")}; Amateur speeds=${defaultConfig.explorerSpeeds.join(",")}, ratings=${defaultConfig.explorerRatings.join(",")}.`);
   console.log("White expansion requests only Masters metadata and Amateur moves; it never fetches or caches Elite. Black-response selection requests Masters plus Elite statistics.");
-  console.log(`Move-number band endpoints are inclusive: full move ${defaultConfig.moveBands.earlyThrough} is early and full move ${defaultConfig.moveBands.middleThrough} is middle.`);
+  console.log(`Move-number band endpoints are inclusive: full move ${defaultConfig.moveNumberBands.early} is early and full move ${defaultConfig.moveNumberBands.middle} is middle.`);
   console.log("All engine evaluations use White's point of view: positive is better for White, negative is better for Black. Example: +0.32 means +32 cp for White.");
   console.log("A remote-engine cache stores the complete move/evaluation snapshot returned by one source for one exact Full FEN and request profile.");
-  console.log(`Our application—not Stockfish—hashes role=deep-local, depth=${defaultConfig.engine.deepVerification.depth}, and MultiPV=${defaultConfig.engine.deepVerification.multiPv} with SHA-256 to produce the local-engine profile ID.`);
+  console.log(`Our application—not Stockfish—hashes role=deep-local, depth=${defaultConfig.localStockfishDepth}, and MultiPV=${defaultConfig.localStockfishMultiPv} with SHA-256 to produce the local-engine profile ID.`);
   console.log("The profile hash is a non-reversible fingerprint of those settings only. Full FEN and candidate UCI are separate database-key fields; they are not inside the profile hash.");
   console.log("Baseline cache identity = exact Full FEN + profile ID. Exact-candidate cache identity = exact Full FEN + candidate UCI + profile ID.");
   console.log("The profile does not currently distinguish Stockfish version/binary build, Threads (parallel CPU workers), Hash (transposition-table memory), neural-network file, or other engine options.");
@@ -108,9 +109,9 @@ function printConfiguration(): void {
   console.log("\nFORMULAS USED THROUGHOUT THE RUN");
   console.log("White conditional popularity = Amateur games for the move / total Amateur games.");
   console.log("Resulting route probability = route probability before White move × White move share at this position. Black's deterministic response does not multiply it again.");
-  console.log(`Black weighted games = Masters games × ${defaultConfig.humanMoves.mastersWeight} + Elite games.`);
-  console.log(`Black score = (weighted Black wins + 0.5 × weighted draws + ${defaultConfig.smoothing.anchorGames} × ${defaultConfig.smoothing.repertoireSidePrior}) / (weighted games + ${defaultConfig.smoothing.anchorGames}).`);
-  console.log(`Smoothing adds ${(defaultConfig.smoothing.anchorGames * defaultConfig.smoothing.repertoireSidePrior).toFixed(0)} result points—not wins—from ${defaultConfig.smoothing.anchorGames} imaginary games. A win is 1 point, a draw is 0.5, and a loss is 0; small samples stay near ${(defaultConfig.smoothing.repertoireSidePrior * 100).toFixed(2)}%, while large samples dominate the prior.`);
+  console.log(`Black weighted games = Masters games × ${defaultConfig.mastersWeight} + Elite games.`);
+  console.log(`Black score = (weighted Black wins + 0.5 × weighted draws + ${defaultConfig.anchorGames} × ${defaultConfig.repertoireSidePrior}) / (weighted games + ${defaultConfig.anchorGames}).`);
+  console.log(`Smoothing adds ${(defaultConfig.anchorGames * defaultConfig.repertoireSidePrior).toFixed(0)} result points—not wins—from ${defaultConfig.anchorGames} imaginary games. A win is 1 point, a draw is 0.5, and a loss is 0; small samples stay near ${(defaultConfig.repertoireSidePrior * 100).toFixed(2)}%, while large samples dominate the prior.`);
   console.log("Evaluations use White's perspective, so Black prefers the lowest number: negative favors Black and positive favors White.");
   console.log("CP loss = candidate evaluation − best evaluation. Example: g6=-10cp is better for Black than d5=+20cp because -10 is lower; d5's loss is 20-(-10)=30cp, so it passes an 80cp tolerance and fails a 20cp tolerance.");
   console.log("\nCOUNTER DEFINITIONS");
@@ -174,26 +175,25 @@ function logExplorerRows(label: string, data: ExplorerBucket): void {
 
 async function diagnosticFetchAllDatabases(
   fen: string,
-  snapshotId: string,
   requestedBuckets: readonly HumanDatabaseType[] = ["MASTERS", "ELITE", "AMATEUR"]
 ) {
   const started = Date.now();
   const fullFen = parseFullFen(fen);
   const positionKey = positionKeyFromFen(fullFen);
   console.log(`\n[HUMAN EXPLORER INPUT] Full FEN: ${fullFen}`);
-  console.log(`[HUMAN EXPLORER CACHE KEY] snapshot=${snapshotId}; position=${positionKey}`);
+  console.log(`[HUMAN EXPLORER CACHE KEY] position=${positionKey}`);
   for (const databaseType of requestedBuckets) {
-    const cached = await readHumanExplorerBucket(snapshotId, positionKey, databaseType);
+    const cached = await readExplorerCache(positionKey, computeExplorerCacheProfile(databaseType, defaultConfig));
     const status = cached.status === "empty" ? "VALID_ABSENCE" : cached.status === "success" ? "PRESENT" : "UNCHECKED";
     console.log(`[CACHE ${databaseType}] retrieval=${cached.status === "missing" ? "MISS" : "HIT"}; status=${status}`);
   }
 
-  const result = await fetchAllDatabases(fullFen, snapshotId, requestedBuckets) as ExplorerResultSet;
+  const result = await fetchAllDatabases(fullFen, requestedBuckets) as ExplorerResultSet;
   logExplorerRows("AMATEUR RAW DATA — LICHESS OPENING EXPLORER", result[2]);
 
   const moveNumber = fullmoveNumber(fullFen);
   const band = getMoveBand(moveNumber, defaultConfig);
-  const threshold = defaultConfig.whiteMoveFiltering.mainlinePopularity[band];
+  const threshold = defaultConfig.popularityThresholds[band];
   const amateurSan = new Set(result[2].moves.map(move => move.san));
   const whiteDecisions = [...amateurSan].map(san => ({
     san,
@@ -286,29 +286,31 @@ async function diagnosticEvaluateBlackMove(
   fen: string,
   chess: Chess,
   moveNumber: number,
-  previousMovesSan: string[],
-  snapshotId: string
+  previousMovesSan: string[]
 ): Promise<SelectedResponseResult> {
   const started = Date.now();
   const fullFen = parseFullFen(fen);
-  const [masters, elite] = await fetchAllDatabases(fullFen, snapshotId) as ExplorerResultSet;
+  const [masters, elite] = await fetchAllDatabases(fullFen) as ExplorerResultSet;
   const candidates = buildBlackHumanShortlist(masters.moves, elite.moves, defaultConfig);
   const lichessProfile = computeRemoteEngineEvaluationProfile("LICHESS", defaultConfig);
   const chessDbProfile = computeRemoteEngineEvaluationProfile("CHESSDB", defaultConfig);
   const lichessBefore = await readRemoteEngineResult(fullFen, "LICHESS", lichessProfile);
   const chessDbBefore = await readRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile);
   const localProfile = computeLocalEngineEvaluationProfile(defaultConfig);
-  const [localBaselineBefore, localCandidatesBefore] = await Promise.all([
-    prisma.localEngineBaseline.findUnique({ where: { fullFen_evaluationProfile: { fullFen, evaluationProfile: localProfile } } }),
-    prisma.localEngineCandidate.findMany({ where: { fullFen, evaluationProfile: localProfile } })
-  ]);
+  const readLocalEvaluations = () => prisma.engineCacheEvaluation.findMany({
+    where: { cache: { fullFen, engineProfile: localProfile, engine: "LOCAL" } },
+    orderBy: { uci: "asc" }
+  });
+  const localBefore = await readLocalEvaluations();
+  const localBaselineBefore = localBefore.find(evaluation => evaluation.rank === 1) ?? null;
+  const localCandidatesBefore = localBefore.filter(evaluation => evaluation.rank !== 1);
 
   console.log(`\n[BLACK RESPONSE INPUT] history=${previousMovesSan.join(" ")}; Full FEN=${fullFen}`);
   logExplorerRows("BLACK MASTERS RAW DATA — LICHESS OPENING EXPLORER", masters);
   logExplorerRows("BLACK ELITE RAW DATA — LICHESS OPENING EXPLORER", elite);
   console.log(`[REMOTE CACHE BEFORE] Lichess=${lichessBefore.status}; ChessDB=${chessDbBefore.status}`);
   console.log(`[LOCAL CACHE BEFORE] baseline=${localBaselineBefore ? "hit" : "miss"}; exact candidates=${localCandidatesBefore.length}; role=available only if local fallback or verification is needed.`);
-  console.log(`[MINIMUM WEIGHTED GAMES] ${defaultConfig.humanMoves.minimumWeightedGames}`);
+  console.log(`[MINIMUM WEIGHTED GAMES] ${defaultConfig.minimumWeightedGames}`);
   const survivingUci = new Set(candidates.map(candidate => candidate.uci));
   const rawByUci = new Map<string, { san: string; masters: number; elite: number }>();
   for (const move of masters.moves) rawByUci.set(move.uci, { san: move.san, masters: move.games, elite: 0 });
@@ -319,38 +321,37 @@ async function diagnosticEvaluateBlackMove(
   }
   for (const [uci, raw] of rawByUci) {
     if (survivingUci.has(uci)) continue;
-    const weighted = raw.masters * defaultConfig.humanMoves.mastersWeight + raw.elite;
+    const weighted = raw.masters * defaultConfig.mastersWeight + raw.elite;
     console.log(`  ${raw.san} (${uci}): Masters=${raw.masters}, Elite=${raw.elite}, weighted=${weighted} => ABORT`);
-    console.log(`    Reason: ${weighted} weighted games is below the required ${defaultConfig.humanMoves.minimumWeightedGames}.`);
+    console.log(`    Reason: ${weighted} weighted games is below the required ${defaultConfig.minimumWeightedGames}.`);
   }
   for (const candidate of candidates) {
     console.log(`  ${candidate.san} (${candidate.uci}): Black score=${(candidate.blackScore * 100).toFixed(3)}%; Masters=${candidate.mastersGames}, Elite=${candidate.eliteGames}, weighted=${candidate.weightedGames}, weighted Black wins=${candidate.weightedBlackWins}, weighted draws=${candidate.weightedDraws}`);
   }
   if (candidates.length === 0) console.log("  No human response survived the weighted-games threshold; local fallback will be required.");
 
-  const result = await evaluateBlackMove(fullFen, chess, moveNumber, previousMovesSan, snapshotId);
+  const result = await evaluateBlackMove(fullFen, chess, moveNumber, previousMovesSan);
   const lichessAfter = await readRemoteEngineResult(fullFen, "LICHESS", lichessProfile);
   const chessDbAfter = await readRemoteEngineResult(fullFen, "CHESSDB", chessDbProfile);
-  const [localBaselineAfter, localCandidatesAfter] = await Promise.all([
-    prisma.localEngineBaseline.findUnique({ where: { fullFen_evaluationProfile: { fullFen, evaluationProfile: localProfile } } }),
-    prisma.localEngineCandidate.findMany({ where: { fullFen, evaluationProfile: localProfile }, orderBy: { candidateUci: "asc" } })
-  ]);
+  const localAfter = await readLocalEvaluations();
+  const localBaselineAfter = localAfter.find(evaluation => evaluation.rank === 1) ?? null;
+  const localCandidatesAfter = localAfter.filter(evaluation => evaluation.rank !== 1);
   logRemoteSnapshot("LICHESS", lichessAfter);
   logRemoteSnapshot("CHESSDB", chessDbAfter);
   console.log(`\n[LOCAL ENGINE SNAPSHOT] profile=${localProfile}`);
   console.log(localBaselineAfter
-    ? `  baseline ${localBaselineAfter.san ?? "?"} (${localBaselineAfter.bestUci}): ${evaluationText(localBaselineAfter)}${localBaselineBefore ? " [CACHE HIT]" : " [CALCULATED THIS CALL]"}`
+    ? `  baseline ${localBaselineAfter.san ?? "?"} (${localBaselineAfter.uci}): ${evaluationText(localBaselineAfter)}${localBaselineBefore ? " [CACHE HIT]" : " [CALCULATED THIS CALL]"}`
     : "  No local baseline was needed.");
   for (const candidate of localCandidatesAfter) {
-    const wasCached = localCandidatesBefore.some(before => before.candidateUci === candidate.candidateUci);
-    console.log(`  exact candidate ${candidate.san ?? "?"} (${candidate.candidateUci}): ${evaluationText(candidate)}${wasCached ? " [CACHE HIT]" : " [CALCULATED THIS CALL]"}`);
+    const wasCached = localCandidatesBefore.some(before => before.uci === candidate.uci);
+    console.log(`  exact candidate ${candidate.san ?? "?"} (${candidate.uci}): ${evaluationText(candidate)}${wasCached ? " [CACHE HIT]" : " [CALCULATED THIS CALL]"}`);
   }
   const localWasUsed = result.source === "Local Deep Stockfish" || result.deepVerified;
   console.log(`[LOCAL ENGINE USAGE] used=${localWasUsed ? "yes" : "no"}; ${localWasUsed ? "local fallback or verification contributed to this decision." : "cached local entries were not used because remote evidence or an opening rule decided this response."}`);
 
   const tolerance = getCpTolerance(moveNumber, false);
   console.log(`\n[WATERFALL EXPLANATION] API tolerance=${tolerance}cp`);
-  const hardcoded = moveNumber === 1 && previousMovesSan.length === 1 && (previousMovesSan[0] === "e4" || previousMovesSan[0] === "d4");
+  const hardcoded = result.moveOrigin === "Hardcoded Move";
   if (hardcoded) {
     console.log(`  Opening rule fixes Black's response as ${result.selectedMoveSan}. Engines provide evidence but do not choose a competing move.`);
   } else {
@@ -374,7 +375,7 @@ async function diagnosticEvaluateBlackMove(
       else console.log("    ChessDB unavailable/empty => fall through to Local Deep Stockfish.");
       if (chessDecision === "REJECT") continue;
       if (chessDecision === "ACCEPT") break;
-      console.log(`    Local Deep Stockfish is required; local tolerance=${getCpTolerance(moveNumber, true)}cp, depth=${defaultConfig.engine.deepVerification.depth}, MultiPV=${defaultConfig.engine.deepVerification.multiPv}.`);
+      console.log(`    Local Deep Stockfish is required; local tolerance=${getCpTolerance(moveNumber, true)}cp, depth=${defaultConfig.localStockfishDepth}, MultiPV=${defaultConfig.localStockfishMultiPv}.`);
       if (candidate.uci === result.selectedUci) break;
     }
   }
@@ -382,13 +383,13 @@ async function diagnosticEvaluateBlackMove(
   console.log(`  source=${result.source}; evaluation=${evaluationText(result)}; selection method=${result.selectionMethod}; origin=${result.moveOrigin}; deep verified=${result.deepVerified}`);
   console.log(`  human statistics=${result.selectedStats ? pretty(result.selectedStats) : "none (engine-origin fallback)"}`);
   console.log(`[BLACK RESPONSE COMPLETE] ${elapsed(started)}`);
-  return { ...result, openingMetadata: masters.opening, openingMetadataRetrieval: masters.retrieval };
+  return result;
 }
 
 async function diagnosticWikibooks(nodeId: string) {
   const before = await prisma.repertoireNode.findUniqueOrThrow({
     where: { id: nodeId },
-    select: { history: true, wikibooksChecked: true, wikiText: true, eco: true, openingName: true, openingMetadataStatus: true, openingMetadataSource: true }
+    select: { history: true, wikibooksChecked: true, wikiText: true, eco: true, openingName: true, openingMetadataStatus: true }
   });
   const started = Date.now();
   const result = await ensureRepertoireNodeWikibooks(nodeId);
@@ -396,7 +397,8 @@ async function diagnosticWikibooks(nodeId: string) {
     where: { id: nodeId },
     select: { wikibooksChecked: true, wikiText: true }
   });
-  console.log(`\n[OPENING METADATA] history=${before.history || "(root)"}; retrieval=CACHE; cache=exact-history node; source=${before.openingMetadataSource === "LICHESS_MASTERS" ? "Lichess Opening Explorer — Masters metadata" : "unavailable"}; status=${before.openingMetadataStatus ?? "UNCHECKED"}; ECO=${before.eco ?? "unavailable"}; name=${before.openingName ?? "unavailable"}`);
+  console.log(`\n[OPENING METADATA] history=${before.history || "(root)"}; retrieval=CACHE; cache=exact-history node; source=Lichess Opening Explorer; status=
+${before.openingMetadataStatus ?? "UNCHECKED"}; ECO=${before.eco ?? "unavailable"}; name=${before.openingName ?? "unavailable"}`);
   console.log(`[WIKIBOOKS] history=${before.history || "(root)"}; retrieval=${before.wikibooksChecked ? "CACHE" : "FRESH"}; cache=exact-history node; status=${after.wikiText === null ? "VALID_ABSENCE" : "PRESENT"}; source=Wikibooks; characters=${after.wikiText?.length ?? "unavailable"}; elapsed=${elapsed(started)}`);
   return result;
 }
@@ -516,20 +518,20 @@ function installBlockFormatter(write: (...args: unknown[]) => void): () => void 
       write(`[LIVE COUNTER] Transpositions: +1 => ${liveCounters.transpositions} total.`);
       return;
     }
-    if (normalized.startsWith("[REPETITION STOP]")) {
+    if (normalized.startsWith("[REPETITION]")) {
       liveCounters.repetitions++;
       pendingCandidate = false;
       write(normalized);
       write(`[LIVE COUNTER] Repetition Stops: +1 => ${liveCounters.repetitions} total.`);
       return;
     }
-    if (normalized.startsWith("[DEPTH-LIMIT STOP]")) {
+    if (normalized.startsWith("[DEPTH BUDGET REACHED]")) {
       liveCounters.depthLimitedStops++;
       write(normalized);
       write(`[LIVE COUNTER] Depth-limited stops: +1 => ${liveCounters.depthLimitedStops} total.`);
       return;
     }
-    if (normalized.startsWith("[MISSING WHITE MOVES]")) {
+    if (normalized === "No opponent moves found.") {
       liveCounters.missingWhite++;
       write(normalized);
       write(`[LIVE COUNTER] Missing White moves: +1 => ${liveCounters.missingWhite} total.`);
@@ -571,7 +573,8 @@ async function main(): Promise<void> {
   let stopRequested = false;
   const requestStop = () => {
     stopRequested = true;
-    write("Stop requested; diagnostic generation will stop after the current position.");
+    // S0.03: raw console only, never the run log.
+    originalLog("Stop requested; generation will stop after the current position.");
   };
   let failure: unknown = null;
 
@@ -582,7 +585,7 @@ async function main(): Promise<void> {
     console.log("DETAILED DIAGNOSTIC MODE — the production generator and decision functions are unchanged.");
     console.log(`Diagnostic log: ${logPath}`);
     printConfiguration();
-    await generateRepertoire(START_FEN, 3, {
+    await generateRepertoire(START_FEN, {
       fetchDatabases: diagnosticFetchAllDatabases,
       fetchOpeningMetadata: diagnosticFetchOpeningMetadata,
       responseEvaluator: diagnosticEvaluateBlackMove,
@@ -598,7 +601,8 @@ async function main(): Promise<void> {
     try { await prisma.$disconnect(); } catch (error) { if (!failure) failure = error; }
     try { lock?.release(); } catch (error) { if (!failure) failure = error; }
     const finished = new Date();
-    fs.appendFileSync(logPath, `\n${failure ? "[FAILED/STOPPED]" : "[FINISHED]"} ${failure instanceof Error ? failure.message : failure ?? "Detailed generation completed"}\nFinished: ${finished.toISOString()}\nElapsed: ${finished.getTime() - startedAt.getTime()}ms\n\`\`\`\n`);
+    const closingTag = failure instanceof UserRequestedStopError ? "[STOPPED]" : failure ? "[FAILED]" : "[FINISHED]";
+    fs.appendFileSync(logPath, `\n${closingTag} ${failure instanceof Error ? failure.message : failure ?? "Detailed generation completed"}\nFinished: ${finished.toISOString()}\nElapsed: ${finished.getTime() - startedAt.getTime()}ms\n\`\`\`\n`);
     restoreConsole();
   }
 

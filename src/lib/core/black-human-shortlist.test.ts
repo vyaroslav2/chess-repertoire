@@ -100,8 +100,8 @@ describe('B1 Black Human Shortlist Construction', () => {
 
   it('12. minimum evidence boundary: one below drops, exact survives', () => {
     const config = JSON.parse(JSON.stringify(defaultConfig));
-    config.humanMoves.minimumWeightedGames = 15;
-    config.humanMoves.mastersWeight = 5;
+    config.minimumWeightedGames = 15;
+    config.mastersWeight = 5;
 
     const listDrop = buildBlackHumanShortlist([{ uci: 'e2e4', san: 'e4', white: 0, draws: 0, black: 0, games: 2 }], [], config);
     assert.strictEqual(listDrop.length, 0, "10 weighted drops");
@@ -135,6 +135,17 @@ describe('B1 Black Human Shortlist Construction', () => {
     const list = buildBlackHumanShortlist(masters, [], defaultConfig);
     assert.strictEqual(list[0].uci, 'a2a3', 'Should sort lexically by uci ascending on tie');
     assert.strictEqual(list[1].uci, 'h2h3');
+  });
+
+  it('EW.05 equal score: more weighted games first', () => {
+    // 49/100 and 98/200: the same score from 50 and 150 weighted games.
+    const elite = [
+      { uci: 'a2a3', san: 'a3', white: 25, draws: 0, black: 25, games: 50 },
+      { uci: 'h2h3', san: 'h3', white: 76, draws: 0, black: 74, games: 150 }
+    ];
+    const list = buildBlackHumanShortlist([], elite, defaultConfig);
+    assert.strictEqual(list[0].blackScore, list[1].blackScore);
+    assert.strictEqual(list[0].uci, 'h2h3');
   });
 
   it('17, 18. empty Masters + Elite empty -> empty shortlist, all below floor -> empty', () => {
@@ -175,14 +186,14 @@ describe('B1 Black Human Shortlist Construction', () => {
     const masters = [{ uci: 'e2e4', san: 'e4', white: 1, draws: 2, black: 3, games: 6 }];
     const c1 = JSON.parse(JSON.stringify(defaultConfig));
     const c2 = JSON.parse(JSON.stringify(defaultConfig));
-    c1.smoothing.repertoireSidePrior = 1.0;
-    c2.smoothing.repertoireSidePrior = 0.0;
+    c1.repertoireSidePrior = 1.0;
+    c2.repertoireSidePrior = 0.0;
     
     const l1 = buildBlackHumanShortlist(masters, [], c1);
     const l2 = buildBlackHumanShortlist(masters, [], c2);
     assert.ok(l1[0].blackScore !== l2[0].blackScore, "blackScore reacts to prior config");
 
-    c1.humanMoves.mastersWeight = 100;
+    c1.mastersWeight = 100;
     const l3 = buildBlackHumanShortlist(masters, [], c1);
     assert.ok(l1[0].weightedGames !== l3[0].weightedGames, "weightedGames reacts to weight config");
   });

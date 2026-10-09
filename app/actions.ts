@@ -59,27 +59,27 @@ export async function fetchDuePositions(repertoireId: string) {
     const histories = ["", ...historyUcis.map((_, index) => historyUcis.slice(0, index + 1).join(" "))];
     const historyNodes = await prisma.repertoireNode.findMany({
       where: { repertoireId, history: { in: histories } },
-      select: { history: true, eco: true, openingName: true, openingMetadataStatus: true, openingMetadataSource: true }
+      select: { history: true, eco: true, openingName: true, openingMetadataStatus: true }
     });
     const metadataByHistory = new Map(historyNodes.map(node => [node.history, node]));
     const openingByPly = histories.map(history => metadataByHistory.get(history) ?? null);
     if (stat.targetMove.toNodeId) {
       const destination = await prisma.repertoireNode.findUnique({
         where: { id: stat.targetMove.toNodeId },
-        select: { history: true, eco: true, openingName: true, openingMetadataStatus: true, openingMetadataSource: true }
+        select: { history: true, eco: true, openingName: true, openingMetadataStatus: true }
       });
       openingByPly.push(destination);
-    } else if (stat.targetMove.stopReason === "Repetition" && stat.targetMove.routeHistory) {
+    } else if (stat.targetMove.stopReason === "Repetition" && stat.targetMove.uci) {
+      const routeHistory = [stat.node.history, stat.targetMove.uci].filter(Boolean).join(" ");
       const terminal = await prisma.openingMetadataHistoryCache.findUnique({
-        where: { repertoireId_history: { repertoireId, history: stat.targetMove.routeHistory } },
-        select: { eco: true, openingName: true, status: true, source: true }
+        where: { repertoireId_history: { repertoireId, history: routeHistory } },
+        select: { eco: true, openingName: true, status: true }
       });
       openingByPly.push(terminal ? {
-        history: stat.targetMove.routeHistory,
+        history: routeHistory,
         eco: terminal.eco,
         openingName: terminal.openingName,
-        openingMetadataStatus: terminal.status,
-        openingMetadataSource: terminal.source
+        openingMetadataStatus: terminal.status
       } : null);
     }
     return { ...stat, lineMoves, openingByPly };
@@ -89,6 +89,90 @@ export async function fetchDuePositions(repertoireId: string) {
   enrichedStats.sort((a, b) => a.lineMoves.length - b.lineMoves.length);
 
   return enrichedStats.slice(0, 20);
+}
+
+export async function fetchDemoPositions(repertoireId: string) {
+  const branches = await prisma.repertoireMove.findMany({
+    where: {
+      repertoireId,
+      playerTurn: "OPPONENT",
+      toNodeId: { not: null },
+    },
+    include: {
+      fromNode: true,
+      toNode: {
+        include: {
+          stats: {
+            where: { repertoireId, targetMoveId: { not: null } },
+            include: { targetMove: true, repertoire: true },
+            take: 1,
+          },
+        },
+      },
+    },
+  });
+
+  const cards = (await Promise.all(branches.map(async (branch) => {
+    const stat = branch.toNode?.stats[0];
+    if (!stat?.targetMove || !stat.repertoire || !branch.toNode) return null;
+
+    const priorMoves = branch.fromNode.displayPgn
+      ? branch.fromNode.displayPgn.split(/\s+/)
+      : [];
+    const lineMoves = [...priorMoves, branch.san];
+
+    // Attach per-ply opening metadata for live move-list browsing, same as fetchDuePositions.
+    const historyUcis = branch.toNode.history === "" ? [] : branch.toNode.history.split(/\s+/);
+    const histories = ["", ...historyUcis.map((_, index) => historyUcis.slice(0, index + 1).join(" "))];
+    const historyNodes = await prisma.repertoireNode.findMany({
+      where: { repertoireId, history: { in: histories } },
+      select: { history: true, eco: true, openingName: true, openingMetadataStatus: true }
+    });
+    const metadataByHistory = new Map(historyNodes.map(node => [node.history, node]));
+    const openingByPly = histories.map(history => metadataByHistory.get(history) ?? null);
+    if (stat.targetMove.toNodeId) {
+      const destination = await prisma.repertoireNode.findUnique({
+        where: { id: stat.targetMove.toNodeId },
+        select: { history: true, eco: true, openingName: true, openingMetadataStatus: true }
+      });
+      openingByPly.push(destination);
+    } else if (stat.targetMove.stopReason === "Repetition" && stat.targetMove.uci) {
+      const routeHistory = [branch.toNode.history, stat.targetMove.uci].filter(Boolean).join(" ");
+      const terminal = await prisma.openingMetadataHistoryCache.findUnique({
+        where: { repertoireId_history: { repertoireId, history: routeHistory } },
+        select: { eco: true, openingName: true, status: true }
+      });
+      openingByPly.push(terminal ? {
+        history: routeHistory,
+        eco: terminal.eco,
+        openingName: terminal.openingName,
+        openingMetadataStatus: terminal.status
+      } : null);
+    }
+
+    return {
+      ...stat,
+      demoId: branch.id,
+      node: branch.toNode,
+      lineMoves,
+      openingByPly,
+      routeLabel: lineMoves.join(" "),
+    };
+  }))).filter((card): card is NonNullable<typeof card> => card !== null);
+
+  // Preorder traversal keeps a line together: introduce the Black response
+  // after move 1, then its continuation after move 2, and so on until that
+  // branch ends before moving to the next variation.  Comparing move tokens
+  // also guarantees that a route precedes every route below it.
+  cards.sort((a, b) => {
+    const sharedLength = Math.min(a.lineMoves.length, b.lineMoves.length);
+    for (let index = 0; index < sharedLength; index++) {
+      const comparison = a.lineMoves[index].localeCompare(b.lineMoves[index]);
+      if (comparison !== 0) return comparison;
+    }
+    return a.lineMoves.length - b.lineMoves.length;
+  });
+  return cards;
 }
 
 export async function updateSrsStats(statId: string, quality: number) {

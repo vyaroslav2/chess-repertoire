@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { prisma } from "../db/operations";
+import { claimPosition, prisma, saveLocalEngineBaseline } from "../db/operations";
 import { applyApprovedDeepCorrection, type CorrectionInput } from "./rm-correction";
 import { ProposedDeepCorrection } from "./deep-verification";
 import { parseFullFen, positionKeyFromFen } from "./fen";
@@ -18,10 +18,11 @@ async function createDummyRepertoire() {
 async function createNode(repertoireId: string, fullFen: string, pgn: string) {
     const canonical = parseFullFen(fullFen);
     const key = positionKeyFromFen(canonical);
-    await prisma.position.upsert({ where: { positionKey: key }, update: {}, create: { positionKey: key }});
-    return await prisma.repertoireNode.create({
-        data: { repertoireId, fullFen: canonical, positionKey: key, pgn, cumulativeProb: 1 }
+    const node = await prisma.repertoireNode.create({
+        data: { repertoireId, fullFen: canonical, positionKey: key, displayPgn: pgn, routeProb: 1, cumProb: 1 }
     });
+    await claimPosition(prisma, repertoireId, key, node.id);
+    return node;
 }
 
 test('Correction: rejects identical UCI', async () => {
@@ -64,17 +65,14 @@ test('Correction: cross-repertoire edge triggers hard error and rollback', async
     const child2 = await createNode(rep2, "rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2", "e4 c5");
 
     const failedMove = await prisma.repertoireMove.create({
-        data: { repertoireId: rep1, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false, localEvaluationProfile: profile }
+        data: { repertoireId: rep1, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false}
     });
 
     await prisma.repertoireMove.create({
         data: { repertoireId: rep2, fromNodeId: child.id, toNodeId: child2.id, san: "c5", uci: "c7c5", playerTurn: "OPPONENT" }
     });
 
-    await prisma.localEngineBaseline.upsert({
-        where: { fullFen_evaluationProfile: { fullFen: root.fullFen, evaluationProfile: profile } }, update: { cp: 20, bestUci: "d2d4" },
-        create: { fullFen: root.fullFen, evaluationProfile: profile, bestUci: "d2d4", cp: 20, mate: null }
-    });
+    await saveLocalEngineBaseline(root.fullFen, profile, { uci: "d2d4", cp: 20, mate: null });
 
     const proposal: ProposedDeepCorrection = { uci: "d2d4", san: "d4", cp: 20, mate: null, source: "Local Deep Stockfish", selectionMethod: "Corrected after Deep Verification", moveOrigin: "Engine Move", deepVerified: true, localEvaluationProfile: profile, baselineUci: "d2d4", baselineCp: 20, baselineMate: null };
     const input: CorrectionInput = { repertoireId: rep1, failed: { responseId: failedMove.id, uci: "e2e4", fullFen: root.fullFen, cp: 10, mate: null, source: "Local Deep Stockfish" , fromNodeId: failedMove.fromNodeId, toNodeId: failedMove.toNodeId }, proposal };
@@ -90,15 +88,13 @@ test('Correction: missing local engine candidate throws error', async () => {
     const root = await createNode(repId, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "");
     const child = await createNode(repId, "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1", "e4");
     const failedMove = await prisma.repertoireMove.create({
-        data: { repertoireId: repId, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false, localEvaluationProfile: profile }
+        data: { repertoireId: repId, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false}
     });
 
-    await prisma.localEngineBaseline.upsert({
-        where: { fullFen_evaluationProfile: { fullFen: root.fullFen, evaluationProfile: profile } }, update: { cp: 20, bestUci: "d2d4" },
-        create: { fullFen: root.fullFen, evaluationProfile: profile, bestUci: "d2d4", cp: 20, mate: null }
-    });
+    await saveLocalEngineBaseline(root.fullFen, profile, { uci: "d2d4", cp: 20, mate: null });
 
-    const proposal: ProposedDeepCorrection = { uci: "d2d4", san: "d4", cp: 20, mate: null, source: "Local Deep Stockfish", selectionMethod: "Corrected after Deep Verification", moveOrigin: "Human Move", deepVerified: true, localEvaluationProfile: profile, baselineUci: "d2d4", baselineCp: 20, baselineMate: null };
+    // DB.32: the baseline's own move is in the same EngineCache row, so the missing candidate must be another move.
+    const proposal: ProposedDeepCorrection = { uci: "c2c4", san: "c4", cp: 20, mate: null, source: "Local Deep Stockfish", selectionMethod: "Corrected after Deep Verification", moveOrigin: "Human Move", deepVerified: true, localEvaluationProfile: profile, baselineUci: "d2d4", baselineCp: 20, baselineMate: null };
     const input: CorrectionInput = { repertoireId: repId, failed: { responseId: failedMove.id, uci: "e2e4", fullFen: root.fullFen, cp: 10, mate: null, source: "Local Deep Stockfish" , fromNodeId: failedMove.fromNodeId, toNodeId: failedMove.toNodeId }, proposal };
 
     await assert.rejects(applyApprovedDeepCorrection(input), /Stale proposal: LocalEngineCandidate missing/);
@@ -109,13 +105,10 @@ test('Correction: completely fresh SRS initialization', async () => {
     const root = await createNode(repId, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "");
     const child = await createNode(repId, "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1", "e4");
     const failedMove = await prisma.repertoireMove.create({
-        data: { repertoireId: repId, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false, localEvaluationProfile: profile }
+        data: { repertoireId: repId, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false}
     });
 
-    await prisma.localEngineBaseline.upsert({
-        where: { fullFen_evaluationProfile: { fullFen: root.fullFen, evaluationProfile: profile } }, update: { cp: 20, bestUci: "d2d4" },
-        create: { fullFen: root.fullFen, evaluationProfile: profile, bestUci: "d2d4", cp: 20, mate: null }
-    });
+    await saveLocalEngineBaseline(root.fullFen, profile, { uci: "d2d4", cp: 20, mate: null });
 
     const proposal: ProposedDeepCorrection = { uci: "d2d4", san: "d4", cp: 20, mate: null, source: "Local Deep Stockfish", selectionMethod: "Corrected after Deep Verification", moveOrigin: "Engine Move", deepVerified: true, localEvaluationProfile: profile, baselineUci: "d2d4", baselineCp: 20, baselineMate: null };
     const input: CorrectionInput = { repertoireId: repId, failed: { responseId: failedMove.id, uci: "e2e4", fullFen: root.fullFen, cp: 10, mate: null, source: "Local Deep Stockfish" , fromNodeId: failedMove.fromNodeId, toNodeId: failedMove.toNodeId }, proposal };
@@ -156,8 +149,7 @@ test('applyApprovedDeepCorrection handles cycle safety, deletes subgraphs and cr
             selectionMethod: "Ordinary API",
             moveOrigin: "Engine Move",
             deepVerified: false,
-            localEvaluationProfile: profile,
-            weightedCount: 1.5
+            weightedGames: 1.5
         }
     });
 
@@ -189,10 +181,7 @@ test('applyApprovedDeepCorrection handles cycle safety, deletes subgraphs and cr
         }
     });
 
-    await prisma.localEngineBaseline.upsert({
-        where: { fullFen_evaluationProfile: { fullFen: root.fullFen, evaluationProfile: profile } }, update: { cp: 20, bestUci: "d2d4" },
-        create: { fullFen: root.fullFen, evaluationProfile: profile, bestUci: "d2d4", cp: 20, mate: null }
-    });
+    await saveLocalEngineBaseline(root.fullFen, profile, { uci: "d2d4", cp: 20, mate: null });
 
     const proposal: ProposedDeepCorrection = {
         uci: "d2d4", san: "d4", cp: 20, mate: null,
@@ -223,7 +212,7 @@ test('applyApprovedDeepCorrection handles cycle safety, deletes subgraphs and cr
     assert.ok(newResponse);
     assert.equal(newResponse.uci, "d2d4");
     assert.equal(newResponse.deepVerified, true);
-    assert.equal(newResponse.weightedCount, null, "Weighted count reset to null");
+    assert.equal(newResponse.weightedGames, null, "Weighted count reset to null");
 
     const oldStatCheck = await prisma.repertoirePositionStat.findUnique({ where: { id: oldStat.id } });
     assert.ok(oldStatCheck, "The history-specific card should be reset in place");
@@ -246,7 +235,7 @@ test('Correction: preserves externally owned canonical node (transposition targe
 
     // The move that reached child1 (this is the failed move)
     const failedMove = await prisma.repertoireMove.create({
-        data: { repertoireId: repId, fromNodeId: root.id, toNodeId: child1.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false, localEvaluationProfile: profile }
+        data: { repertoireId: repId, fromNodeId: root.id, toNodeId: child1.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false}
     });
 
     // The obsolete edge from child1 to the sharedTarget (transposition)
@@ -259,10 +248,7 @@ test('Correction: preserves externally owned canonical node (transposition targe
         data: { repertoireId: repId, fromNodeId: sharedTarget.id, toNodeId: root.id, san: "Nf3", uci: "g1f3", playerTurn: "RESPONSE" }
     });
 
-    await prisma.localEngineBaseline.upsert({
-        where: { fullFen_evaluationProfile: { fullFen: root.fullFen, evaluationProfile: profile } }, update: { cp: 20, bestUci: "d2d4" },
-        create: { fullFen: root.fullFen, evaluationProfile: profile, bestUci: "d2d4", cp: 20, mate: null }
-    });
+    await saveLocalEngineBaseline(root.fullFen, profile, { uci: "d2d4", cp: 20, mate: null });
 
     const proposal: ProposedDeepCorrection = {
         uci: "d2d4", san: "d4", cp: 20, mate: null,
@@ -286,13 +272,10 @@ test('Correction: rejects stale baseline', async () => {
     const root = await createNode(repId, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "");
     const child = await createNode(repId, "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1", "e4");
     const failedMove = await prisma.repertoireMove.create({
-        data: { repertoireId: repId, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false, localEvaluationProfile: profile }
+        data: { repertoireId: repId, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false}
     });
 
-    await prisma.localEngineBaseline.upsert({
-        where: { fullFen_evaluationProfile: { fullFen: root.fullFen, evaluationProfile: profile } }, update: { cp: 15, bestUci: "d2d4" },
-        create: { fullFen: root.fullFen, evaluationProfile: profile, bestUci: "d2d4", cp: 15, mate: null }
-    });
+    await saveLocalEngineBaseline(root.fullFen, profile, { uci: "d2d4", cp: 15, mate: null });
 
     const proposal: ProposedDeepCorrection = { uci: "d2d4", san: "d4", cp: 20, mate: null, source: "Local Deep Stockfish", selectionMethod: "Corrected after Deep Verification", moveOrigin: "Engine Move", deepVerified: true, localEvaluationProfile: profile, baselineUci: "d2d4", baselineCp: 20, baselineMate: null };
     const input: CorrectionInput = { repertoireId: repId, failed: { responseId: failedMove.id, uci: "e2e4", fullFen: root.fullFen, cp: 10, mate: null, source: "Local Deep Stockfish" , fromNodeId: failedMove.fromNodeId, toNodeId: failedMove.toNodeId }, proposal };
@@ -305,14 +288,11 @@ test('Correction: runtime-validates proposal before mutation', async () => {
     const root = await createNode(repId, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "");
     const child = await createNode(repId, "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1", "e4");
     const failedMove = await prisma.repertoireMove.create({
-        data: { repertoireId: repId, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false, localEvaluationProfile: profile }
+        data: { repertoireId: repId, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false}
     });
 
     // Valid setup
-    await prisma.localEngineBaseline.upsert({
-        where: { fullFen_evaluationProfile: { fullFen: root.fullFen, evaluationProfile: profile } }, update: { cp: 20, bestUci: "d2d4" },
-        create: { fullFen: root.fullFen, evaluationProfile: profile, bestUci: "d2d4", cp: 20, mate: null }
-    });
+    await saveLocalEngineBaseline(root.fullFen, profile, { uci: "d2d4", cp: 20, mate: null });
 
     const proposal: ProposedDeepCorrection = { uci: "d2d4", san: "Nf3", cp: 20, mate: null, source: "Local Deep Stockfish", selectionMethod: "Corrected after Deep Verification", moveOrigin: "Engine Move", deepVerified: true, localEvaluationProfile: profile, baselineUci: "d2d4", baselineCp: 20, baselineMate: null };
     const input: CorrectionInput = { repertoireId: repId, failed: { responseId: failedMove.id, uci: "e2e4", fullFen: root.fullFen, cp: 10, mate: null, source: "Local Deep Stockfish" , fromNodeId: failedMove.fromNodeId, toNodeId: failedMove.toNodeId }, proposal };
@@ -328,13 +308,10 @@ test('Correction: rejects stale fromNodeId', async () => {
     const child = await createNode(repId, "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1", "e4");
 
     const failedMove = await prisma.repertoireMove.create({
-        data: { repertoireId: repId, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false, localEvaluationProfile: profile }
+        data: { repertoireId: repId, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false}
     });
 
-    await prisma.localEngineBaseline.upsert({
-        where: { fullFen_evaluationProfile: { fullFen: root.fullFen, evaluationProfile: profile } }, update: { cp: 20, bestUci: "d2d4" },
-        create: { fullFen: root.fullFen, evaluationProfile: profile, bestUci: "d2d4", cp: 20, mate: null }
-    });
+    await saveLocalEngineBaseline(root.fullFen, profile, { uci: "d2d4", cp: 20, mate: null });
 
     const proposal: ProposedDeepCorrection = { uci: "d2d4", san: "d4", cp: 20, mate: null, source: "Local Deep Stockfish", selectionMethod: "Corrected after Deep Verification", moveOrigin: "Engine Move", deepVerified: true, localEvaluationProfile: profile, baselineUci: "d2d4", baselineCp: 20, baselineMate: null };
     const input: CorrectionInput = { repertoireId: repId, failed: { responseId: failedMove.id, uci: "e2e4", fullFen: root.fullFen, cp: 10, mate: null, source: "Local Deep Stockfish", fromNodeId: otherRoot.id, toNodeId: child.id }, proposal };
@@ -349,13 +326,10 @@ test('Correction: rejects stale toNodeId', async () => {
     const otherChild = await createNode(repId, "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1", "d4");
 
     const failedMove = await prisma.repertoireMove.create({
-        data: { repertoireId: repId, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false, localEvaluationProfile: profile }
+        data: { repertoireId: repId, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false}
     });
 
-    await prisma.localEngineBaseline.upsert({
-        where: { fullFen_evaluationProfile: { fullFen: root.fullFen, evaluationProfile: profile } }, update: { cp: 20, bestUci: "d2d4" },
-        create: { fullFen: root.fullFen, evaluationProfile: profile, bestUci: "d2d4", cp: 20, mate: null }
-    });
+    await saveLocalEngineBaseline(root.fullFen, profile, { uci: "d2d4", cp: 20, mate: null });
 
     const proposal: ProposedDeepCorrection = { uci: "d2d4", san: "d4", cp: 20, mate: null, source: "Local Deep Stockfish", selectionMethod: "Corrected after Deep Verification", moveOrigin: "Engine Move", deepVerified: true, localEvaluationProfile: profile, baselineUci: "d2d4", baselineCp: 20, baselineMate: null };
     const input: CorrectionInput = { repertoireId: repId, failed: { responseId: failedMove.id, uci: "e2e4", fullFen: root.fullFen, cp: 10, mate: null, source: "Local Deep Stockfish", fromNodeId: root.id, toNodeId: otherChild.id }, proposal };
@@ -368,13 +342,10 @@ test('Correction: Engine Move proposal exact baseline validation', async () => {
     const root = await createNode(repId, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "");
     const child = await createNode(repId, "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1", "e4");
     const failedMove = await prisma.repertoireMove.create({
-        data: { repertoireId: repId, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false, localEvaluationProfile: profile }
+        data: { repertoireId: repId, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false}
     });
 
-    await prisma.localEngineBaseline.upsert({
-        where: { fullFen_evaluationProfile: { fullFen: root.fullFen, evaluationProfile: profile } }, update: { cp: 20, bestUci: "d2d4" },
-        create: { fullFen: root.fullFen, evaluationProfile: profile, bestUci: "d2d4", cp: 20, mate: null }
-    });
+    await saveLocalEngineBaseline(root.fullFen, profile, { uci: "d2d4", cp: 20, mate: null });
 
     // Valid move so it passes basic move generation validation, but with the wrong evaluation.
     const proposal: ProposedDeepCorrection = { uci: "g1f3", san: "Nf3", cp: 50, mate: null, source: "Local Deep Stockfish", selectionMethod: "Corrected after Deep Verification", moveOrigin: "Engine Move", deepVerified: true, localEvaluationProfile: profile, baselineUci: "d2d4", baselineCp: 20, baselineMate: null };
@@ -392,13 +363,10 @@ test('Correction: rejects failed RESPONSE with foreign fromNode', async () => {
     const child = await createNode(rep1, "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1", "e4");
 
     const failedMove = await prisma.repertoireMove.create({
-        data: { repertoireId: rep1, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false, localEvaluationProfile: profile }
+        data: { repertoireId: rep1, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false}
     });
 
-    await prisma.localEngineBaseline.upsert({
-        where: { fullFen_evaluationProfile: { fullFen: root.fullFen, evaluationProfile: profile } }, update: { cp: 20, bestUci: "d2d4" },
-        create: { fullFen: root.fullFen, evaluationProfile: profile, bestUci: "d2d4", cp: 20, mate: null }
-    });
+    await saveLocalEngineBaseline(root.fullFen, profile, { uci: "d2d4", cp: 20, mate: null });
 
     const proposal: ProposedDeepCorrection = { uci: "g1f3", san: "Nf3", cp: 20, mate: null, source: "Local Deep Stockfish", selectionMethod: "Corrected after Deep Verification", moveOrigin: "Engine Move", deepVerified: true, localEvaluationProfile: profile, baselineUci: "d2d4", baselineCp: 20, baselineMate: null };
     const input: CorrectionInput = { repertoireId: rep1, failed: { responseId: failedMove.id, uci: "e2e4", fullFen: root.fullFen, cp: 10, mate: null, source: "Local Deep Stockfish", fromNodeId: root.id, toNodeId: child.id }, proposal };
@@ -416,18 +384,15 @@ test('Correction: BFS rejects traversal of foreign node on a local edge', async 
     const grandChild = await createNode(rep2, "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2", "e4 e5");
 
     const failedMove = await prisma.repertoireMove.create({
-        data: { repertoireId: rep1, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false, localEvaluationProfile: profile }
+        data: { repertoireId: rep1, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false}
     });
 
     // An edge belonging to rep1 but pointing to a node in rep2
     await prisma.repertoireMove.create({
-        data: { repertoireId: rep1, fromNodeId: child.id, toNodeId: grandChild.id, san: "e5", uci: "e7e5", playerTurn: "CHALLENGE", cp: null, source: "Lichess Cloud Evaluation", selectionMethod: "Ordinary API", moveOrigin: "Human Move", deepVerified: false, localEvaluationProfile: null }
+        data: { repertoireId: rep1, fromNodeId: child.id, toNodeId: grandChild.id, san: "e5", uci: "e7e5", playerTurn: "CHALLENGE", cp: null, source: "Lichess Cloud Evaluation", selectionMethod: "Ordinary API", moveOrigin: "Human Move", deepVerified: false}
     });
 
-    await prisma.localEngineBaseline.upsert({
-        where: { fullFen_evaluationProfile: { fullFen: root.fullFen, evaluationProfile: profile } }, update: { cp: 20, bestUci: "d2d4" },
-        create: { fullFen: root.fullFen, evaluationProfile: profile, bestUci: "d2d4", cp: 20, mate: null }
-    });
+    await saveLocalEngineBaseline(root.fullFen, profile, { uci: "d2d4", cp: 20, mate: null });
 
     const proposal: ProposedDeepCorrection = { uci: "d2d4", san: "d4", cp: 20, mate: null, source: "Local Deep Stockfish", selectionMethod: "Corrected after Deep Verification", moveOrigin: "Engine Move", deepVerified: true, localEvaluationProfile: profile, baselineUci: "d2d4", baselineCp: 20, baselineMate: null };
     const input: CorrectionInput = { repertoireId: rep1, failed: { responseId: failedMove.id, uci: "e2e4", fullFen: root.fullFen, cp: 10, mate: null, source: "Local Deep Stockfish", fromNodeId: root.id, toNodeId: child.id }, proposal };
@@ -441,7 +406,7 @@ test('Correction: rejects Hardcoded Move origin', async () => {
     const child = await createNode(repId, "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1", "e4");
 
     const failedMove = await prisma.repertoireMove.create({
-        data: { repertoireId: repId, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false, localEvaluationProfile: profile }
+        data: { repertoireId: repId, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false}
     });
 
     const proposal: ProposedDeepCorrection = { uci: "d2d4", san: "d4", cp: 20, mate: null, source: "Local Deep Stockfish", selectionMethod: "Corrected after Deep Verification", moveOrigin: "Hardcoded Move" as any, deepVerified: true, localEvaluationProfile: profile, baselineUci: "d2d4", baselineCp: 20, baselineMate: null };
@@ -456,7 +421,7 @@ test('Correction: rejects deepVerified = false proposal', async () => {
     const child = await createNode(repId, "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1", "e4");
 
     const failedMove = await prisma.repertoireMove.create({
-        data: { repertoireId: repId, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false, localEvaluationProfile: profile }
+        data: { repertoireId: repId, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", playerTurn: "RESPONSE", cp: 10, source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false}
     });
 
     const proposal: ProposedDeepCorrection = { uci: "d2d4", san: "d4", cp: 20, mate: null, source: "Local Deep Stockfish", selectionMethod: "Corrected after Deep Verification", moveOrigin: "Engine Move", deepVerified: false as any, localEvaluationProfile: profile, baselineUci: "d2d4", baselineCp: 20, baselineMate: null };

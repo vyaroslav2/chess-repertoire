@@ -1,0 +1,18 @@
+{
+  "name": "human-evidence-pilot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "download": "tsx cli.ts download",
+    "filter": "tsx cli.ts filter",
+    "import": "tsx cli.ts import",
+    "evaluate": "tsx cli.ts evaluate",
+    "db-check": "tsx cli.ts db-check",
+    "load": "tsx cli.ts load",
+    "test": "tsx --test tests/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "mysql2": "^3.24.5"
+  }
+}

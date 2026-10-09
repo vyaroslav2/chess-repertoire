@@ -1,6 +1,9 @@
 import { Prisma } from "@prisma/client";
 import { Chess } from "chess.js";
 import {
+  claimPosition,
+  readLocalEngineBaseline,
+  readLocalEngineCandidate,
   type ResponseEvaluationSource,
   type ResponseMoveOrigin,
   type ResponseSelectionMethod,
@@ -16,7 +19,7 @@ export interface ReplaceResponseBranchInput {
     fromNodeId: string;
     toNodeId: string | null;
     san: string;
-    fromNode: { pgn: string; fullFen: string; cumulativeProb: number; positionKey?: string; history?: string; humanDataSnapshotId?: string | null };
+    fromNode: { displayPgn: string; fullFen: string; cumProb: number; positionKey?: string; history?: string };
   };
   newUci: string;
   expectedNewSan: string;
@@ -27,13 +30,15 @@ export interface ReplaceResponseBranchInput {
   newMoveOrigin: ResponseMoveOrigin;
   newDeepVerified: boolean;
   newLocalEvaluationProfile: string | null;
-  newWeightedCount: number | null;
+  newWeightedGames: number | null;
   newMastersGames?: number | null;
   newEliteGames?: number | null;
-  newTotalRelevantGames?: number | null;
-  newMoveShare?: number | null;
+  newTotalMastersGames?: number | null;
+  newMastersMoveShare?: number | null;
+  newTotalEliteGames?: number | null;
+  newEliteMoveShare?: number | null;
   newEngineRank?: number | null;
-  cumulativeProb: number;
+  cumProb: number;
 }
 
 export interface OwnedBranchRoot {
@@ -63,7 +68,7 @@ export async function collectOwnedBranchDeletion(input: {
     if (!currentNode) throw new Error("Stale repertoire branch: destination node disappeared");
     if (currentNode.repertoireId !== input.repertoireId) throw new Error("Cross-repertoire node detected");
     const expectedPgn = `${current.parentPgn ? `${current.parentPgn} ` : ""}${current.san}`;
-    if (currentNode.pgn !== expectedPgn) continue;
+    if (currentNode.displayPgn !== expectedPgn) continue;
 
     nodesToDelete.add(current.nodeId);
     const outgoingEdges = await input.tx.repertoireMove.findMany({
@@ -74,7 +79,7 @@ export async function collectOwnedBranchDeletion(input: {
       if (edge.repertoireId !== input.repertoireId) throw new Error("Cross-repertoire edge detected");
       movesToDelete.add(edge.id);
       if (edge.toNodeId !== null) {
-        queue.push({ nodeId: edge.toNodeId, parentPgn: currentNode.pgn, san: edge.san });
+        queue.push({ nodeId: edge.toNodeId, parentPgn: currentNode.displayPgn, san: edge.san });
       }
     }
   }
@@ -124,11 +129,13 @@ export async function replaceResponseBranch(input: ReplaceResponseBranchInput) {
     moveOrigin: input.newMoveOrigin,
     deepVerified: input.newDeepVerified,
     localEvaluationProfile: input.newLocalEvaluationProfile,
-    weightedCount: input.newWeightedCount
+    weightedGames: input.newWeightedGames
     ,mastersGames: input.newMastersGames
     ,eliteGames: input.newEliteGames
-    ,totalRelevantGames: input.newTotalRelevantGames
-    ,moveShare: input.newMoveShare
+    ,totalMastersGames: input.newTotalMastersGames
+    ,mastersMoveShare: input.newMastersMoveShare
+    ,totalEliteGames: input.newTotalEliteGames
+    ,eliteMoveShare: input.newEliteMoveShare
     ,engineRank: input.newEngineRank
   });
 
@@ -151,12 +158,8 @@ export async function replaceResponseBranch(input: ReplaceResponseBranchInput) {
   if (input.newDeepVerified) {
     const profile = input.newLocalEvaluationProfile!;
     const [baseline, candidate] = await Promise.all([
-      tx.localEngineBaseline.findUnique({ where: { fullFen_evaluationProfile: { fullFen: canonicalSource, evaluationProfile: profile } } }),
-      tx.localEngineCandidate.findUnique({ where: { fullFen_candidateUci_evaluationProfile: {
-        fullFen: canonicalSource,
-        candidateUci: input.newUci,
-        evaluationProfile: profile
-      } } })
+      readLocalEngineBaseline(canonicalSource, profile),
+      readLocalEngineCandidate(canonicalSource, input.newUci, profile)
     ]);
     if (!baseline || (baseline.bestUci !== input.newUci && !candidate)) {
       throw new Error("Invalid replacement RESPONSE: compatible Local Deep evidence is missing");
@@ -173,7 +176,7 @@ export async function replaceResponseBranch(input: ReplaceResponseBranchInput) {
     roots: oldResponse.toNodeId === null ? [] : [{
       edgeId: oldResponse.id,
       nodeId: oldResponse.toNodeId,
-      parentPgn: oldResponse.fromNode.pgn,
+      parentPgn: oldResponse.fromNode.displayPgn,
       san: oldResponse.san
     }]
   });
@@ -181,35 +184,35 @@ export async function replaceResponseBranch(input: ReplaceResponseBranchInput) {
     await tx.repertoireMove.delete({ where: { id: oldResponse.id } });
     movesToDelete.add(oldResponse.id);
   }
-  await tx.position.upsert({ where: { positionKey: posKey }, update: {}, create: { positionKey: posKey } });
-
-  const newPgn = `${oldResponse.fromNode.pgn ? `${oldResponse.fromNode.pgn} ` : ""}${chessMove.san}`;
+  const newPgn = `${oldResponse.fromNode.displayPgn ? `${oldResponse.fromNode.displayPgn} ` : ""}${chessMove.san}`;
   const newHistory = `${oldResponse.fromNode.history ? `${oldResponse.fromNode.history} ` : ""}${input.newUci}`;
-  const existingDestinationNode = await tx.repertoireNode.findFirst({ where: { repertoireId, positionKey: posKey } });
-  const isRepetition = existingDestinationNode !== null && (existingDestinationNode.history === "" ||
-    (oldResponse.fromNode.history?.startsWith(`${existingDestinationNode.history} `) ?? false));
-  const newDestinationNode = existingDestinationNode ??
-    await tx.repertoireNode.create({
+  // Black's reply never stops on a repetition or transposition: it always lands on
+  // this route's own node. HM.30 and HM.34 catch the White moves that follow.
+  let newDestinationNode = await tx.repertoireNode.findFirst({ where: { repertoireId, history: newHistory } });
+  if (!newDestinationNode) {
+    newDestinationNode = await tx.repertoireNode.create({
       data: {
         repertoireId, fullFen: canonicalFullFen, positionKey: posKey, history: newHistory,
-        displayPgn: newPgn, pgn: newPgn, cumulativeProb: input.cumulativeProb,
-        humanDataSnapshotId: oldResponse.fromNode.humanDataSnapshotId ?? null
+        displayPgn: newPgn, routeProb: input.cumProb, cumProb: input.cumProb, siblingIndex: 0
       }
     });
-  const isTransposition = !isRepetition && newDestinationNode.history !== newHistory;
+    await claimPosition(tx, repertoireId, posKey, newDestinationNode.id);
+  }
   const newResponse = await tx.repertoireMove.create({
     data: {
       repertoireId,
       fromNodeId: oldResponse.fromNodeId,
-      toNodeId: isRepetition ? null : newDestinationNode.id,
+      toNodeId: newDestinationNode.id,
       san: chessMove.san,
       uci: input.newUci,
       playerTurn: "RESPONSE",
-      weightedCount: input.newWeightedCount,
+      weightedGames: input.newWeightedGames,
       mastersGames: input.newMastersGames ?? null,
       eliteGames: input.newEliteGames ?? null,
-      totalRelevantGames: input.newTotalRelevantGames ?? null,
-      moveShare: input.newMoveShare ?? null,
+      totalMastersGames: input.newTotalMastersGames ?? null,
+      mastersMoveShare: input.newMastersMoveShare ?? null,
+      totalEliteGames: input.newTotalEliteGames ?? null,
+      eliteMoveShare: input.newEliteMoveShare ?? null,
       engineRank: input.newEngineRank ?? null,
       cp: input.newCp,
       mate: input.newMate,
@@ -217,13 +220,8 @@ export async function replaceResponseBranch(input: ReplaceResponseBranchInput) {
       selectionMethod: input.newSelectionMethod,
       moveOrigin: input.newMoveOrigin,
       deepVerified: input.newDeepVerified,
-      localEvaluationProfile: input.newLocalEvaluationProfile,
-      prob: null,
-      routeProbability: input.cumulativeProb,
-      trueProbability: input.cumulativeProb,
-      routeHistory: isTransposition || isRepetition ? newHistory : null,
-      stopReason: isRepetition ? "Repetition" : isTransposition ? "Transposition" : null,
-      humanDataSnapshotId: oldResponse.fromNode.humanDataSnapshotId ?? null
+      moveProb: null,
+      stopReason: null
     }
   });
   await tx.repertoirePositionStat.upsert({
@@ -269,9 +267,9 @@ export async function replaceResponseBranch(input: ReplaceResponseBranchInput) {
     removedMoveCount: movesToDelete.size,
     invalidatedExternalSourceNodeIds,
     createdResponseId: newResponse.id,
-    createdDestinationNodeId: isRepetition ? null : newDestinationNode.id,
+    createdDestinationNodeId: newDestinationNode.id,
     createdDestinationFullFen: newDestinationNode.fullFen,
-    createdDestinationPgn: newDestinationNode.pgn,
+    createdDestinationPgn: newDestinationNode.displayPgn,
     replacementUci: newResponse.uci!,
     replacementSan: newResponse.san
   };

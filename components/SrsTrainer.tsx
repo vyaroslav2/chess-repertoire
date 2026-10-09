@@ -1,22 +1,23 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import Chessground from "@react-chess/chessground";
 import "chessground/assets/chessground.base.css";
 import { Chess } from "chess.js";
-import { updateSrsStats } from "../app/actions";
 import LichessMoveList from "./LichessMoveList";
 import { logFlightBox } from "../lib/logger";
 
 interface SrsTrainerProps {
   dueStats: any[];
+  demoMode?: boolean;
 }
 
 type TestStatus = "idle" | "wrong" | "correct" | "revealed";
 
-export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
+export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerProps) {
   const [stats, setStats] = useState(dueStats);
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [graduatedCount, setGraduatedCount] = useState(0);
+  const [goodHitsByCard, setGoodHitsByCard] = useState<Record<string, number>>({});
   
   // The state machine
   const [testStatus, setTestStatus] = useState<TestStatus>("idle");
@@ -30,13 +31,28 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
   const isInitializingRef = useRef(true);
   const animTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Only true while the opponent's move is actually being revealed — every other
+  // position change (new card, browsing, skipping) is a dead instant jump, no glide.
+  const [animationEnabled, setAnimationEnabled] = useState(false);
+
+  // Manual board flip, toggled with the 'f' key.
+  const [flipped, setFlipped] = useState(false);
+
   // Sound ref
   const moveSoundRef = useRef<HTMLAudioElement | null>(null);
 
-  const currentStat = stats[currentIndex];
+  const currentStat = stats[0];
   const lineMoves: string[] = currentStat?.lineMoves || [];
   const targetPlyIndex = lineMoves.length; // The ply they are supposed to guess from (after opponent's move)
   const currentOpening = currentStat?.openingByPly?.[Math.max(0, currentPlyIndex)] ?? null;
+  const positionOpening = currentPlyIndex <= 0
+    ? "" // Starting position has no opening — nothing to show, not even "missing metadata".
+    : currentOpening?.openingMetadataStatus === "PRESENT"
+      ? [currentOpening.eco, currentOpening.openingName].filter(Boolean).join(" ")
+      : currentOpening?.openingMetadataStatus === "VALID_ABSENCE"
+        ? "No opening classification (Lichess Masters)"
+        : "";
+  const hasPositionOpening = positionOpening !== "";
 
   // Derived lock state
   const expectedPlyIndex = (testStatus === 'idle' || testStatus === 'wrong') ? targetPlyIndex : targetPlyIndex + 1;
@@ -51,12 +67,17 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
   const playSound = () => {
     if (moveSoundRef.current) {
       moveSoundRef.current.currentTime = 0;
-      moveSoundRef.current.play().catch(e => console.error("Audio play failed:", e));
+      // Browsers block audio autoplay before any user gesture (e.g. the very first
+      // card's reveal on page load) — that's expected, not a bug, so stay quiet about it.
+      moveSoundRef.current.play().catch(e => {
+        if (e instanceof DOMException && e.name === "NotAllowedError") return;
+        console.error("Audio play failed:", e);
+      });
     }
   };
 
   // 1. Loading & Animation Sequence
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!currentStat) return;
 
     logFlightBox("LOAD_CARD_START", { cardId: currentStat.id, lineMoves });
@@ -68,54 +89,50 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
 
     setIsInitializing(true);
     isInitializingRef.current = true;
-    
-    if (lineMoves.length === 0) {
-      // First move of the game, no opponent move to animate
-      chess.reset();
-      setFen(chess.fen());
-      setLastMove(undefined);
-      setTestStatus("idle");
-      setCurrentPlyIndex(0);
-      setIsInitializing(false);
-      isInitializingRef.current = false;
-      logFlightBox("LOAD_CARD_END_IMMEDIATE", { fen: chess.fen(), currentPlyIndex: 0 });
-      return;
-    }
 
-    // Start from the beginning to play out the full line as requested
+    // Snap instantly to the position just before the opponent's last move —
+    // no per-ply animation, matching a Lichess puzzle's instant setup.
+    const priorMoves = lineMoves.slice(0, -1);
+    const finalMove = lineMoves[lineMoves.length - 1];
+
     const tempChess = new Chess();
+    for (const san of priorMoves) {
+      tempChess.move(san);
+    }
+    setAnimationEnabled(false);
     setFen(tempChess.fen());
     chess.load(tempChess.fen());
     setLastMove(undefined);
     setTestStatus("idle");
-    setCurrentPlyIndex(0);
+    setCurrentPlyIndex(priorMoves.length);
 
-    let step = 0;
+    if (!finalMove) {
+      // First move of the game: no opponent move to animate.
+      setIsInitializing(false);
+      isInitializingRef.current = false;
+      logFlightBox("LOAD_CARD_END_IMMEDIATE", { fen: tempChess.fen(), currentPlyIndex: priorMoves.length });
+      return;
+    }
 
-    const playNextMove = () => {
-      const startTime = performance.now();
-      if (step < lineMoves.length) {
-        const m = tempChess.move(lineMoves[step]);
-        if (m) {
-          setFen(tempChess.fen());
-          chess.load(tempChess.fen()); // Sync main instance
-          setLastMove([m.from, m.to]);
-          setCurrentPlyIndex(step + 1);
-          playSound();
-          logFlightBox("ANIMATE_MOVE", { step, san: lineMoves[step], fen: tempChess.fen(), timeToExecute: performance.now() - startTime });
-        } else {
-          logFlightBox("ANIMATE_MOVE_FAIL", { step, san: lineMoves[step], fen: tempChess.fen() });
-        }
-        step++;
-        animTimerRef.current = setTimeout(playNextMove, 400); // 400ms per ply animation
+    // Only the opponent's final move plays an animation, after a brief pause
+    // so it reads as a deliberate reveal rather than part of the snap-in.
+    animTimerRef.current = setTimeout(() => {
+      const m = tempChess.move(finalMove);
+      if (m) {
+        setAnimationEnabled(true);
+        setFen(tempChess.fen());
+        chess.load(tempChess.fen()); // Sync main instance
+        setLastMove([m.from, m.to]);
+        setCurrentPlyIndex(lineMoves.length);
+        playSound();
+        logFlightBox("ANIMATE_MOVE", { san: finalMove, fen: tempChess.fen() });
       } else {
-        setIsInitializing(false); // Done playing out
-        isInitializingRef.current = false;
-        logFlightBox("LOAD_CARD_ANIMATION_COMPLETE", { finalFen: tempChess.fen() });
+        logFlightBox("ANIMATE_MOVE_FAIL", { san: finalMove, fen: tempChess.fen() });
       }
-    };
-
-    animTimerRef.current = setTimeout(playNextMove, 800); // 800ms initial pause so they can orient themselves before the first ply animates
+      setIsInitializing(false);
+      isInitializingRef.current = false;
+      logFlightBox("LOAD_CARD_ANIMATION_COMPLETE", { finalFen: tempChess.fen() });
+    }, 500);
 
     return () => {
       if (animTimerRef.current) {
@@ -171,6 +188,13 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
 
       logFlightBox("KEY_PRESS", { key: e.key, isInitializing: isInitializingRef.current, isBrowsing, testStatus });
 
+      // Flip board (doesn't consume/affect any other state)
+      if (e.key === "f" || e.key === "F") {
+        setFlipped((prev) => !prev);
+        logFlightBox("ACTION_FLIP_BOARD", {});
+        return;
+      }
+
       // Skip animation on any key press
       if (isInitializingRef.current) {
         if (animTimerRef.current) {
@@ -189,6 +213,7 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
           const m = tempChess.move(lineMoves[i]);
           if (m) lm = [m.from, m.to];
         }
+        setAnimationEnabled(false);
         setFen(tempChess.fen());
         chess.load(tempChess.fen());
         setLastMove(lm);
@@ -242,16 +267,17 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
   if (!currentStat) {
     return (
       <div style={{ color: "white", textAlign: "center", marginTop: "50px" }}>
-        <h2 style={{ fontSize: "2rem", color: "var(--lichess-green)" }}>You're all caught up!</h2>
+        <h2 style={{ fontSize: "2rem", color: "var(--lichess-green)" }}>{demoMode ? "Demo complete" : "You're all caught up!"}</h2>
         <p style={{ fontSize: "1.1rem", marginTop: "10px", color: "var(--lichess-text-muted)" }}>
-          No more positions due for review.
+          {demoMode ? `${graduatedCount} cards graduated locally. No database changes were made.` : "No more positions due for review."}
         </p>
       </div>
     );
   }
 
   const calcTurnColor = () => (chess.turn() === "w" ? "white" : "black");
-  const orientation = currentStat.repertoire.color.toLowerCase() === "black" ? "black" : "white";
+  const baseOrientation = currentStat.repertoire.color.toLowerCase() === "black" ? "black" : "white";
+  const orientation = flipped ? (baseOrientation === "black" ? "white" : "black") : baseOrientation;
 
   const calcMovable = () => {
     // Only allow moves if we are idle or wrong (let them try again)
@@ -325,61 +351,64 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
     }
   };
 
-  const handleRate = async (quality: number) => {
-    logFlightBox("ACTION_RATE_SUBMIT", { quality, cardId: currentStat.id });
-    
-    // Optimistic UI update: instantly jump to the next card (or caught up screen)
-    if (currentIndex < stats.length) {
-      setCurrentIndex((prev) => prev + 1);
-    }
-    
-    if (currentIndex === stats.length - 1) {
-      logFlightBox("TRAINING_COMPLETE", {});
+  const handleRate = (quality: number) => {
+    const cardKey = currentStat.demoId ?? currentStat.id;
+    const goodHits = goodHitsByCard[cardKey] ?? 0;
+    const isGood = quality === 2;
+    const isEasy = quality === 3;
+    const graduates = isEasy || (isGood && goodHits >= 1);
+
+    logFlightBox("ACTION_DEMO_RATE", { quality, cardId: cardKey, goodHits, graduates });
+
+    if (isGood && !graduates) {
+      setGoodHitsByCard((previous) => ({ ...previous, [cardKey]: goodHits + 1 }));
+    } else if (quality === 0) {
+      setGoodHitsByCard((previous) => ({ ...previous, [cardKey]: 0 }));
     }
 
-    try {
-      // Async update in the background
-      await updateSrsStats(currentStat.id, quality);
-    } catch (e) {
-      console.error("Failed to update stat", e);
-      logFlightBox("ACTION_RATE_SUBMIT_ERROR", { quality, cardId: currentStat.id, error: String(e) });
-    }
+    setStats((previous) => {
+      const [current, ...remaining] = previous;
+      if (!current) return previous;
+      return graduates ? remaining : [...remaining, current];
+    });
+    if (graduates) setGraduatedCount((previous) => previous + 1);
   };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "20px", position: "relative" }}>
       
-      {/* Fixed Toast Banners */}
-      {testStatus === "wrong" && (
-        <div style={{ position: "fixed", bottom: "20px", left: "20px", background: "#c62828", color: "white", padding: "12px 24px", borderRadius: "8px", boxShadow: "0 4px 12px rgba(0,0,0,0.5)", zIndex: 100, fontSize: "1.1rem" }}>
-          Incorrect move. Try again, or press <strong style={{ color: "black", background: "white", padding: "2px 6px", borderRadius: "4px", fontSize: "0.9rem" }}>Enter</strong> to reveal.
-        </div>
-      )}
-      {testStatus === "correct" && (
-        <div style={{ position: "fixed", bottom: "20px", left: "20px", background: "var(--lichess-green)", color: "white", padding: "12px 24px", borderRadius: "8px", boxShadow: "0 4px 12px rgba(0,0,0,0.5)", zIndex: 100, fontSize: "1.1rem" }}>
-          Correct! Press <strong style={{ color: "black", background: "white", padding: "2px 6px", borderRadius: "4px", fontSize: "0.9rem" }}>Enter</strong> for Good (3), or use 1-4.
-        </div>
-      )}
-      {testStatus === "revealed" && (
-        <div style={{ position: "fixed", bottom: "20px", left: "20px", background: "#f9a825", color: "black", padding: "12px 24px", borderRadius: "8px", boxShadow: "0 4px 12px rgba(0,0,0,0.5)", zIndex: 100, fontSize: "1.1rem" }}>
-          Revealed. Press <strong style={{ color: "white", background: "black", padding: "2px 6px", borderRadius: "4px", fontSize: "0.9rem" }}>Enter</strong> to proceed (defaults to Good).
-        </div>
+      {testStatus !== "idle" && (
+        <div
+          style={{
+            position: "fixed", bottom: 0, left: 0, width: "250px", height: "25px",
+            background: testStatus === "wrong" ? "#c62828" : testStatus === "correct" ? "var(--lichess-green)" : "#f9a825",
+            borderTop: "1px solid var(--lichess-border)", borderRight: "1px solid var(--lichess-border)", zIndex: 100,
+          }}
+        />
       )}
 
       <div style={{ color: "var(--lichess-text-bright)", textAlign: "center" }}>
-        <h2>Reviewing: {currentStat.repertoire.title}</h2>
-        <p style={{ color: "var(--lichess-text-muted)" }}>
-          Position {currentIndex + 1} of {stats.length}
-        </p>
-        <p style={{ color: "var(--lichess-text-muted)", minHeight: "1.5em" }}>
-          {currentOpening?.openingMetadataStatus === "PRESENT"
-            ? `${currentOpening.eco} · ${currentOpening.openingName}`
-            : currentOpening?.openingMetadataStatus === "VALID_ABSENCE"
-              ? "No opening classification (Lichess Masters)"
-              : "Opening metadata unavailable"}
+        <p className="demo-status-hover" style={{ color: "var(--lichess-text-muted)" }}>
+          {demoMode
+            ? `Black to move · ${stats.length} cards remaining · ${graduatedCount} graduated · Good ${goodHitsByCard[currentStat.demoId ?? currentStat.id] ?? 0}/2`
+            : `Position 1 of ${stats.length}`}
         </p>
       </div>
 
+      <div
+        style={{
+          width: "748px", maxWidth: "100%", marginBottom: "-14px",
+          color: "var(--lichess-text-muted)", fontSize: "14px", lineHeight: "20px",
+          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+          // Always render placeholder text and reserve the line's height, even when there's
+          // nothing to show (e.g. the starting position) — hiding via display would collapse
+          // the row and shift the board down the moment real opening text appears.
+          visibility: hasPositionOpening ? "visible" : "hidden",
+        }}
+        title={hasPositionOpening ? positionOpening : undefined}
+      >
+        {hasPositionOpening ? positionOpening : "ECO Opening Name"}
+      </div>
       <div style={{ 
         display: "flex", 
         alignItems: "flex-start", 
@@ -400,7 +429,7 @@ export default function SrsTrainer({ dueStats }: SrsTrainerProps) {
               highlight: { lastMove: true, check: true },
               drawable: { enabled: true, visible: true },
               coordinates: true,
-              animation: { enabled: true, duration: 200 },
+              animation: { enabled: animationEnabled, duration: 200 },
               movable: {
                 ...calcMovable(),
                 events: {

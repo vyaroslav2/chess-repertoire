@@ -95,10 +95,10 @@ export function buildBlackHumanShortlist(
   processMoves(eliteMoves, false);
 
   const shortlist: BlackHumanCandidate[] = [];
-  const minGames = config.humanMoves.minimumWeightedGames;
-  const weight = config.humanMoves.mastersWeight;
-  const anchorGames = config.smoothing.anchorGames;
-  const repertoireSidePrior = config.smoothing.repertoireSidePrior;
+  const minGames = config.minimumWeightedGames;
+  const weight = config.mastersWeight;
+  const anchorGames = config.anchorGames;
+  const repertoireSidePrior = config.repertoireSidePrior;
 
   for (const candidate of Array.from(candidatesByUci.values())) {
     candidate.weightedGames = (candidate.mastersGames * weight) + candidate.eliteGames;
@@ -120,9 +120,13 @@ export function buildBlackHumanShortlist(
     shortlist.push(candidate);
   }
 
+  // EW.05: top score first; ties go to more evidence. The engine tie-break is the caller's.
   shortlist.sort((a, b) => {
     if (a.blackScore !== b.blackScore) {
       return b.blackScore - a.blackScore;
+    }
+    if (a.weightedGames !== b.weightedGames) {
+      return b.weightedGames - a.weightedGames;
     }
     return a.uci.localeCompare(b.uci);
   });
