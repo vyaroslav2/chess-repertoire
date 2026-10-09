@@ -37,7 +37,7 @@ HER.04 **Names are protected.** An existing run or download name is never overwr
 
 ## Filter
 
-HER.10 **Filtering happens while reading.** The prefix is decompressed as a stream.[^8] Each complete game is checked and kept or rejected. An unfinished game at the cut-off point is discarded.[^9] The full month is never extracted.
+HER.10 **Filtering happens while reading.** The prefix is decompressed as a stream.[^8] Each complete game is checked and kept or rejected. An unfinished game at the cut-off point is discarded.[^9] Only the kept games are written out, to `sample.pgn`. With `--limit`, reading stops at the N-th kept game; the rest of the prefix is never unpacked.
 
 HER.11 **A game is kept only if all of these hold.**[^10]
 * Rated Rapid or Classical, read from the `Event` header.
@@ -191,7 +191,7 @@ HER.65 **More data means a new download from byte 0.** There is no "continue": e
 
 [^7]: Anyone can download the same URL and range again, take its fingerprint and compare. Same fingerprint --> same bytes --> the filter gives the same games.
 
-[^8]: The file is unpacked bit by bit as it is read, and each game is checked as soon as it is complete. The unpacked month is never saved to disk or held in memory whole; unpacked, it is several times bigger.
+[^8]: The file is unpacked bit by bit as it is read, and each game is checked as soon as it is complete. The unpacked prefix is never saved to disk or held in memory whole; unpacked, it is several times bigger.
 
 [^9]: The 2.5 GB cut lands in the middle of a game. That last game has no result after its moves, so it is thrown away. Every other game is complete.
 
@@ -239,56 +239,59 @@ HER.65 **More data means a new download from byte 0.** There is no "continue": e
 [^30]: "The code" means our two programs: the importer, which wrote `observations.jsonl`, and the loader, which filled the table. Agreement shows they read each game the same way and did not mix up rows. It cannot catch an error in Lichess's own file, e.g. a wrong result recorded by Lichess: both programs would copy it.
 
 [^31]: 
-
-
-
-
-
 [^32]: 
+
+
+
 
 
 [^33]: 
 
+
 [^34]: 
-
-
 
 [^35]: 
 
+
+
 [^36]: 
 
-
-
-
-
 [^37]: 
+
+
+
+
 
 [^38]: 
 
 [^39]: 
 
-[^40]: Should mention as a footnote the date can be screwed by the local time setting in the DB. %%Small correction: the stored date is always right. Only reading it back shifted it, and that is fixed (HER.44). Suggested footnote: ""%%
+[^40]: 
 
-[^41]: 
+[^41]: Should mention as a footnote the date can be screwed by the local time setting in the DB. %%Small correction: the stored date is always right. Only reading it back shifted it, and that is fixed (HER.44). Suggested footnote: ""%%
 
 [^42]: 
 
-[^43]:
-[^44]: explain %%Where the data came from, recorded so it can be checked.%%
+[^43]: 
 
-[^45]:==A small JSON file describing a run: the settings used, the source, the counts and whether it finished. Here: `data/downloads/2024-01-2500mb/manifest.json`.==
+[^44]:
+[^45]: explain %%Where the data came from, recorded so it can be checked.%%
 
-[^46]: Should be part of the spec. Write it. 
+[^46]:==A small JSON file describing a run: the settings used, the source, the counts and whether it finished. Here: `data/downloads/2024-01-2500mb/manifest.json`.==
 
-[^47]: So what exactly is `prefix`?
+[^47]: Should be part of the spec. Write it. 
 
-[^48]: should mention this, either as a footnote or as part of the spec
+[^48]: So what exactly is `prefix`?
 
-[^49]: should be part of the spec or a footnote
+[^49]: should mention this, either as a footnote or as part of the spec
+
+[^50]: should be part of the spec or a footnote
 
 
 
-[^50]: make a footnote
+[^51]: make a footnote
 
-[^51]: 
+
+
+[^52]: Prefix might me more precise word here.
 
