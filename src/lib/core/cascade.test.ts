@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { Chess } from "chess.js";
-import { prisma, saveLocalEngineBaseline } from "../db/operations";
+import { prisma } from "../db/operations";
 import { defaultConfig } from "./config";
 import { generateRepertoire } from "./generator";
 import { probabilityBalance, runCascade, type CascadeRunState } from "./cascade";
@@ -81,15 +81,10 @@ describe("TR", () => {
         const legal = chess.moves({ verbose: true });
         const reply = legal.find(candidate => candidate.san === replies[boardAndTurn(fen)]) ?? legal[0];
         calls.push(boardAndTurn(fen));
-        // S3.12: every Black response must be deepVerified, which needs local Stockfish evidence.
-        await saveLocalEngineBaseline(fen, "test-local", { uci: reply.lan, cp: -10, mate: null });
         return {
           selectedUci: reply.lan, selectedMoveSan: reply.san, cp: -10, mate: null,
-          source: "ChessDB" as const, selectionMethod: "Ordinary API" as const, moveOrigin: "Human Move" as const,
-          deepVerified: true, localEvaluationProfile: "test-local",
-          selectedStats: { weightedGames: 30, blackScore: 0.5 }, candidateMoves: [], enginePvs: [],
-          evalSource: "ChessDB" as const, selectedEngineCp: -10, selectedMate: null,
-          openingMetadata: null, openingMetadataRetrieval: "FRESH" as const
+          source: "Local Stockfish 19" as const, selectionMethod: "Baseline" as const, moveOrigin: "Engine Move" as const,
+          engineRank: 1
         };
       };
     }
@@ -107,15 +102,15 @@ describe("TR", () => {
         responseEvaluator: evaluator(calls, { [play(["e4"])]: "e5", [play(["Nf3"])]: "e5", [play(["e4", "e5", "Nf3"])]: "Nc6" }) as any,
         fetchDatabases: (async (fen: string) => {
           const moves = whiteMoves[boardAndTurn(fen)];
-          if (!moves) return [empty, empty, empty];
-          return [empty, empty, {
+          if (!moves) return empty;
+          return {
             moves: moves.map(([san, games]) => {
               const chess = new Chess(fen);
               const played = chess.move(san);
               return { san, uci: played.lan, games, white: games, draws: 0, black: 0 };
             }),
             totalGames: 100, positionTotalGames: 100, unaccountedShare: 0, opening: null
-          }];
+          };
         }) as any
       }));
       if (log.error) throw log.error;

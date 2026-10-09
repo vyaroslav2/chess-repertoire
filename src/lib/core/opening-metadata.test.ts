@@ -3,18 +3,6 @@ import { after, before, test } from "node:test";
 import { Chess } from "chess.js";
 import { createRepertoireNode, prisma } from "../db/operations";
 import { captureRebuildOpeningMetadataCache, restoreRebuildOpeningMetadataState } from "./generator";
-import { pickExplorerOpening } from "../api/lichess";
-
-test("DB.06 rule 1 takes Masters, then Elite, then Amateur", () => {
-  const masters = { opening: { eco: "B10", name: "Caro-Kann Defense" } };
-  const elite = { opening: { eco: "B12", name: "Caro-Kann Defense: Advance Variation" } };
-  const amateur = { opening: { eco: "B13", name: "Caro-Kann Defense: Exchange Variation" } };
-  const none = { opening: null };
-  assert.deepEqual(pickExplorerOpening([masters, elite, amateur]), masters.opening);
-  assert.deepEqual(pickExplorerOpening([none, elite, amateur]), elite.opening);
-  assert.deepEqual(pickExplorerOpening([none, none, amateur]), amateur.opening);
-  assert.equal(pickExplorerOpening([none, none, none]), null);
-});
 
 let userId: string;
 let repertoireId: string;

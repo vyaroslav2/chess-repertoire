@@ -5,8 +5,7 @@ import {
   createOpponentMove,
   createRepertoireNode,
   createResponseMove,
-  prisma,
-  saveLocalEngineBaseline
+  prisma
 } from "../db/operations";
 import { parseFullFen, positionKeyFromFen } from "./fen";
 import {
@@ -22,15 +21,6 @@ import {
   type GeneratorQueueItem,
   type PendingCanonicalContinuations
 } from "./generator";
-
-// S3.12: every Black response must be deepVerified, which needs local Stockfish evidence.
-function deepVerified<T extends (fen: string, ...rest: any[]) => Promise<any>>(evaluator: T) {
-  return (async (fen: string, ...rest: any[]) => {
-    const result = await evaluator(fen, ...rest);
-    await saveLocalEngineBaseline(fen, "test-local", { uci: result.selectedUci, cp: result.cp, mate: result.mate });
-    return { ...result, deepVerified: true, localEvaluationProfile: "test-local" };
-  }) as T;
-}
 
 describe("Slice 17 OPPONENT set reconciliation", () => {
   const initialFullFen = new Chess().fen();
@@ -134,12 +124,10 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
       san: move.san,
       cp,
       mate: null,
-      source: "Lichess Cloud Evaluation",
-      selectionMethod: "Ordinary API",
-      moveOrigin: "Human Move",
-      deepVerified: false,
-      localEvaluationProfile: null,
-      weightedGames: 10
+      source: "Local Stockfish 19",
+      selectionMethod: "Baseline",
+      moveOrigin: "Engine Move",
+      engineRank: 1
     });
     const stat = await prisma.repertoirePositionStat.create({
       data: {
@@ -403,7 +391,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
 
     const evaluatorCalls = new Map<string, number>();
     const evaluatorHistories = new Map<string, string[]>();
-    const responseEvaluator = async (fen: string, chess: Chess, _moveNumber: number, history: string[]) => {
+    const responseEvaluator = async (fen: string, chess: Chess, history: string[]) => {
       evaluatorCalls.set(fen, (evaluatorCalls.get(fen) ?? 0) + 1);
       evaluatorHistories.set(fen, [...history]);
       let uci: string;
@@ -420,19 +408,10 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
         selectedMoveSan: move.san,
         cp,
         mate: null,
-        source: "ChessDB" as const,
-        selectionMethod: "Ordinary API" as const,
-        moveOrigin: "Human Move" as const,
-        deepVerified: false,
-        localEvaluationProfile: null,
-        selectedStats: { weightedGames: 30, blackScore: 0.5 },
-        candidateMoves: [],
-        enginePvs: [],
-        evalSource: "ChessDB" as const,
-        selectedEngineCp: cp,
-        selectedMate: null,
-        openingMetadata: fen === e4.destination.fullFen ? { eco: "B00", name: "King's Pawn Game" } : null,
-        openingMetadataRetrieval: "FRESH" as const
+        source: "Local Stockfish 19" as const,
+        selectionMethod: "Baseline" as const,
+        moveOrigin: "Engine Move" as const,
+        engineRank: 1
       };
     };
     const humanRows = [
@@ -444,15 +423,12 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     const summary = await generateRepertoire(initialFullFen, {
       repertoireId,
       // Only the root has White moves; the positions after Black's reply have none.
-      fetchDatabases: (async (fen: string) => [
-        { moves: [], totalGames: 0, opening: undefined },
-        { moves: [], totalGames: 0 },
-        fen === initialFullFen
-          ? { moves: humanRows, totalGames: 90, positionTotalGames: 100, unaccountedShare: 0.1 }
-          : { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0 }
-      ]) as any,
-      fetchOpeningMetadata: async () => null,
-      responseEvaluator: deepVerified(responseEvaluator) as any,
+      fetchDatabases: (async (fen: string) => fen === initialFullFen
+        ? { moves: humanRows, totalGames: 90, positionTotalGames: 100, unaccountedShare: 0.1, opening: null }
+        : { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0, opening: null }) as any,
+      // DB.06 rule 4: the position after White's move is fetched for its name only.
+      fetchOpeningMetadata: async (fen: string) => fen === e4.destination.fullFen ? { eco: "B00", name: "King's Pawn Game" } : null,
+      responseEvaluator: responseEvaluator as any,
       ensureNodeWikibooks: (async () => ({ status: "CACHED", text: null })) as any,
       wait: async () => undefined
     });
@@ -531,21 +507,21 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     });
 
     const mockDatabases = async (fen: string) => {
-      if (fen === root.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [{ san: "Nc3", uci: "b1c3", games: 50 }, { san: "Nf3", uci: "g1f3", games: 50 }], totalGames: 100, positionTotalGames: 100, unaccountedShare: 0 }] as any;
-      if (fen === nodeB.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [{ san: "Nf3", uci: "g1f3", games: 100 }], totalGames: 100, positionTotalGames: 100, unaccountedShare: 0 }] as any;
-      if (fen === nodeA.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0 }] as any;
-      return [{ moves: [] }, { moves: [] }, { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0 }] as any;
+      if (fen === root.fullFen) return { moves: [{ san: "Nc3", uci: "b1c3", games: 50 }, { san: "Nf3", uci: "g1f3", games: 50 }], totalGames: 100, positionTotalGames: 100, unaccountedShare: 0 } as any;
+      if (fen === nodeB.fullFen) return { moves: [{ san: "Nf3", uci: "g1f3", games: 100 }], totalGames: 100, positionTotalGames: 100, unaccountedShare: 0 } as any;
+      if (fen === nodeA.fullFen) return { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0 } as any;
+      return { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0 } as any;
     };
 
     let reprocessedB = false;
     const mockEvaluator = async (fen: string) => {
-      if (fen === nc3_edge.destination.fullFen) return { selectedUci: "g8f6", selectedMoveSan: "Nf6", cp: -5, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Lichess Cloud Evaluation", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false, localEvaluationProfile: null };
-      if (fen === nf3_edge.destination.fullFen) return { selectedUci: "g8f6", selectedMoveSan: "Nf6", cp: -5, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Lichess Cloud Evaluation", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false, localEvaluationProfile: null };
+      if (fen === nc3_edge.destination.fullFen) return { selectedUci: "g8f6", selectedMoveSan: "Nf6", cp: -5, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1 };
+      if (fen === nf3_edge.destination.fullFen) return { selectedUci: "g8f6", selectedMoveSan: "Nf6", cp: -5, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1 };
       if (fen === a_to_x.destination.fullFen) {
         reprocessedB = true;
-        return { selectedUci: "d7d5", selectedMoveSan: "d5", cp: -10, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Lichess Cloud Evaluation", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false, localEvaluationProfile: null };
+        return { selectedUci: "d7d5", selectedMoveSan: "d5", cp: -10, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1 };
       }
-      return { selectedUci: "e7e5", selectedMoveSan: "e5", cp: 0, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Lichess Cloud Evaluation", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false, localEvaluationProfile: null };
+      return { selectedUci: "e7e5", selectedMoveSan: "e5", cp: 0, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1 };
     };
 
     // Force B to be processed first by queueing order
@@ -556,7 +532,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
       repertoireId,
       fetchDatabases: mockDatabases,
       fetchOpeningMetadata: async () => null,
-      responseEvaluator: deepVerified(mockEvaluator) as any,
+      responseEvaluator: mockEvaluator as any,
       ensureNodeWikibooks: (async () => ({ status: "CACHED", text: null })) as any,
       wait: async () => undefined
     });
@@ -602,10 +578,10 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     });
 
     const mockDatabases = async (fen: string) => {
-      if (fen === root.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [{ san: "Nf3", uci: "g1f3", games: 50 }, { san: "Nc3", uci: "b1c3", games: 50 }], totalGames: 100, positionTotalGames: 100, unaccountedShare: 0 }] as any;
-      if (fen === nodeB.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [{ san: "Nf3", uci: "g1f3", games: 100 }], totalGames: 100, positionTotalGames: 100, unaccountedShare: 0 }] as any;
-      if (fen === nodeA.fullFen) return [{ moves: [] }, { moves: [] }, { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0 }] as any;
-      return [{ moves: [] }, { moves: [] }, { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0 }] as any;
+      if (fen === root.fullFen) return { moves: [{ san: "Nf3", uci: "g1f3", games: 50 }, { san: "Nc3", uci: "b1c3", games: 50 }], totalGames: 100, positionTotalGames: 100, unaccountedShare: 0 } as any;
+      if (fen === nodeB.fullFen) return { moves: [{ san: "Nf3", uci: "g1f3", games: 100 }], totalGames: 100, positionTotalGames: 100, unaccountedShare: 0 } as any;
+      if (fen === nodeA.fullFen) return { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0 } as any;
+      return { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0 } as any;
     };
 
     let reprocessedB = false;
@@ -613,24 +589,24 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     const mockEvaluator = async (fen: string) => {
       if (fen === nc3_edge.destination.fullFen) {
         processingOrder.push("B");
-        return { selectedUci: "g8f6", selectedMoveSan: "Nf6", cp: -5, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Lichess Cloud Evaluation", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false, localEvaluationProfile: null };
+        return { selectedUci: "g8f6", selectedMoveSan: "Nf6", cp: -5, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1 };
       }
       if (fen === nf3_edge.destination.fullFen) {
         processingOrder.push("A");
-        return { selectedUci: "g8f6", selectedMoveSan: "Nf6", cp: -5, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Lichess Cloud Evaluation", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false, localEvaluationProfile: null };
+        return { selectedUci: "g8f6", selectedMoveSan: "Nf6", cp: -5, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1 };
       }
       if (fen === a_to_x.destination.fullFen) {
         reprocessedB = true;
-        return { selectedUci: "d7d5", selectedMoveSan: "d5", cp: -10, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Lichess Cloud Evaluation", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false, localEvaluationProfile: null };
+        return { selectedUci: "d7d5", selectedMoveSan: "d5", cp: -10, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1 };
       }
-      return { selectedUci: "e7e5", selectedMoveSan: "e5", cp: 0, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Lichess Cloud Evaluation", selectionMethod: "Ordinary API", moveOrigin: "Engine Move", deepVerified: false, localEvaluationProfile: null };
+      return { selectedUci: "e7e5", selectedMoveSan: "e5", cp: 0, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1 };
     };
 
     await generateRepertoire(root.fullFen, {
       repertoireId,
       fetchDatabases: mockDatabases,
       fetchOpeningMetadata: async () => null,
-      responseEvaluator: deepVerified(mockEvaluator) as any,
+      responseEvaluator: mockEvaluator as any,
       ensureNodeWikibooks: (async () => ({ status: "CACHED", text: null })) as any,
       wait: async () => undefined
     });

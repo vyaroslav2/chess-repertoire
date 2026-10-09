@@ -3,7 +3,6 @@ import { Chess } from "chess.js";
 import { fetchWikibooksSnippet, type WikibooksResult } from "../api/wikibooks";
 import { parseFullFen, positionKeyFromFen } from "../core/fen";
 import { isValidUciMove } from "../core/uci";
-import type { ExplorerDataset } from "../core/config";
 
 export const prisma = new PrismaClient();
 
@@ -190,85 +189,9 @@ export async function readExplorerCache(positionKey: string, cacheProfile: strin
   };
 }
 
-export type HumanDatabaseType = ExplorerDataset;
+// --- DB.32 EngineCache: local Stockfish only ---
 
-// --- DB.32 EngineCache ---
-
-export type RemoteEngineSource = "LICHESS" | "CHESSDB";
-type EngineName = RemoteEngineSource | "LOCAL";
-
-export type RemoteEngineEvaluation = {
-  uci: string;
-  san?: string | null;
-  cp: number | null;
-  mate: number | null;
-};
-
-function validateRemoteEngineSource(source: string): asserts source is RemoteEngineSource {
-  if (source !== "LICHESS" && source !== "CHESSDB") {
-    throw new Error(`Invalid remote engine source: ${source}`);
-  }
-}
-
-function validateRemoteEngineResult(
-  fullFen: string,
-  source: RemoteEngineSource,
-  evaluationProfile: string,
-  evaluations: RemoteEngineEvaluation[]
-): Array<RemoteEngineEvaluation & { san: string }> {
-  const canonicalFullFen = parseFullFen(fullFen);
-  if (canonicalFullFen !== fullFen) {
-    throw new Error("Invalid remote engine result: FullFen must be canonical");
-  }
-  validateRemoteEngineSource(source);
-  if (typeof evaluationProfile !== "string" || evaluationProfile.trim() === "" || evaluationProfile.trim() !== evaluationProfile) {
-    throw new Error("Invalid remote engine result: evaluationProfile must be non-empty and canonical");
-  }
-  if (!Array.isArray(evaluations)) {
-    throw new Error("Invalid remote engine result: evaluations must be an array");
-  }
-
-  const seenUci = new Set<string>();
-  return evaluations.flatMap(evaluation => {
-    if (!evaluation || typeof evaluation !== "object") {
-      throw new Error("Invalid remote engine result: evaluation must be an object");
-    }
-    if (!isValidUciMove(evaluation.uci)) {
-      throw new Error("Invalid remote engine result: malformed UCI/LAN move");
-    }
-    if (seenUci.has(evaluation.uci)) {
-      return [];
-    }
-    seenUci.add(evaluation.uci);
-
-    const hasCp = typeof evaluation.cp === "number" && Number.isFinite(evaluation.cp);
-    const hasMate = typeof evaluation.mate === "number" && Number.isInteger(evaluation.mate);
-    if (!((hasCp && evaluation.mate === null) || (evaluation.cp === null && hasMate))) {
-      throw new Error("Invalid remote engine result: exactly one of finite cp or integer mate is required");
-    }
-
-    const chess = new Chess(canonicalFullFen);
-    let parsedMove;
-    try {
-      parsedMove = chess.move({
-        from: evaluation.uci.slice(0, 2),
-        to: evaluation.uci.slice(2, 4),
-        promotion: evaluation.uci.length === 5 ? evaluation.uci[4] : undefined
-      });
-    } catch {
-      throw new Error(`Invalid remote engine result: illegal UCI move ${evaluation.uci}`);
-    }
-    if (!parsedMove || parsedMove.lan !== evaluation.uci) {
-      throw new Error(`Invalid remote engine result: illegal UCI move ${evaluation.uci}`);
-    }
-    if (evaluation.san !== undefined && evaluation.san !== null &&
-        (typeof evaluation.san !== "string" || evaluation.san.trim() === "" || evaluation.san !== parsedMove.san)) {
-      throw new Error(`Invalid remote engine result: SAN does not match UCI move ${evaluation.uci}`);
-    }
-
-    return [{ ...evaluation, san: parsedMove.san }];
-  });
-}
+type EngineName = "LOCAL";
 
 async function upsertEngineCache(client: DbClient, fullFen: string, engine: EngineName, engineProfile: string) {
   return client.engineCache.upsert({
@@ -276,96 +199,6 @@ async function upsertEngineCache(client: DbClient, fullFen: string, engine: Engi
     update: { fetchedAt: new Date() },
     create: { fullFen, engineProfile, engine }
   });
-}
-
-export async function saveRemoteEngineResult(
-  fullFen: string,
-  source: RemoteEngineSource,
-  evaluationProfile: string,
-  evaluations: RemoteEngineEvaluation[]
-) {
-  const validated = validateRemoteEngineResult(fullFen, source, evaluationProfile, evaluations);
-
-  return prisma.$transaction(async tx => {
-    const cache = await upsertEngineCache(tx, fullFen, source, evaluationProfile);
-    await tx.engineCacheEvaluation.deleteMany({ where: { cacheId: cache.id } });
-    if (validated.length > 0) {
-      await tx.engineCacheEvaluation.createMany({
-        data: validated.map((evaluation, index) => ({
-          cacheId: cache.id,
-          uci: evaluation.uci,
-          san: evaluation.san,
-          cp: evaluation.cp,
-          mate: evaluation.mate,
-          rank: index + 1
-        }))
-      });
-    }
-    return cache;
-  });
-}
-
-/** Explicit refresh entry point: fetch a complete source snapshot, then replace it atomically. */
-export async function refreshRemoteEngineResult(
-  fullFen: string,
-  source: RemoteEngineSource,
-  evaluationProfile: string,
-  fetchSnapshot: () => Promise<RemoteEngineEvaluation[]>
-) {
-  const evaluations = await fetchSnapshot();
-  return saveRemoteEngineResult(fullFen, source, evaluationProfile, evaluations);
-}
-
-type EngineCacheMarker = { id: string; fullFen: string; source: string; evaluationProfile: string; fetchedAt: Date };
-
-export type ReadRemoteEngineResult =
-  | { status: "missing" }
-  | { status: "empty", fetch: EngineCacheMarker }
-  | { status: "success", fetch: EngineCacheMarker, evaluations: Array<RemoteEngineEvaluation & { id: string; fetchId: string; san: string | null; rank: number | null }> };
-
-export async function readRemoteEngineResult(
-  fullFen: string,
-  source: RemoteEngineSource,
-  evaluationProfile: string
-): Promise<ReadRemoteEngineResult> {
-  const canonicalFullFen = parseFullFen(fullFen);
-  if (canonicalFullFen !== fullFen) throw new Error("FullFen must be canonical");
-  validateRemoteEngineSource(source);
-  if (typeof evaluationProfile !== "string" || evaluationProfile.trim() === "" || evaluationProfile.trim() !== evaluationProfile) {
-    throw new Error("evaluationProfile must be non-empty and canonical");
-  }
-
-  const cache = await prisma.engineCache.findUnique({
-    where: { fullFen_engine_engineProfile: { fullFen, engine: source, engineProfile: evaluationProfile } },
-    include: { evaluations: { orderBy: { uci: "asc" } } }
-  });
-  if (!cache) return { status: "missing" };
-
-  const fetch = { id: cache.id, fullFen: cache.fullFen, source: cache.engine, evaluationProfile: cache.engineProfile, fetchedAt: cache.fetchedAt };
-  if (cache.evaluations.length === 0) return { status: "empty", fetch };
-  return {
-    status: "success",
-    fetch,
-    evaluations: cache.evaluations.map(evaluation => ({
-      id: evaluation.id, fetchId: evaluation.cacheId, uci: evaluation.uci, san: evaluation.san,
-      cp: evaluation.cp, mate: evaluation.mate, rank: evaluation.rank
-    }))
-  };
-}
-
-export async function readRemoteEngineCandidate(
-  fullFen: string,
-  source: RemoteEngineSource,
-  evaluationProfile: string,
-  uci: string
-) {
-  const result = await readRemoteEngineResult(fullFen, source, evaluationProfile);
-  if (result.status === "missing") return { status: "missing" as const };
-  if (result.status === "empty") return { status: "unavailable" as const, fetch: result.fetch };
-  const evaluation = result.evaluations.find(item => item.uci === uci);
-  return evaluation
-    ? { status: "success" as const, fetch: result.fetch, evaluation }
-    : { status: "unavailable" as const, fetch: result.fetch };
 }
 
 export type LocalEngineEvaluation = {
@@ -506,32 +339,18 @@ export async function readLocalEngineCandidate(fullFen: string, candidateUci: st
 
 // --- DB.08 - DB.15 moves ---
 
-export const RESPONSE_EVALUATION_SOURCES = ["Lichess Cloud Evaluation", "ChessDB", "Local Deep Stockfish"] as const;
-// DB.14: the ordinary waterfall, no candidate has enough games, the engine fallback, a hardcoded response.
-export const RESPONSE_SELECTION_METHODS = ["Ordinary API", "No Qualifying Candidates", "Engine Fallback", "Hardcoded", "Corrected after Deep Verification"] as const;
-export const RESPONSE_MOVE_ORIGINS = ["Human Move", "Engine Move", "Hardcoded Move"] as const;
+export const RESPONSE_EVALUATION_SOURCES = ["Local Stockfish 19"] as const;
+// DB.14: Stockfish's baseline (EW.09) or a hardcoded response (EW.13).
+export const RESPONSE_SELECTION_METHODS = ["Baseline", "Hardcoded"] as const;
+export const RESPONSE_MOVE_ORIGINS = ["Engine Move", "Hardcoded Move"] as const;
 export type ResponseEvaluationSource = typeof RESPONSE_EVALUATION_SOURCES[number];
 export type ResponseSelectionMethod = typeof RESPONSE_SELECTION_METHODS[number];
 export type ResponseMoveOrigin = typeof RESPONSE_MOVE_ORIGINS[number];
 
-/** DB.13 the human evidence behind a Black move. */
-export type ResponseHumanEvidence = {
-  mastersGames?: number | null;
-  eliteGames?: number | null;
-  weightedGames?: number | null;
-  totalMastersGames?: number | null;
-  mastersMoveShare?: number | null;
-  totalEliteGames?: number | null;
-  eliteMoveShare?: number | null;
-};
-
-export type ResponsePersistenceInput = ResponseHumanEvidence & {
+export type ResponsePersistenceInput = {
   fromNodeId: string; toNodeId: string | null; uci: string; san?: string | null;
   cp: number | null; mate: number | null; source: ResponseEvaluationSource;
   selectionMethod: ResponseSelectionMethod; moveOrigin: ResponseMoveOrigin;
-  deepVerified: boolean;
-  /** The local profile the deepVerified evidence was read under. Checked, never stored (DB.14). */
-  localEvaluationProfile: string | null;
   stopReason?: "Repetition" | "Transposition" | ResponseEnding | null;
   engineRank?: number | null;
 };
@@ -549,40 +368,13 @@ export function validateResponsePersistence(input: ResponsePersistenceInput): vo
   const hasCp = typeof input.cp === "number" && Number.isFinite(input.cp);
   const hasMate = typeof input.mate === "number" && Number.isInteger(input.mate) && input.mate !== 0;
   if (!((hasCp && input.mate === null) || (input.cp === null && hasMate))) throw new Error("Invalid RESPONSE evaluation: exactly one of finite cp or non-zero integer mate is required");
-  if (typeof input.deepVerified !== "boolean") throw new Error("Invalid RESPONSE deepVerified value");
-  if (input.deepVerified && !isNonEmptyCanonicalString(input.localEvaluationProfile)) throw new Error("Invalid RESPONSE: deepVerified requires localEvaluationProfile");
-  if (input.localEvaluationProfile !== null && !isNonEmptyCanonicalString(input.localEvaluationProfile)) throw new Error("Invalid RESPONSE localEvaluationProfile");
-  if (input.weightedGames !== undefined && input.weightedGames !== null &&
-      (typeof input.weightedGames !== "number" || !Number.isFinite(input.weightedGames) || input.weightedGames < 0)) throw new Error("Invalid RESPONSE weightedGames");
-  for (const [label, value] of [["mastersGames", input.mastersGames], ["eliteGames", input.eliteGames], ["totalMastersGames", input.totalMastersGames], ["totalEliteGames", input.totalEliteGames], ["engineRank", input.engineRank]] as const) {
-    if (value !== undefined && value !== null && (!Number.isInteger(value) || value < 0)) throw new Error(`Invalid RESPONSE ${label}`);
-  }
-  for (const [label, value] of [["mastersMoveShare", input.mastersMoveShare], ["eliteMoveShare", input.eliteMoveShare]] as const) {
-    if (value !== undefined && value !== null && (!Number.isFinite(value) || value < 0 || value > 1)) throw new Error(`Invalid RESPONSE ${label}`);
-  }
+  if (input.engineRank !== undefined && input.engineRank !== null && input.engineRank !== 1) throw new Error("Invalid RESPONSE engineRank");
   const stopReason = input.stopReason ?? null;
   if (stopReason === "Repetition") {
     if (input.toNodeId !== null) throw new Error("Invalid RESPONSE repetition: toNodeId must be null");
   } else if (!isNonEmptyCanonicalString(input.toNodeId)) {
     throw new Error("Invalid RESPONSE: non-repetition requires toNodeId");
   }
-}
-
-/** DB.13: the share fields are always the games field over its total. */
-export function responseHumanEvidence(input: {
-  mastersGames: number | null;
-  eliteGames: number | null;
-  weightedGames: number | null;
-  totalMastersGames: number | null;
-  totalEliteGames: number | null;
-}): Required<ResponseHumanEvidence> {
-  const share = (games: number | null, total: number | null) =>
-    games !== null && total !== null && total > 0 ? games / total : null;
-  return {
-    ...input,
-    mastersMoveShare: share(input.mastersGames, input.totalMastersGames),
-    eliteMoveShare: share(input.eliteGames, input.totalEliteGames)
-  };
 }
 
 // --- DB.03 - DB.16 nodes ---
@@ -716,14 +508,6 @@ export type ResponseEnding = typeof RESPONSE_ENDINGS[number];
 /** A node whose White move ended the route is only an ending, never a route owner or ancestor. */
 export const NOT_WHITE_MOVE_ENDING_NODE = { incomingMoves: { none: { stopReason: { in: [...WHITE_MOVE_ENDINGS] } } } };
 
-async function hasLocalDeepEvidence(fullFen: string, uci: string, evaluationProfile: string) {
-  const [baseline, candidate] = await Promise.all([
-    readLocalEngineBaseline(fullFen, evaluationProfile),
-    readLocalEngineCandidate(fullFen, uci, evaluationProfile)
-  ]);
-  return { baseline, candidate, ok: baseline !== null && (baseline.bestUci === uci || candidate !== null) };
-}
-
 export async function createResponseMove(input: ResponsePersistenceInput) {
   validateResponsePersistence(input);
   const [fromNode, toNode] = await Promise.all([
@@ -732,9 +516,6 @@ export async function createResponseMove(input: ResponsePersistenceInput) {
   ]);
   if (!fromNode || (input.toNodeId !== null && !toNode)) throw new Error("RESPONSE source or destination node does not exist");
   if (toNode && fromNode.repertoireId !== toNode.repertoireId) throw new Error("RESPONSE cannot cross repertoires");
-  if (input.deepVerified && !(await hasLocalDeepEvidence(fromNode.fullFen, input.uci, input.localEvaluationProfile!)).ok) {
-    throw new Error("Invalid RESPONSE: compatible Local Deep evidence is missing");
-  }
   const chess = new Chess(fromNode.fullFen);
   let move;
   try { move = chess.move({ from: input.uci.slice(0, 2), to: input.uci.slice(2, 4), promotion: input.uci[4] }); }
@@ -755,13 +536,9 @@ export async function createResponseMove(input: ResponsePersistenceInput) {
     repertoireId: fromNode.repertoireId, fromNodeId: input.fromNodeId, toNodeId: input.toNodeId,
     uci: input.uci, san: move.san, playerTurn: "RESPONSE", moveProb: null,
     stopReason: input.stopReason ?? null,
-    mastersGames: input.mastersGames ?? null, eliteGames: input.eliteGames ?? null,
-    weightedGames: input.weightedGames ?? null,
-    totalMastersGames: input.totalMastersGames ?? null, mastersMoveShare: input.mastersMoveShare ?? null,
-    totalEliteGames: input.totalEliteGames ?? null, eliteMoveShare: input.eliteMoveShare ?? null,
     cp: input.cp, mate: input.mate, source: input.source,
     selectionMethod: input.selectionMethod, moveOrigin: input.moveOrigin,
-    engineRank: input.engineRank ?? null, deepVerified: input.deepVerified
+    engineRank: input.engineRank ?? null
   };
   return prisma.$transaction(async tx => {
     // DB.09: one RESPONSE per position.
@@ -769,54 +546,6 @@ export async function createResponseMove(input: ResponsePersistenceInput) {
     if (existing) return tx.repertoireMove.update({ where: { id: existing.id }, data: complete });
     return tx.repertoireMove.create({ data: complete });
   });
-}
-
-export async function markResponseDeepVerified(input: {
-  responseId: string;
-  expectedUci: string;
-  expectedFullFen: string;
-  localEvaluationProfile: string;
-  expectedBaseline: { uci: string; cp: number | null; mate: number | null };
-  expectedCandidate: { uci: string; cp: number | null; mate: number | null };
-}) {
-  const response = await prisma.repertoireMove.findUnique({
-    where: { id: input.responseId },
-    include: { fromNode: true }
-  });
-  if (!response || response.playerTurn !== "RESPONSE") throw new Error("DV pass persistence: RESPONSE no longer exists");
-  if (response.uci !== input.expectedUci || response.fromNode.fullFen !== input.expectedFullFen) {
-    throw new Error("DV pass persistence: RESPONSE changed after verification");
-  }
-  validateResponsePersistence({
-    fromNodeId: response.fromNodeId,
-    toNodeId: response.toNodeId,
-    uci: response.uci,
-    san: response.san,
-    cp: response.cp,
-    mate: response.mate,
-    source: response.source as ResponseEvaluationSource,
-    selectionMethod: response.selectionMethod as ResponseSelectionMethod,
-    moveOrigin: response.moveOrigin as ResponseMoveOrigin,
-    deepVerified: false,
-    localEvaluationProfile: null,
-    weightedGames: response.weightedGames,
-    stopReason: response.stopReason as ResponsePersistenceInput["stopReason"]
-  });
-  const { baseline, candidate } = await hasLocalDeepEvidence(input.expectedFullFen, input.expectedUci, input.localEvaluationProfile);
-  const baselineMatches = baseline !== null && baseline.bestUci === input.expectedBaseline.uci &&
-    baseline.cp === input.expectedBaseline.cp && baseline.mate === input.expectedBaseline.mate;
-  const candidateMatches = input.expectedBaseline.uci === input.expectedUci
-    ? input.expectedCandidate.uci === input.expectedUci && input.expectedCandidate.cp === input.expectedBaseline.cp && input.expectedCandidate.mate === input.expectedBaseline.mate
-    : candidate !== null && candidate.candidateUci === input.expectedCandidate.uci && candidate.cp === input.expectedCandidate.cp && candidate.mate === input.expectedCandidate.mate;
-  if (!baselineMatches || !candidateMatches || input.expectedCandidate.uci !== input.expectedUci) {
-    throw new Error("DV pass persistence: compatible Local Deep evidence is missing");
-  }
-  const update = await prisma.repertoireMove.updateMany({
-    where: { id: input.responseId, uci: input.expectedUci, deepVerified: false },
-    data: { deepVerified: true }
-  });
-  if (update.count !== 1) throw new Error("DV pass persistence: RESPONSE changed concurrently");
-  return prisma.repertoireMove.findUniqueOrThrow({ where: { id: input.responseId } });
 }
 
 /** Compatibility API for existing OPPONENT callers only. */

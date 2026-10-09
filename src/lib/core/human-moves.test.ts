@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { Chess } from "chess.js";
-import { createRepertoireNode, prisma, saveLocalEngineBaseline } from "../db/operations";
+import { createRepertoireNode, prisma } from "../db/operations";
 import { runCascade } from "./cascade";
 import { defaultConfig } from "./config";
 import { selectWhiteCandidates } from "./evaluator";
@@ -115,15 +115,10 @@ describe("HM generator", () => {
       const legal = chess.moves({ verbose: true });
       const reply = legal.find(move => move.san === replies[boardAndTurn(fen)]) ?? legal[0];
       calls.push(fen);
-      // S3.12: every Black response must be deepVerified, which needs local Stockfish evidence.
-      await saveLocalEngineBaseline(fen, "test-local", { uci: reply.lan, cp: -10, mate: null });
       return {
         selectedUci: reply.lan, selectedMoveSan: reply.san, cp: -10, mate: null,
-        source: "ChessDB" as const, selectionMethod: "Ordinary API" as const, moveOrigin: "Human Move" as const,
-        deepVerified: true, localEvaluationProfile: "test-local",
-        selectedStats: { weightedGames: 30, blackScore: 0.5 }, candidateMoves: [], enginePvs: [],
-        evalSource: "ChessDB" as const, selectedEngineCp: -10, selectedMate: null,
-        openingMetadata: null, openingMetadataRetrieval: "FRESH" as const
+        source: "Local Stockfish 19" as const, selectionMethod: "Baseline" as const, moveOrigin: "Engine Move" as const,
+        engineRank: 1
       };
     };
   }
@@ -132,7 +127,7 @@ describe("HM generator", () => {
     return captureLog(() => generateRepertoire(START_FEN, {
       repertoireId, ...common,
       responseEvaluator: evaluator(calls) as any,
-      fetchDatabases: (async (fen: string) => fen === START_FEN ? [empty, empty, amateurAt(moves)] : [empty, empty, empty]) as any
+      fetchDatabases: (async (fen: string) => fen === START_FEN ? amateurAt(moves) : empty) as any
     }));
   }
 
@@ -191,8 +186,8 @@ describe("HM generator", () => {
       repertoireId, ...common,
       responseEvaluator: evaluator(calls) as any,
       fetchDatabases: (async (fen: string) => fen === START_FEN
-        ? [empty, empty, { moves: [amateurMove("e4", 4), amateurMove("d4", 3)], totalGames: 7, positionTotalGames: 100, unaccountedShare: 0.93, opening: null }]
-        : [empty, empty, empty]) as any
+        ? { moves: [amateurMove("e4", 4), amateurMove("d4", 3)], totalGames: 7, positionTotalGames: 100, unaccountedShare: 0.93, opening: null }
+        : empty) as any
     }));
     assert.ok(warned.includes("[WARNING] All opponent moves were filtered away."));
     assert.deepEqual(calls, []);
@@ -269,8 +264,8 @@ describe("HM generator", () => {
       repertoireId, ...common,
       responseEvaluator: evaluator(calls) as any,
       fetchDatabases: (async (fen: string) => fen === mateFen
-        ? [empty, empty, amateurAt([amateurMove("Qh5#", 40, mateFen), amateurMove("Nc3", 60, mateFen)])]
-        : [empty, empty, empty]) as any
+        ? amateurAt([amateurMove("Qh5#", 40, mateFen), amateurMove("Nc3", 60, mateFen)])
+        : empty) as any
     }));
     assert.ok(lines.includes("[GAME OVER] route=Qh5#; cumProb=40.000%"));
     const node = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, displayPgn: "Qh5#" } });
@@ -297,8 +292,8 @@ describe("HM generator", () => {
       responseEvaluator: evaluator(calls, { [play(["Nf3"])]: "Nf6", [play(["Nf3", "Nf6", "Ne5"])]: "Ng8" }) as any,
       fetchDatabases: (async (fen: string) => {
         const san = whiteMoves[boardAndTurn(fen)];
-        if (!san) return [empty, empty, empty];
-        return [empty, empty, amateurAt([amateurMove(san, 100, fen)])];
+        if (!san) return empty;
+        return amateurAt([amateurMove(san, 100, fen)]);
       }) as any
     }));
     assert.ok(lines.includes("[REPETITION] route=Nf3 Nf6 Ne5 Ng8 Nf3; repeated=Nf3; cumProb=100.000%"));
@@ -328,8 +323,8 @@ describe("HM generator", () => {
       fetchDatabases: (async (fen: string) => {
         fetched.push(boardAndTurn(fen));
         const moves = whiteMoves[boardAndTurn(fen)];
-        if (!moves) return [empty, empty, empty];
-        return [empty, empty, amateurAt(moves.map(([san, games]) => amateurMove(san, games, fen)))];
+        if (!moves) return empty;
+        return amateurAt(moves.map(([san, games]) => amateurMove(san, games, fen)));
       }) as any
     }));
     return { calls, fetched, lines };

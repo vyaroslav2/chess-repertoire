@@ -34,8 +34,8 @@ model Repertoire {
 
 // --- THE CACHES (DB.30: they survive the wipe) ---
 
-// DB.31, EX.01: Explorer data, one row per position per dataset cache profile.
-// The dataset is part of the profile. No move rows means the position was
+// DB.31, EX.01: Explorer data, one row per position per cache profile.
+// Only the Amateur dataset is fetched. No move rows means the position was
 // fetched and has no games (State B).
 model PositionCache {
   id                 String   @id @default(uuid())
@@ -66,13 +66,13 @@ model PositionCacheMove {
   @@unique([cacheId, uci])
 }
 
-// DB.32: engine evaluations, against the exact fullFen and that engine's own
-// profile. Lichess, ChessDB and local Stockfish each keep their own rows.
+// DB.32: engine evaluations, against the exact fullFen and the local Stockfish
+// profile, which includes the Stockfish version. Only local Stockfish writes them.
 model EngineCache {
   id            String   @id @default(uuid())
   fullFen       String
   engineProfile String
-  engine        String // "LICHESS" | "CHESSDB" | "LOCAL"
+  engine        String // "LOCAL"
   fetchedAt     DateTime @default(now())
 
   evaluations EngineCacheEvaluation[]
@@ -87,7 +87,7 @@ model EngineCacheEvaluation {
   san     String?
   cp      Float?
   mate    Int?
-  rank    Int? // place in the engine's list; local Stockfish: 1 for its best move, otherwise null
+  rank    Int? // 1 for Stockfish's best move, otherwise null
 
   cache EngineCache @relation(fields: [cacheId], references: [id], onDelete: Cascade)
 
@@ -197,15 +197,6 @@ model RepertoireMove {
   // DB.20
   stopReason String?
 
-  // DB.13 Black move fields: the human evidence
-  mastersGames      Int?
-  eliteGames        Int?
-  weightedGames     Float?
-  totalMastersGames Int?
-  mastersMoveShare  Float?
-  totalEliteGames   Int?
-  eliteMoveShare    Float?
-
   // DB.14 Black move fields: the engine evidence
   cp              Float?
   mate            Int?
@@ -213,7 +204,6 @@ model RepertoireMove {
   selectionMethod String?
   moveOrigin      String?
   engineRank      Int?
-  deepVerified    Boolean @default(false)
 
   fromNode   RepertoireNode           @relation("OutgoingMoves", fields: [fromNodeId], references: [id], onDelete: Cascade)
   toNode     RepertoireNode?          @relation("IncomingMoves", fields: [toNodeId], references: [id], onDelete: Cascade)

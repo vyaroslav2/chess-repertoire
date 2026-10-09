@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { Chess } from "chess.js";
-import { prisma, saveLocalEngineBaseline } from "../db/operations";
+import { prisma } from "../db/operations";
 import { defaultConfig } from "./config";
 import { endOfRunFailures, generateRepertoire, NO_OPPONENT_MOVES_ENDING } from "./generator";
 
@@ -50,12 +50,12 @@ describe("S3 main queue loop", () => {
       });
     }
 
-    async function move(from: { id: string }, to: { id: string }, san: string, extra: { stopReason?: string | null; response?: boolean; deepVerified?: boolean } = {}) {
+    async function move(from: { id: string }, to: { id: string }, san: string, extra: { stopReason?: string | null; response?: boolean } = {}) {
       return prisma.repertoireMove.create({
         data: {
           repertoireId, fromNodeId: from.id, toNodeId: to.id, uci: san, san,
           playerTurn: extra.response ? "RESPONSE" : "OPPONENT", moveProb: extra.response ? null : 0.5,
-          stopReason: extra.stopReason ?? null, deepVerified: extra.deepVerified ?? false
+          stopReason: extra.stopReason ?? null
         }
       });
     }
@@ -72,7 +72,7 @@ describe("S3 main queue loop", () => {
 
     const failures = () => endOfRunFailures({ repertoireId, tinyDroppedTotal: 0, config: defaultConfig });
 
-    it("S3.11 S3.12 S3.13 S3.14: a sound tree passes every check", async () => {
+    it("S3.11 S3.13 S3.14: a sound tree passes every check", async () => {
       await sound();
       assert.deepEqual(await failures(), []);
     });
@@ -83,14 +83,6 @@ describe("S3 main queue loop", () => {
       assert.match((await failures()).join("\n"), /^S3\.11: .* is 99\.000000%, not 100%\.$/);
       // tinyDroppedTotal is part of the sum.
       assert.deepEqual(await endOfRunFailures({ repertoireId, tinyDroppedTotal: 0.01, config: defaultConfig }), []);
-    });
-
-    it("S3.12: a Black response without deepVerified fails", async () => {
-      const { a } = await sound();
-      const c = await node("e4 e5", 0.6);
-      await move(a, c, "e5", { response: true, stopReason: "Depth budget reached on Black's move" });
-      await prisma.repertoireMove.updateMany({ where: { repertoireId, san: "e4" }, data: { stopReason: null } });
-      assert.deepEqual(await failures(), ["S3.12: 1 Black responses do not have deepVerified set (first: e5)."]);
     });
 
     it("S3.13: a node without opening metadata fails", async () => {
@@ -120,34 +112,30 @@ describe("S3 main queue loop", () => {
     const whiteMoves: Record<string, Array<[string, number]>> = { [play([])]: [["e4", 98], ["a4", 2]] };
     const fetchDatabases = (async (fen: string) => {
       const moves = whiteMoves[boardAndTurn(fen)];
-      if (!moves) return [empty, empty, empty];
-      return [empty, empty, {
+      if (!moves) return empty;
+      return {
         moves: moves.map(([san, games]) => {
           const played = new Chess(fen).move(san);
           return { san, uci: played.lan, games, white: games, draws: 0, black: 0 };
         }),
         totalGames: 100, positionTotalGames: 100, unaccountedShare: 0, opening: null
-      }];
+      };
     }) as any;
 
-    function evaluator(deepVerified: boolean) {
+    function evaluator() {
       return async (fen: string, chess: Chess) => {
         const reply = chess.moves({ verbose: true }).find(move => move.san === "e5")!;
-        await saveLocalEngineBaseline(fen, "test-local", { uci: reply.lan, cp: -10, mate: null });
         return {
           selectedUci: reply.lan, selectedMoveSan: reply.san, cp: -10, mate: null,
-          source: "ChessDB" as const, selectionMethod: "Ordinary API" as const, moveOrigin: "Human Move" as const,
-          deepVerified, localEvaluationProfile: "test-local",
-          selectedStats: { weightedGames: 30, blackScore: 0.5 }, candidateMoves: [], enginePvs: [],
-          evalSource: "ChessDB" as const, selectedEngineCp: -10, selectedMate: null,
-          openingMetadata: null, openingMetadataRetrieval: "FRESH" as const
+          source: "Local Stockfish 19" as const, selectionMethod: "Baseline" as const, moveOrigin: "Engine Move" as const,
+          engineRank: 1
         };
       };
     }
 
     it("S3.14 EX.06: the Black move into a position with no games carries stopReason No opponent moves found", async () => {
       const log = await captureLog(() => generateRepertoire(START_FEN, {
-        repertoireId, ...common, fetchDatabases, responseEvaluator: evaluator(true) as any
+        repertoireId, ...common, fetchDatabases, responseEvaluator: evaluator() as any
       }));
       if (log.error) throw log.error;
       const response = await prisma.repertoireMove.findFirstOrThrow({ where: { repertoireId, playerTurn: "RESPONSE" } });
@@ -158,7 +146,7 @@ describe("S3 main queue loop", () => {
 
     it("S3.10 S3.15: the summary prints rareDroppedMovesTotal and a sound run returns normally", async () => {
       const log = await captureLog(() => generateRepertoire(START_FEN, {
-        repertoireId, ...common, fetchDatabases, responseEvaluator: evaluator(true) as any
+        repertoireId, ...common, fetchDatabases, responseEvaluator: evaluator() as any
       }));
       if (log.error) throw log.error;
       assert.equal(log.result!.rareDroppedMovesTotal, 1);
@@ -167,13 +155,17 @@ describe("S3 main queue loop", () => {
       assert.equal(repertoire.generationStatus, "IDLE");
     });
 
-    it("S3.12 S3.15: one failed check throws a hard error after the summary", async () => {
-      // A response that cannot be stored as verified stands in for one that slipped through.
+    it("S3.11 S3.15: one failed check throws a hard error after the summary", async () => {
+      // Explorer claims half the root's games are missing although its moves add up: probability is created.
+      const inconsistent = (async (fen: string) => {
+        const result = await fetchDatabases(fen);
+        return boardAndTurn(fen) === play([]) ? { ...result, unaccountedShare: 0.5 } : result;
+      }) as any;
       const log = await captureLog(() => generateRepertoire(START_FEN, {
-        repertoireId, ...common, fetchDatabases, responseEvaluator: evaluator(false) as any
+        repertoireId, ...common, fetchDatabases: inconsistent, responseEvaluator: evaluator() as any
       }));
       assert.ok(log.error);
-      assert.equal(log.error.message, "End-of-run checks failed:\nS3.12: 1 Black responses do not have deepVerified set (first: e5).");
+      assert.match(log.error.message, /^End-of-run checks failed:\nS3\.11: .* is 150\.000000%, not 100%\.$/);
       assert.ok(log.lines.includes("Rare Dropped Moves Total: 1"));
       const repertoire = await prisma.repertoire.findUniqueOrThrow({ where: { id: repertoireId } });
       assert.equal(repertoire.generationStatus, "FAILED");
@@ -181,7 +173,7 @@ describe("S3 main queue loop", () => {
 
     it("S3.03: each node is processed once, marked when it is taken off the queue", async () => {
       const log = await captureLog(() => generateRepertoire(START_FEN, {
-        repertoireId, ...common, fetchDatabases, responseEvaluator: evaluator(true) as any
+        repertoireId, ...common, fetchDatabases, responseEvaluator: evaluator() as any
       }));
       if (log.error) throw log.error;
       const dequeued = log.lines.filter(line => line.startsWith("[QUEUE] Dequeued: "));

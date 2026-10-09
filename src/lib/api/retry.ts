@@ -1,9 +1,5 @@
 import { defaultConfig } from '../core/config';
 
-export const GlobalState = {
-    lichessCloudEvals: false
-};
-
 export class UserRequestedStopError extends Error {
   constructor(message = 'Generation was stopped at the user\'s request') {
     super(message);
@@ -14,13 +10,11 @@ export class UserRequestedStopError extends Error {
 export const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 /** AR.01: every outside API, and the lane it shares. */
-export type ApiName = "Explorer" | "Cloud Eval" | "ChessDB" | "Wikibooks";
-type LaneName = "Lichess" | "ChessDB" | "Wikibooks";
+export type ApiName = "Explorer" | "Wikibooks";
+type LaneName = "Lichess" | "Wikibooks";
 
 const laneOf: Record<ApiName, LaneName> = {
   "Explorer": "Lichess",
-  "Cloud Eval": "Lichess",
-  "ChessDB": "ChessDB",
   "Wikibooks": "Wikibooks"
 };
 
@@ -33,7 +27,6 @@ let apisOff: Set<ApiName>;
 export function resetApiState(): void {
   lanes = {
     Lichess: { queue: Promise.resolve(), nextRequestAt: 0 },
-    ChessDB: { queue: Promise.resolve(), nextRequestAt: 0 },
     Wikibooks: { queue: Promise.resolve(), nextRequestAt: 0 }
   };
   apisOff = new Set();
@@ -55,11 +48,10 @@ export function lichessHeaders(useToken: boolean): Record<string, string> {
 
 export type ApiResponse =
   | { kind: "answer"; body: any }  // AR.05
-  | { kind: "nothing" }            // AR.06: Cloud Eval 404
   | { kind: "off" };               // AR.11: gave up, now or earlier in the run
 
 type RequestOptions = {
-  body: "json" | "text";
+  body: "json";
   headers?: Record<string, string>;
   fetch?: typeof fetch;
   wait?: (ms: number) => Promise<void>;
@@ -86,9 +78,6 @@ async function sendThroughLane(api: ApiName, url: string, options: RequestOption
   try {
     const gapMs = lane.nextRequestAt - Date.now();
     if (gapMs > 0) await wait(gapMs);
-    if (api === "Cloud Eval" && defaultConfig.cloudEvalExtraGapMs > 0) {
-      await wait(defaultConfig.cloudEvalExtraGapMs);
-    }
     const send = options.fetch ?? fetch;
     try {
       const response = await send(url, {
@@ -139,7 +128,7 @@ function giveUp(api: ApiName, reason: string, afterRetry: boolean): ApiResponse 
   return { kind: "off" };
 }
 
-/** AR: send one request under the shared rules. Only a real answer or a valid "nothing here" comes back to cache (AR.12). */
+/** AR: send one request under the shared rules. Only a real answer comes back to cache (AR.12). AR.06's missing Wikibooks page is a 200 answer. */
 export async function requestApi(api: ApiName, url: string, options: RequestOptions): Promise<ApiResponse> {
   if (apisOff.has(api)) return { kind: "off" };
 
@@ -154,12 +143,10 @@ export async function requestApi(api: ApiName, url: string, options: RequestOpti
   }
   if (attempt.kind !== "response") throw new Error("unreachable");
 
-  if (attempt.status === 404 && api === "Cloud Eval") return { kind: "nothing" }; // AR.06
   if (attempt.status < 200 || attempt.status > 299) {
     console.log(`[WARNING] ${api} returned HTTP ${attempt.status}. Not retrying.`); // AR.09
     return giveUp(api, `HTTP ${attempt.status}`, false);
   }
-  if (options.body === "text") return { kind: "answer", body: attempt.text };
   try {
     return { kind: "answer", body: JSON.parse(attempt.text) };
   } catch (e: any) {

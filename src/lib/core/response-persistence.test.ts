@@ -1,18 +1,16 @@
 import assert from "node:assert/strict";
 import { after, before, beforeEach, test } from "node:test";
-import { prisma, createOpponentMove, createRepertoireNode, createResponseMove, saveLocalEngineBaseline, saveLocalEngineCandidate, saveRemoteEngineResult, validateResponsePersistence } from "../db/operations";
+import { prisma, createOpponentMove, createRepertoireNode, createResponseMove, validateResponsePersistence } from "../db/operations";
 import { Chess } from "chess.js";
 
 const FEN = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
-const PROFILE = "local-test-profile";
 let repertoireId: string;
 let fromNodeId: string;
 let toNodeId: string;
 
 const base = (overrides: Record<string, unknown> = {}) => ({
   fromNodeId, toNodeId, uci: "g8f6", san: "Nf6", cp: -15, mate: null,
-  source: "Lichess Cloud Evaluation", selectionMethod: "Ordinary API", moveOrigin: "Human Move",
-  deepVerified: false, localEvaluationProfile: null, weightedGames: 20, ...overrides
+  source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1, ...overrides
 }) as Parameters<typeof createResponseMove>[0];
 
 before(async () => { await prisma.$connect(); });
@@ -30,10 +28,10 @@ beforeEach(async () => {
 test("Slice 13 RESPONSE validation, provenance, UCI identity and atomic replacement", async () => {
   const cpRow = await createResponseMove(base());
   assert.equal(cpRow.uci, "g8f6"); assert.equal(cpRow.cp, -15); assert.equal(cpRow.mate, null);
-  assert.equal(cpRow.source, "Lichess Cloud Evaluation"); assert.equal(cpRow.selectionMethod, "Ordinary API"); assert.equal(cpRow.moveOrigin, "Human Move");
-  const mateRow = await createResponseMove(base({ cp: null, mate: -3, source: "ChessDB" }));
-  assert.equal(mateRow.cp, null); assert.equal(mateRow.mate, -3); assert.equal(mateRow.source, "ChessDB");
-  const cpAgain = await createResponseMove(base({ cp: 8, mate: null, source: "Local Deep Stockfish" }));
+  assert.equal(cpRow.source, "Local Stockfish 19"); assert.equal(cpRow.selectionMethod, "Baseline"); assert.equal(cpRow.moveOrigin, "Engine Move");
+  const mateRow = await createResponseMove(base({ cp: null, mate: -3 }));
+  assert.equal(mateRow.cp, null); assert.equal(mateRow.mate, -3);
+  const cpAgain = await createResponseMove(base({ cp: 8, mate: null }));
   assert.equal(cpAgain.cp, 8); assert.equal(cpAgain.mate, null); assert.equal(await prisma.repertoireMove.count({ where: { fromNodeId } }), 1);
   await assert.rejects(createResponseMove(base({ san: "Nh6" })), /SAN does not match/);
   assert.equal(await prisma.repertoireMove.count({ where: { fromNodeId } }), 1);
@@ -149,43 +147,23 @@ test("Slice 13 rejects every malformed evaluation and controlled value before wr
   const bad = [
     { cp: null, mate: null }, { cp: 1, mate: 2 }, { cp: NaN, mate: null }, { cp: Infinity, mate: null },
     { cp: null, mate: 1.5 }, { cp: null, mate: 0 }, { source: "Hardcoded" }, { source: undefined },
-    { selectionMethod: "Guess" }, { moveOrigin: "Guess" }, { uci: "bad" }, { deepVerified: true, localEvaluationProfile: null }
+    { selectionMethod: "Guess" }, { moveOrigin: "Guess" }, { uci: "bad" }, { engineRank: 2 },
+    // The API sources, the human candidate paths and the deep-verification correction are gone (DB.14).
+    { source: "Lichess Cloud Evaluation" }, { source: "ChessDB" }, { source: "Local Deep Stockfish" },
+    { selectionMethod: "Ordinary API" }, { selectionMethod: "Engine Fallback" }, { selectionMethod: "Corrected after Deep Verification" },
+    { moveOrigin: "Human Move" }
   ];
   for (const override of bad) assert.throws(() => validateResponsePersistence(base(override)), /Invalid RESPONSE/);
   assert.equal(await prisma.repertoireMove.count(), 0);
 });
 
-test("Slice 13 persists valid provenance combinations including fallback and hardcoded", async () => {
+test("DB.14 persists both provenance combinations: baseline and hardcoded", async () => {
   for (const state of [
-    { source: "Lichess Cloud Evaluation", selectionMethod: "Ordinary API", moveOrigin: "Human Move" },
-    { source: "ChessDB", selectionMethod: "Ordinary API", moveOrigin: "Human Move" },
-    { source: "Local Deep Stockfish", selectionMethod: "Ordinary API", moveOrigin: "Human Move" },
-    { source: "Local Deep Stockfish", selectionMethod: "Engine Fallback", moveOrigin: "Engine Move" },
-    { source: "ChessDB", selectionMethod: "Hardcoded", moveOrigin: "Hardcoded Move" }
+    { source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1 },
+    { source: "Local Stockfish 19", selectionMethod: "Hardcoded", moveOrigin: "Hardcoded Move", engineRank: null }
   ] as const) {
     const row = await createResponseMove(base(state));
     assert.equal(row.source, state.source); assert.equal(row.selectionMethod, state.selectionMethod); assert.equal(row.moveOrigin, state.moveOrigin);
   }
   assert.ok(!Object.keys(prisma.repertoireMove.fields).includes("selectionReason"));
-});
-
-async function seedVerifiedResponse() {
-  await saveLocalEngineBaseline(FEN, PROFILE, { uci: "e7e5", cp: 0, mate: null });
-  await saveLocalEngineCandidate(FEN, "g8f6", PROFILE, { uci: "g8f6", cp: 10, mate: null });
-  return createResponseMove(base({ source: "Local Deep Stockfish", deepVerified: true, localEvaluationProfile: PROFILE }));
-}
-
-test("DB.14 deepVerified needs real Local evidence; the profile is checked, not stored", async () => {
-  await assert.rejects(createResponseMove(base({ deepVerified: true, localEvaluationProfile: PROFILE })), /evidence is missing/);
-  const move = await seedVerifiedResponse();
-  assert.equal(move.deepVerified, true);
-  assert.ok(!Object.keys(move).includes("localEvaluationProfile"));
-});
-
-
-test("Slice 13 remote refresh cannot invalidate Local verification", async () => {
-  await seedVerifiedResponse();
-  await saveRemoteEngineResult(FEN, "LICHESS", "remote-profile", [{ uci: "g8f6", cp: 1, mate: null }]);
-  await saveRemoteEngineResult(FEN, "CHESSDB", "remote-profile", [{ uci: "g8f6", cp: 2, mate: null }]);
-  assert.equal((await prisma.repertoireMove.findFirstOrThrow({ where: { fromNodeId } })).deepVerified, true);
 });
