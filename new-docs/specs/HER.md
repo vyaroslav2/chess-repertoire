@@ -112,7 +112,9 @@ HER.40 **One row per game.**
 
 ==Code does not match yet: the column is still `played_on`, and `final_state` still uses NULL instead of `undefined`. To fix later.==
 
-HER.41 **Moves are stored whole, with no move numbers.** The full game costs little. A query shows as much as it needs. A move's number follows from its place in the list. UCI is for code; SAN is for reading. Same as `history` and `displayPgn` in [[DB|DB.03]]. ==//- Опционально можно добавить генерируемое (не нужно писать запрос для заполнения это поля) поле `hash_uci` для каждой партии. Потому что строка `uci_moves` очень длинная и с `hash_uci` будет легче работать. -//==
+HER.41 **Moves are stored whole, with no move numbers.** The full game costs little. A query shows as much as it needs. A move's number follows from its place in the list. UCI is for code; SAN is for reading. Same as `history` and `displayPgn` in [[DB|DB.03]]. 
+A generated `hash_uci` column (a short fixed key from `uci_moves`) would make whole-game comparisons fast, e.g. finding identical games. It does not help "starts with" queries. Not added: no query needs it yet, and MySQL can add it at any time without a reload (HER.60).
+ 
 
 HER.42 **`stop_reason` is filled in by MySQL** from ==🔵the other columns, so it is never out of date.==
 1. `final_state` is set `-->` that value.
