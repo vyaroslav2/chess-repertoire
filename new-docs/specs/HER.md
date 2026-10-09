@@ -10,12 +10,12 @@ All code lives in `experiments/he/`. All data stays in `experiments/he/data/`, w
 
 Lichess archive --> [[archive-prefix|prefix]] --> `sample.pgn` --> `games` table. Each step:
 
-| Step     | Reads                   | Writes                                              | Blocks    |
-| -------- | ----------------------- | --------------------------------------------------- | --------- |
+| Step     | Reads                   | Writes                                                | Blocks    |
+| -------- | ----------------------- | ----------------------------------------------------- | --------- |
 | Download | Lichess monthly archive | its first N GB, the prefix (`archive-prefix.pgn.zst`) | HER.01–04 |
-| Filter   | the prefix              | the kept games (`sample.pgn`)                        | HER.10–14 |
-| Import   | `sample.pgn`            | `observations.jsonl`, `groups.jsonl`                 | HER.20–21 |
-| Load     | `sample.pgn`            | the MySQL `games` table                             | HER.30–33 |
+| Filter   | the prefix              | the kept games (`sample.pgn`)                         | HER.10–14 |
+| Import   | `sample.pgn`            | `observations.jsonl`, `groups.jsonl`                  | HER.20–21 |
+| Load     | `sample.pgn`            | the MySQL `games` table                               | HER.30–33 |
 
 The `download` command runs the first three steps in one go; `load` is run on its own.
 
@@ -66,21 +66,19 @@ Fair side effect: short games are kept less often. A game in which Black makes 5
 
 HER.13 **Duplicates are dropped by game ID.**
 
-HER.14 The filter reads games until N are kept (`--limit`). Example: 2024-01-2500mb read 5,712,931 games to keep 50,000:
+HER.14 The filter reads games until N are kept (`--limit`). Example: 2024-01-2500mb read 5,713,581 games to keep 50,000:
 
-| Check, in order                     | Rejected  | Still in  |
-| ----------------------------------- | --------- | --------- |
-| Read                                |           | 5,712,931 |
-| Not rated Rapid or Classical        | 4,922,688 | 790,243   |
-| Rating average outside 1600–2199    | 452,665   | 337,578   |
-| Rating gap 100 or more              | 41,499    | 296,079   |
-| Other opening                       | 244,802   | 51,277    |
-| Ended before the sampled move       | 1,277     | 50,000    |
-| Rules infraction (on load, HER.61)  | 5         | 49,995    |
+| Check, in order                  | Rejected  | Still in  |
+| -------------------------------- | --------- | --------- |
+| Read                             |           | 5,713,581 |
+| Not rated Rapid or Classical     | 4,923,236 | 790,345   |
+| Rating average outside 1600–2199 | 452,729   | 337,616   |
+| Rating gap 100 or more           | 41,507    | 296,109   |
+| Other opening                    | 244,827   | 51,282    |
+| Ended before the sampled move    | 1,277     | 50,005    |
+| Rules infraction (HER.61)        | 5         | 50,000    |
 
 Each game is counted once, in the highest row it fails.
-
-==These numbers come from the code before rules infraction moved into the filter: the last row was dropped on load. To update after the rerun; the table will then end at 50,000, with rules infraction as the filter's last check.==
 
 ## Files
 
@@ -90,7 +88,7 @@ HER.20 **Each run writes files.**
 * `runs/<run>/groups.jsonl` — win/draw/loss counts per position + move.[^17]
 * `runs/<run>/manifest.json` — filters, rejection counts and group sizes.
 
-HER.21 **Group sizes in 2024-01-2500mb.** 40,951 position + move groups: 39,313 with one game, 1,472 with 2–9, 136 with 10–49, 25 with 50–199, 5 with 200+.
+HER.21 **Group sizes in 2024-01-2500mb.** 40,953 position + move groups: 39,315 with one game, 1,472 with 2–9, 136 with 10–49, 25 with 50–199, 5 with 200+.
 
 ## Load into MySQL
 
@@ -158,15 +156,15 @@ HER.50 **A game is rejected on load if:**
 * a move is illegal;
 * the final position contradicts the result: checkmate must match the winner; stalemate and insufficient material must be draws.
 
-HER.51 **Cross-check with the importer.** Every row was compared with `observations.jsonl`, written separately by the importer. For each game, the result and the sampled move (UCI and SAN) must agree. 2024-01-2500mb: 49,995 rows checked, 0 mismatches. Both come from the same PGN, so this checks the code, not Lichess.[^23] To check against Lichess, open `lichess.org/<game_id>`.
+HER.51 **Cross-check with the importer.** Every row was compared with `observations.jsonl`, written separately by the importer. For each game, the result and the sampled move (UCI and SAN) must agree. 2024-01-2500mb: 50,000 rows checked, 0 missing, 0 mismatches. Both come from the same PGN, so this checks the code, not Lichess.[^23] To check against Lichess, open `lichess.org/<game_id>`.
 
-HER.52 **2024-01-2500mb in the table.** 49,995 games.
+HER.52 **2024-01-2500mb in the table.** 50,000 games, all from 1–2 January 2024. None has `?` for ECO or opening name.
 
 | `stop_reason`  | White won | Black won | Drawn | Games  |
 | -------------- | --------- | --------- | ----- | ------ |
-| `resigned`     | 16,460    | 15,213    | —     | 31,673 |
-| `checkmate`    | 5,765     | 4,768     | —     | 10,533 |
-| `time`         | 2,507     | 2,451     | 154   | 5,112  |
+| `resigned`     | 16,461    | 15,215    | —     | 31,676 |
+| `checkmate`    | 5,766     | 4,768     | —     | 10,534 |
+| `time`         | 2,508     | 2,451     | 154   | 5,113  |
 | `drawn`        | —         | —         | 1,778 | 1,778  |
 | `insufficient` | —         | —         | 610   | 610    |
 | `stalemate`    | —         | —         | 289   | 289    |
@@ -177,7 +175,7 @@ The 154 time draws are flags where the opponent could not mate.[^22]
 
 HER.60 **Store facts now, filter in queries later.** The table holds every kept game and how it ended. Which games an analysis uses is decided in the query, not by deleting rows. Facts only in the PGN header (`termination`) must be stored on load. Facts that follow from the moves can be added any time.
 
-HER.61 **Rules-infraction games are dropped.** Lichess may have set the result after catching a rule breaker, so it proves nothing. The filter drops them as its last check (HER.11), so they never reach `sample.pgn`, `observations.jsonl` or the table. `load` does not check again. ==2024-01-2500mb was made before this: its 5 rules-infraction games were dropped on load, so they are still in its `sample.pgn` and `observations.jsonl`. It will be downloaded, filtered and loaded again from scratch; a sample made before the change must not be loaded.==
+HER.61 **Rules-infraction games are dropped.** Lichess may have set the result after catching a rule breaker, so it proves nothing. The filter drops them as its last check (HER.11), so they never reach `sample.pgn`, `observations.jsonl` or the table. `load` does not check again. 2024-01-2500mb was rebuilt from scratch on 2026-10-09 with this rule: the filter dropped 5 such games. A sample made before the change must not be loaded.
 
 HER.62 **No guessed reasons are stored.** Lichess's `Normal` covers mate, resignation, agreed draws and stalemate. "Resigned" and "agreed" are not stored as facts, only inferred in `stop_reason`. Repetition and the 50-move rule are not detected: a repetition on the board does not prove that is why the game ended.
 
