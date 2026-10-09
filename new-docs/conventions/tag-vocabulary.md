@@ -18,3 +18,4 @@ Every note carries one of these in its frontmatter. A spec or diagram moves `#in
 `#in-progress` — still being written. Not confirmed yet.
 `#reviewed` — confirmed. For specs and diagrams: the code is not written yet, or does not match.
 `#processed` — specs and diagrams only: the code matches the note.
+`#archived` — no longer used; kept for history and not updated. Replaces the note's other status tag.
