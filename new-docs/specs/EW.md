@@ -2,7 +2,7 @@
 tags:
   - reviewed
 ---
-# EW — Engine Waterfall
+# EW — Engine Response
 
 EW receives a position after White's move (Black to play) and selects Black's single repertoire move: local Stockfish 19's top move, unless a hardcoded response applies. Human games play no part in Black's choice.
 
