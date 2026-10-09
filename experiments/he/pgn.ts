@@ -92,9 +92,9 @@ export function gameRecord(pgn: string): { record: GameRecord } | { rejected: st
   if (result !== "1-0" && result !== "0-1" && result !== "1/2-1/2") return { rejected: "unfinished" };
   const termination = h.Termination;
   if (!termination) return { rejected: "termination" };
-  // Lichess's opening for the whole game, from the headers; "?" means unknown.
-  const eco = h.ECO, opening = h.Opening;
-  if (!eco || eco === "?" || !opening || opening === "?") return { rejected: "opening-header" };
+  // Lichess's opening for the whole game, from the headers. Only a label, so a game is never
+  // dropped for it: a missing header is stored as "?", PGN's mark for unknown.
+  const eco = h.ECO || "?", opening = h.Opening || "?";
   const { tags, body } = splitPgn(pgn);
   const chess = new Chess();
   try { chess.loadPgn(tags + "\n\n" + body); }

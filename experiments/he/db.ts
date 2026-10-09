@@ -42,8 +42,8 @@ export const GAMES_TABLE = `CREATE TABLE IF NOT EXISTS games (
   termination VARCHAR(20) NOT NULL,                       -- Lichess's reason: Normal, Time forfeit…
   final_state ENUM('checkmate','stalemate','insufficient','undefined') NOT NULL,  -- undefined when the board settles nothing
   stop_reason ${STOP_REASON},
-  eco       CHAR(3) CHARACTER SET ascii NOT NULL,             -- Lichess's ECO code, e.g. D30
-  opening   VARCHAR(150) NOT NULL,                          -- Lichess's opening name for the whole game
+  eco       CHAR(3) CHARACTER SET ascii NOT NULL,             -- Lichess's ECO code, e.g. D30; ? if missing
+  opening   VARCHAR(150) NOT NULL,                          -- Lichess's opening name for the whole game; ? if missing
   uci_moves TEXT CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   san_moves TEXT CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   INDEX (uci_moves(100)),

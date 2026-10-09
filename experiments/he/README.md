@@ -159,8 +159,9 @@ in UCI and in SAN. MySQL fills in `stop_reason` from these: checkmate, stalemate
 time, drawn (agreed, repetition or 50-move) or resigned (inferred; may include players who left).
 It creates the table on first use. Loading again is safe: a game already
 in the table is overwritten, not doubled. A game is rejected if its header and move-list
-results differ, if a checkmate or drawn final position contradicts the result, or if it has
-no ECO code or opening name. Rules-infraction games never reach it: the filter drops them. 50,000 games take about 20 minutes.
+results differ, or if a checkmate or drawn final position contradicts the result. A missing
+ECO code or opening name is stored as ?, never a reason to reject. Rules-infraction games
+never reach it: the filter drops them. 50,000 games take about 20 minutes.
 
 ```powershell
 npm --prefix experiments/he run load -- --run 2024-01-2500mb --limit 100

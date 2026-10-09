@@ -115,8 +115,8 @@ HER.40 **One row per game.**
 | `termination`            | Lichess's reason, copied as is: `Normal` or `Time forfeit`.                                   |
 | `final_state`            | `checkmate`, `stalemate`, `insufficient`, or `undefined` when the board settles nothing.[^21] |
 | `stop_reason`            | Why the game stopped (HER.42).                                                                |
-| `eco`                    | Lichess's ECO code for the whole game, e.g. `D30`.                                             |
-| `opening`                | Lichess's opening name for the whole game, e.g. `Queen's Gambit Declined`.                     |
+| `eco`                    | Lichess's ECO code for the whole game, e.g. `D30`; `?` if missing.                                           |
+| `opening`                | Lichess's opening name for the whole game, e.g. `Queen's Gambit Declined`; `?` if missing.                   |
 | `uci_moves`              | Full mainline in UCI: `e2e4 c7c6 d2d4`.                                                       |
 | `san_moves`              | The same in SAN: `e4 c6 d4`. Case-sensitive (HER.43).                                         |
 

@@ -160,7 +160,10 @@ test("game record keeps the full mainline, the PGN result and how it ended", () 
   assert.equal(parsed.record.finalState, "undefined");
   assert.equal(parsed.record.eco, "D02");
   assert.equal(parsed.record.opening, "Queen's Pawn Game");
-  assert.deepEqual(gameRecord(fixture({ Termination: "Normal", ECO: "?", Opening: "?" })), { rejected: "opening-header" });
+  const unlabelled = gameRecord(fixture({ Termination: "Normal" }));
+  assert.ok("record" in unlabelled, JSON.stringify(unlabelled));
+  assert.equal(unlabelled.record.eco, "?");
+  assert.equal(unlabelled.record.opening, "?");
   assert.equal(parsed.record.sanMoves.split(" ").length, 32);
   assert.ok(parsed.record.sanMoves.startsWith("d4 d5 Nf3 Nf6"));
   assert.ok(parsed.record.uciMoves.startsWith("d2d4 d7d5 g1f3 g8f6"));
