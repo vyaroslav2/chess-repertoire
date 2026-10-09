@@ -11,6 +11,8 @@ tags:
 `#fixed` — was a bug, now resolved. Keep the text, add the date.
 `#glossary` — on glossary notes only, marking a term specific to this project.
 
+`#sf19-todo` — temporary. The note still mentions API evaluations or Stockfish 18 and needs checking for the move to local Stockfish 19. Remove the tag once the note is done; delete this line when no note carries it.
+
 ## Status tags
 
 Every note carries one of these in its frontmatter. A spec or diagram moves `#in-progress` `-->` `#reviewed` `-->` `#processed`.
