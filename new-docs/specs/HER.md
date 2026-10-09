@@ -85,12 +85,12 @@ Each game is counted once, in the highest row it fails.
 ## Files
 
 HER.20 **Each run writes files.**
-* `downloads/<run>/sample.pgn` — the kept games, full PGN.[^17]
-* ==🔴`runs/<run>/observations.jsonl` — one row per game: the sampled position, Black's move and the result.==  //- why do we need observations.jsonl and what it does, conceptually. use simple language -//
-* ==🔴`runs/<run>/groups.jsonl` — win/draw/loss counts per position + move.[^18]==
+* `downloads/<run>/sample.pgn` — the kept games, full PGN. Copied unchanged, clocks and comments included.
+* `runs/<run>/observations.jsonl` — one row per game: the sampled position, Black's move and the result.  HE asks one question: when humans play this move in this position, how do their games end? Each kept game gives one answer, an observation: "Black faced this position, played this move, and then won, drew or lost." `observations.jsonl` is the list of these answers, one line per game. It is the raw evidence; everything later (the counts, the engine's evaluations, the curve) is built from it. Only one move per game, so each game counts once: the same game's result is never counted again for its other moves.
+* ==🔴`runs/<run>/groups.jsonl` — win/draw/loss counts per position + move.[^17]==
 * `runs/<run>/manifest.json` — filters, rejection counts and group sizes.
 
-==🔴HER.21 **Group sizes in 2024-01-2500mb.** 40,951 position + move groups: 39,313 with one game, 1,472 with 2–9, 136 with 10–49, 25 with 50–199, 5 with 200+.[^19]==
+==🔴HER.21 **Group sizes in 2024-01-2500mb.** 40,951 position + move groups: 39,313 with one game, 1,472 with 2–9, 136 with 10–49, 25 with 50–199, 5 with 200+.[^18]==
 
 ## Load into MySQL
 
@@ -109,11 +109,11 @@ HER.40 **One row per game.**
 | Column                   | Holds                                                                                         |
 | ------------------------ | --------------------------------------------------------------------------------------------- |
 | `game_id`                | Lichess ID, e.g. `1jf1GRFe`. The primary key. Case-sensitive (HER.43)                         |
-| `game_date`[^20]              | Date played. Read back as plain text, so the time zone cannot shift it (HER.44).              |
-| `white_elo`, `black_elo` | Ratings before the game.[^21]                                                                 |
-| `result`                 | `1-0`, `0-1` or `1/2-1/2`, as in the PGN.[^22]                                                |
+| `game_date`[^19]              | Date played. Read back as plain text, so the time zone cannot shift it (HER.44).              |
+| `white_elo`, `black_elo` | Ratings before the game.[^20]                                                                 |
+| `result`                 | `1-0`, `0-1` or `1/2-1/2`, as in the PGN.[^21]                                                |
 | `termination`            | Lichess's reason, copied as is: `Normal` or `Time forfeit`.                                   |
-| `final_state`            | `checkmate`, `stalemate`, `insufficient`, or `undefined` when the board settles nothing.[^23] |
+| `final_state`            | `checkmate`, `stalemate`, `insufficient`, or `undefined` when the board settles nothing.[^22] |
 | `stop_reason`            | Why the game stopped (HER.42).                                                                |
 | `eco`                    | Lichess's ECO code for the whole game, e.g. `D30`.                                             |
 | `opening`                | Lichess's opening name for the whole game, e.g. `Queen's Gambit Declined`.                     |
@@ -136,7 +136,7 @@ HER.42 `stop_reason` is filled in by MySQL from the other columns; no code write
 | `checkmate`    |                                                                       | The board (`final_state`) |
 | `stalemate`    | The final position is stalemate. A draw.                              | The board (`final_state`) |
 | `insufficient` | Neither side has enough material to mate. A draw.                     | The board (`final_state`) |
-| `time`         | A player ran out of time. A draw if the opponent could not mate.[^24] | Lichess (`termination`)   |
+| `time`         | A player ran out of time. A draw if the opponent could not mate.[^23] | Lichess (`termination`)   |
 | `drawn`        | Any other draw: agreed, repetition or 50-move rule.                   | Inferred                  |
 | `resigned`     | Any other win. May include players who left the game.                 | Inferred                  |
 
@@ -160,7 +160,7 @@ HER.50 **A game is rejected on load if:**
 * a move is illegal;
 * the final position contradicts the result: checkmate must match the winner; stalemate and insufficient material must be draws.
 
-HER.51 **Cross-check with the importer.** Every row was compared with `observations.jsonl`, written separately by the importer. For each game, the result and the sampled move (UCI and SAN) must agree. 2024-01-2500mb: 49,995 rows checked, 0 mismatches. Both come from the same PGN, so this checks the code, not Lichess.[^25] To check against Lichess, open `lichess.org/<game_id>`.
+HER.51 **Cross-check with the importer.** Every row was compared with `observations.jsonl`, written separately by the importer. For each game, the result and the sampled move (UCI and SAN) must agree. 2024-01-2500mb: 49,995 rows checked, 0 mismatches. Both come from the same PGN, so this checks the code, not Lichess.[^24] To check against Lichess, open `lichess.org/<game_id>`.
 
 HER.52 **2024-01-2500mb in the table.** 49,995 games.
 
@@ -173,7 +173,7 @@ HER.52 **2024-01-2500mb in the table.** 49,995 games.
 | `insufficient` | —         | —         | 610   | 610    |
 | `stalemate`    | —         | —         | 289   | 289    |
 
-The 154 time draws are flags where the opponent could not mate.[^24]
+The 154 time draws are flags where the opponent could not mate.[^23]
 
 ## Decisions
 
@@ -227,26 +227,26 @@ HER.65 **More data means a new download from byte 0.** There is no "continue": e
 
 [^16]: The text `he-v1:Pl5d9kYH` is hashed; the number is cut down to 0–13 and 2 is added --> a move from 2 to 15. Pl5d9kYH gets move 9. It works like a fair die rolled once per game, but the roll is fixed by the ID, so a rerun picks the same move.
 
-[^17]:  `sample.pgn` is the kept games, copied unchanged, clocks and comments included.
+[^17]: We group //- what? -// %%The observations: the lines of `observations.jsonl`, one per game. A group is all the games where Black faced the same position, played the same move, in the same period. `groups.jsonl` has one line per group: how many games, Black's wins, draws and losses, and at which move numbers.%% by `positionKey`/ `normalisedFen`. So one position reached by different move orders is one group. Then by move (UCI) and by period. All three come after filtering: the download filters into `sample.pgn`, then import writes the `observations.jsonl`. JSON is one document. JSONL (JSON Lines) is one JSON object per line: easier for long lists, read or added one line at a time. 
 
-[^18]: We group //- what? -// by `positionKey`/ `normalisedFen`. So one position reached by different move orders is one group. Then by move (UCI) and by period. All three come after filtering: the download filters into `sample.pgn`, then import writes the `observations.jsonl`. JSON is one document. JSONL (JSON Lines) is one JSON object per line: easier for long lists, read or added one line at a time. 
+[^18]: Why do we have them? We should explain in the spec. Wouldn't it be more logical to split into 2-5, 6-10, 11-15 groups? My logic, move number matters. -100cp in the first few moves is not the same as -100 in the middle (potentially, I can't back my words), because it's closer to the end (less moves to equalise in theory). Those 3 bands for start point should be enough. Could be later checked for accuracy, but should not be a spec. A note rather.    ==🟠%%They come from HE item 2: k is fitted separately for groups of 2–9, 10–49, 50–199 and 200+ games, to see whether one k fits all. So the bands are about how many games share a position + move, not move numbers. Agreed: the spec should say why. Your move-number idea is a separate axis. HE already asks to check k across move numbers, and each observation stores its move number, so 2–5, 6–10, 11–15 can be checked later. Agreed: a research note, not spec.%%==
+[^19]: **`game_date`:** the column is called `played_on` in the code. HER.45 also uses `game_date`. The code must change to match the spec. #bug
 
-[^19]: Why do we have them? We should explain in the spec. Wouldn't it be more logical to split into 2-5, 6-10, 11-15 groups? My logic, move number matters. -100cp in the first few moves is not the same as -100 in the middle (potentially, I can't back my words), because it's closer to the end (less moves to equalise in theory). Those 3 bands for start point should be enough. Could be later checked for accuracy, but should not be a spec. A note rather.    ==🟠%%They come from HE item 2: k is fitted separately for groups of 2–9, 10–49, 50–199 and 200+ games, to see whether one k fits all. So the bands are about how many games share a position + move, not move numbers. Agreed: the spec should say why. Your move-number idea is a separate axis. HE already asks to check k across move numbers, and each observation stores its move number, so 2–5, 6–10, 11–15 can be checked later. Agreed: a research note, not spec.%%==
-[^20]: **`game_date`:** the column is called `played_on` in the code. HER.45 also uses `game_date`. The code must change to match the spec. #bug
+[^20]: One rating can be outside 1600–2199; the average counts. 1660 and 1583 average 1621.5, so the game is in. 
 
-[^21]: One rating can be outside 1600–2199; the average counts. 1660 and 1583 average 1621.5, so the game is in. 
+[^21]:  `result` is an ENUM of the three values, which MySQL stores as one byte per row. It cannot get smaller.
 
-[^22]:  `result` is an ENUM of the three values, which MySQL stores as one byte per row. It cannot get smaller.
-
-[^23]: A bug could also leave NULL, and then a deliberate NULL (the board settles nothing) and a NULL left by a bug would look the same." Also, the code does not do this yet: `final_state` still allows NULL, with no `undefined` value. #bug
+[^22]: A bug could also leave NULL, and then a deliberate NULL (the board settles nothing) and a NULL left by a bug would look the same." Also, the code does not do this yet: `final_state` still allows NULL, with no `undefined` value. #bug
 
 
 
-[^24]: Example: White has king and rook, Black has only a king. White's clock runs out. Normally that loses, but Black has nothing left to mate with, so the game is drawn, not won by Black. Lichess records `Termination "Time forfeit"` and `1/2-1/2`. On the board it is no stalemate and no insufficient material (White could still mate), so `final_state` is empty and `stop_reason` is `time`. If Black's clock had run out instead, White would win on time.
+[^23]: Example: White has king and rook, Black has only a king. White's clock runs out. Normally that loses, but Black has nothing left to mate with, so the game is drawn, not won by Black. Lichess records `Termination "Time forfeit"` and `1/2-1/2`. On the board it is no stalemate and no insufficient material (White could still mate), so `final_state` is empty and `stop_reason` is `time`. If Black's clock had run out instead, White would win on time.
 
-[^25]: "The code" means our two programs: the importer, which wrote `observations.jsonl`, and the loader, which filled the table. Agreement shows they read each game the same way and did not mix up rows. It cannot catch an error in Lichess's own file, e.g. a wrong result recorded by Lichess: both programs would copy it.
+[^24]: "The code" means our two programs: the importer, which wrote `observations.jsonl`, and the loader, which filled the table. Agreement shows they read each game the same way and did not mix up rows. It cannot catch an error in Lichess's own file, e.g. a wrong result recorded by Lichess: both programs would copy it.
 
 
+
+[^25]:  
 
 [^26]: A time loss may be random, or caused by a sharp line that eats the clock. The second would not cancel out. The sensitivity check in HE covers it for now. Later check: compare time-loss rates per move.
 
