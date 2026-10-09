@@ -183,9 +183,9 @@ HER.65 **More data means a new download from byte 0.** There is no "continue": e
 
 [^3]: A version label the server gives a file. If Lichess ever replaces the January file, the label changes, so we would know our copy came from the older version.
 
-[^4]: The archive file on Lichess's server, not the games: the date the server says the file last changed. For January 2024 it is 17 June 2024, so the file was re-uploaded months after the month ended; why, we don't know. Like the ETag, it changes if the file is replaced again.
+[^4]: The date the server says the file last changed. For January 2024 it is 17 June 2024, so the file was re-uploaded months after the month ended; why, we don't know. Like the ETag, it changes if the file is replaced again.
 
-[^5]: A fingerprint of the downloaded bytes, 64 characters long. Change one byte and the fingerprint changes completely. It is taken over the compressed bytes, so it also changes if Lichess only recompresses the same games. If any game changes, the hash changes. The hash can also change when no game has changed, if Lichess only recompresses the file.
+[^5]: A fingerprint of the downloaded bytes, 64 characters long. Change one byte and the fingerprint changes completely. If any game changes, the hash changes. The hash can also change when no game has changed, if Lichess only recompresses the file.
 
 [^6]: The month and the bytes requested say what we asked for; the hash says what we got. If Lichess replaces the file at the same URL, the same request returns different bytes, and only the hash proves it. It also catches a download damaged on the way. The settings need no hash: the manifest stores them in full (options, policy, limit), in plain text. One thing is missing: the code version. The same bytes and settings can give a different result after a code change. Recording the git commit in the manifest would close that gap. #deferred 
 
