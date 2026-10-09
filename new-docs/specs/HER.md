@@ -15,12 +15,20 @@ HER.01 **Source.** A Lichess monthly archive of rated standard games (`.pgn.zst`
 
 HER.02 **Only the start of the archive is downloaded.** A month is about 32 GB compressed. The archive is in time order, so its start holds the month's earliest games. The pilot[^1] downloads the first 2.5 GB. The download asks the server for the first N GB (`--gb`). It then checks that the server answered with HTTP 206 (part of a file) and sent exactly the bytes asked for, not the whole file or another range. If not, it stops. N can be anything from 16 bytes to the whole month; 0.001 (1 MB) suits a quick trial. 2.5 GB was a guess at a size big enough for 50,000 kept games. The guess held: the filter reached 50,000 before the [[archive-prefix|prefix]] ran out. The size is a cap, not a promise of 50,000 games. The prefix is a short window of time: 2024-01-2500mb covers only 1–2 January 2024.
 
-
-//- the command or command: -//
+The command:
 `npm --prefix experiments/he run download -- --run 2024-01-2500mb --month 2024-01 --gb 2.5 --limit 50000`. 
 
-`--prefix` //- is a lichess command our own? -//
-// what parameters/arguments are ours and what are not, explain briefly what is each one //
+| Part                      | Whose   | What it does                                                                                                  |
+| ------------------------- | ------- | ------------------------------------------------------------------------------------------------------------- |
+| `npm`                     | Node.js | Node's package manager. Runs the scripts listed in a `package.json`.                                          |
+| `--prefix experiments/he` | npm     | Use the `package.json` in `experiments/he`, so the command works from the repo root.                          |
+| `run download`            | npm     | Run the script named `download` in that `package.json`: `tsx cli.ts download`.                                |
+| `--`                      | npm     | Everything after it goes to our script, not to npm.                                                           |
+| `--run 2024-01-2500mb`    | ours    | The run's name. Its files go in `downloads/<run>/` and `runs/<run>/`. Required.                               |
+| `--month 2024-01`         | ours    | Which monthly archive to download. Required.                                                                  |
+| `--gb 2.5`                | ours    | How much of the archive's start to download (HER.02). Required.                                               |
+| `--limit 50000`           | ours    | Stop once this many games are kept. Optional; without it the whole prefix is filtered.                        |
+| `--seed`, `--max-gap`     | ours    | Not in this command, so the defaults apply: `he-v1` (HER.12) and a rating gap under 100 (200 is for a check). |
 
 
 HER.03 **Provenance is kept.** The download manifest records the URL, the bytes requested, the archive's total size, ETag[^2] and last-modified date, and the ==prefix's SHA-256[^3]==. A run can then be traced to the exact bytes it came from[^4].
