@@ -1,6 +1,6 @@
 ---
 tags:
-  - reviewed
+  - processed
 ---
 # EX — Explorer Data Fetching & Caching
 

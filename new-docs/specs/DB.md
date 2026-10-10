@@ -1,6 +1,6 @@
 ---
 tags:
-  - reviewed
+  - processed
 ---
 # DB — What We Store
 
@@ -38,7 +38,7 @@ DB.06 **Opening metadata.** Each node holds `eco`, `openingName`, and a status: 
 1. Explorer returns an opening for the position this node reaches `-->` use it, `PRESENT`. Every Explorer response carries one.
 2. It returns none `-->` copy `eco`, `openingName` and status from the parent node.
 3. The root, with no name from Explorer `-->` `VALID_ABSENCE`.
-4. The position this node reaches was never sent to Explorer (the route ends after Black's move, or Black's reply was hardcoded) `-->` fetch it for the name only (Amateur), then apply rule 1.
+4. The position this node reaches was never sent to Explorer `-->` fetch it for the name only (Amateur), then apply rule 1. Every position with Black to move is fetched this way, since [[EW]] does not ask Explorer. So is the position at the end of a route, after Black's last move.
 
 A node never changes the node above it. Walking a route, the name changes only where Explorer names the new position. In the UI, stepping back and forth through the moves shows each node's own name. `VALID_ABSENCE` shows nothing.
 
