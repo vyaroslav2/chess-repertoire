@@ -65,7 +65,7 @@ export const defaultConfig: Config = {
         medium: 8,
         shallow: 5
     },
-    depthCap: 5,
+    depthCap: 2,
     explorerSpeeds: ["classical", "rapid"],
     explorerRatings: [1600, 1800, 2000],
     apiRetryDelayMs: 120_000,

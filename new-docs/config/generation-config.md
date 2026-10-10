@@ -15,7 +15,7 @@ tags:
 | `popularityThresholds`        | early=5.00%, middle=10.00%, late=15.00%                           |                                                               |
 | `probabilityBands`[^3]        | deep >= 2.00%; medium >= 0.50% and < 2.00%; shallow < 0.50%       |                                                               |
 | `depthBudget`                 | deep=15, medium=8, shallow=5                                      | full moves counted from the root                              |
-| `depthCap`                    | 5                                                                 | full moves counted from the root; caps every depthBudget band |
+| `depthCap`                    | 2                                                                 | full moves counted from the root; caps every depthBudget band |
 | `explorerSpeeds`              | classical, rapid                                                  | related to amateur cache profile                              |
 | `explorerRatings`             | 1600, 1800, 2000                                                  | related to amateur cache profile                              |
 | `apiRetryDelayMs`             | 120 000                                                           |                                                               |

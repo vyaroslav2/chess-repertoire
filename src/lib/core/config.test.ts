@@ -25,7 +25,7 @@ test('generation-config: every setting has the value in the note', () => {
     assert.deepStrictEqual(defaultConfig.popularityThresholds, { early: 0.05, middle: 0.10, late: 0.15 });
     assert.deepStrictEqual(defaultConfig.probabilityBands, { deep: 0.02, medium: 0.005 });
     assert.deepStrictEqual(defaultConfig.depthBudget, { deep: 15, medium: 8, shallow: 5 });
-    assert.strictEqual(defaultConfig.depthCap, 5);
+    assert.strictEqual(defaultConfig.depthCap, 2);
     assert.deepStrictEqual(defaultConfig.explorerSpeeds, ['classical', 'rapid']);
     assert.deepStrictEqual(defaultConfig.explorerRatings, [1600, 1800, 2000]);
     assert.strictEqual(defaultConfig.apiRetryDelayMs, 120_000);
@@ -208,7 +208,7 @@ test('14. mutating a source object after snapshot creation cannot alter snapshot
     source.depthCap = 100;
 
     // Snapshot should remain unchanged
-    assert.strictEqual(config.depthCap, 5);
+    assert.strictEqual(config.depthCap, 2);
 
     // Hash should remain unchanged
     assert.strictEqual(computeConfigHash(config), configHash);
