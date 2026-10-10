@@ -418,7 +418,7 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
         margin: "0 auto",
         position: "relative",
       }}>
-        <div className={`cg-board-newspaper piece-set-merida ${testStatus !== 'idle' ? 'board-locked' : ''}`} style={{ width: "560px", height: "560px", boxShadow: "var(--glass-shadow)" }}>
+        <div className={`cg-board-newspaper piece-set-merida ${testStatus !== 'idle' ? 'board-locked' : ''}`} style={{ width: "560px", height: "560px", boxShadow: "var(--glass-shadow)", position: "relative", zIndex: 1 }}>
           <Chessground
             width="100%"
             height="100%"
