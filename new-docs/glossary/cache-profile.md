@@ -2,9 +2,8 @@
 tags:
   - glossary
   - reviewed
-  - sf19-todo
 aliases:
   - profile
   - cache profiles
 ---
-**Cache profile** — a fingerprint of the settings that shaped a cached Explorer or engine answer (how we asked: ratings, speeds, MultiPV, depth, and so on). Cache lookup is position + cache profile, not position alone. If those ask-settings change, the old cache no longer matches and must be refetched. 
+**Cache profile** — a fingerprint of the settings that shaped a cached Explorer answer or Stockfish evaluation (how we asked: Explorer ratings and speeds; Stockfish version, depth and MultiPV). Cache lookup is position + cache profile, not position alone. If those ask-settings change, the old cache no longer matches: the position must be fetched or evaluated again. 

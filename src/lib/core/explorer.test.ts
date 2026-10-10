@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { Chess } from "chess.js";
-import { prisma, readExplorerCache, saveLocalEngineBaseline } from "../db/operations";
-import { checkExplorerGameCounts, fetchAllDatabases } from "../api/lichess";
+import { prisma, readExplorerCache } from "../db/operations";
+import { checkExplorerGameCounts, fetchExplorer } from "../api/lichess";
 import { computeExplorerCacheProfile, defaultConfig } from "./config";
 import { parseFullFen, positionKeyFromFen } from "./fen";
 import { generateRepertoire } from "./generator";
@@ -35,28 +35,20 @@ const shortfallWarning = "[WARNING] Explorer move counts do not add up to the po
 
 describe("EX.05 game counts", () => {
   it("EX.05: equal counts carry on with no warning", async () => {
-    const { result, lines } = await captureLog(async () => checkExplorerGameCounts("AMATEUR", 20, 20));
+    const { result, lines } = await captureLog(async () => checkExplorerGameCounts(20, 20));
     assert.equal(result, 0);
     assert.deepEqual(lines, []);
   });
 
-  it("EX.05: an Amateur shortfall warns and returns the missing share", async () => {
-    const { result, lines } = await captureLog(async () => checkExplorerGameCounts("AMATEUR", 17, 20));
+  it("EX.05: a shortfall warns and returns the missing share", async () => {
+    const { result, lines } = await captureLog(async () => checkExplorerGameCounts(17, 20));
     assert.equal(result, 3 / 20);
     assert.deepEqual(lines, [shortfallWarning]);
   });
 
-  it("EX.05: a Masters or Elite shortfall warns only", async () => {
-    for (const dataset of ["MASTERS", "ELITE"] as const) {
-      const { result, lines } = await captureLog(async () => checkExplorerGameCounts(dataset, 17, 20));
-      assert.equal(result, 0);
-      assert.deepEqual(lines, [shortfallWarning]);
-    }
-  });
-
   it("EX.05: more games than the position's total is a hard error", () => {
     assert.throws(
-      () => checkExplorerGameCounts("AMATEUR", 21, 20),
+      () => checkExplorerGameCounts(21, 20),
       { message: "Explorer move counts are more than the position's total games. Dataset: Amateur. Moves: 21 games. Position: 20 games." }
     );
   });
@@ -69,32 +61,37 @@ describe("EX.05 fetch and cache", () => {
   const shortBody = { white: 12, draws: 5, black: 3, moves: [{ san: "e4", white: 10, draws: 5, black: 2 }] };
 
   it("EX.05: the Amateur shortfall is returned on a fresh fetch and on a cache hit", async () => {
-    const fresh = await captureLog(() => withFetch(shortBody, () => fetchAllDatabases(START_FEN, ["AMATEUR"])));
-    assert.equal(fresh.result[2].retrieval, "FRESH");
-    assert.equal(fresh.result[2].unaccountedShare, 3 / 20);
+    const fresh = await captureLog(() => withFetch(shortBody, () => fetchExplorer(START_FEN)));
+    assert.equal(fresh.result.retrieval, "FRESH");
+    assert.equal(fresh.result.unaccountedShare, 3 / 20);
     assert.ok(fresh.lines.includes(shortfallWarning));
 
-    const cached = await captureLog(() => fetchAllDatabases(START_FEN, ["AMATEUR"]));
-    assert.equal(cached.result[2].retrieval, "CACHE");
-    assert.equal(cached.result[2].unaccountedShare, 3 / 20);
+    const cached = await captureLog(() => fetchExplorer(START_FEN));
+    assert.equal(cached.result.retrieval, "CACHE");
+    assert.equal(cached.result.unaccountedShare, 3 / 20);
     assert.ok(cached.lines.includes(shortfallWarning));
   });
 
-  it("EX.05: a Masters shortfall is not returned as unaccounted", async () => {
-    const { result } = await captureLog(() => withFetch(shortBody, () => fetchAllDatabases(START_FEN, ["MASTERS"])));
-    assert.equal(result[0].unaccountedShare, 0);
+  it("EX: only the Amateur dataset is asked for", async () => {
+    const urls: string[] = [];
+    const original = global.fetch;
+    global.fetch = (async (url: string) => { urls.push(String(url)); return new Response(JSON.stringify(shortBody)); }) as typeof fetch;
+    try { await captureLog(() => fetchExplorer(START_FEN)); } finally { global.fetch = original; }
+    assert.equal(urls.length, 1);
+    assert.match(urls[0], /^https:\/\/explorer\.lichess\.ovh\/lichess\?/);
+    assert.match(urls[0], /speeds=classical,rapid&ratings=1600,1800,2000$/);
   });
 
   it("EX.05: more move games than the position's total throws and caches nothing", async () => {
     const body = { white: 1, draws: 0, black: 0, moves: [{ san: "e4", white: 10, draws: 5, black: 2 }] };
-    await assert.rejects(withFetch(body, () => fetchAllDatabases(START_FEN, ["AMATEUR"])), /more than the position's total games/);
-    const profile = computeExplorerCacheProfile("AMATEUR", defaultConfig);
+    await assert.rejects(withFetch(body, () => fetchExplorer(START_FEN)), /more than the position's total games/);
+    const profile = computeExplorerCacheProfile(defaultConfig);
     assert.equal((await readExplorerCache(START_KEY, profile)).status, "missing");
   });
 
   it("EX.05: a response without the position's totals is malformed", async () => {
     await assert.rejects(
-      withFetch({ moves: [] }, () => fetchAllDatabases(START_FEN, ["AMATEUR"])),
+      withFetch({ moves: [] }, () => fetchExplorer(START_FEN)),
       /position statistic counts are missing or invalid/
     );
   });
@@ -126,7 +123,7 @@ describe("EX.05 EX.06 generator", () => {
   it("EX.06: no Amateur moves ends the route with \"No opponent moves found.\"", async () => {
     const { lines } = await captureLog(() => generateRepertoire(START_FEN, {
       repertoireId, ...common,
-      fetchDatabases: (async () => [empty, empty, empty]) as any
+      fetchDatabases: (async () => empty) as any
     }));
     assert.ok(lines.includes("No opponent moves found."));
     assert.equal(await prisma.repertoireMove.count({ where: { repertoireId } }), 0);
@@ -149,27 +146,54 @@ describe("EX.05 EX.06 generator", () => {
       if (!uci) throw new Error(`Unexpected evaluator FEN ${fen}`);
       const move = chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4) });
       chess.undo();
-      // S3.12: every Black response must be deepVerified, which needs local Stockfish evidence.
-      await saveLocalEngineBaseline(fen, "test-local", { uci, cp: -10, mate: null });
       return {
         selectedUci: uci, selectedMoveSan: move.san, cp: -10, mate: null,
-        source: "ChessDB" as const, selectionMethod: "Ordinary API" as const, moveOrigin: "Human Move" as const,
-        deepVerified: true, localEvaluationProfile: "test-local",
-        selectedStats: { weightedGames: 30, blackScore: 0.5 }, candidateMoves: [], enginePvs: [],
-        evalSource: "ChessDB" as const, selectedEngineCp: -10, selectedMate: null,
-        openingMetadata: null, openingMetadataRetrieval: "FRESH" as const
+        source: "Local Stockfish 19" as const, selectionMethod: "Baseline" as const, moveOrigin: "Engine Move" as const,
+        engineRank: 1
       };
     };
 
     await captureLog(() => generateRepertoire(START_FEN, {
       repertoireId, ...common,
       responseEvaluator: responseEvaluator as any,
-      fetchDatabases: (async (fen: string) => fen === START_FEN ? [empty, empty, amateur] : [empty, empty, empty]) as any
+      fetchDatabases: (async (fen: string) => fen === START_FEN ? amateur : empty) as any
     }));
 
     const root = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, history: "" } });
     assert.ok(Math.abs(root.unaccountedDropped - 0.3) < defaultConfig.probabilityTolerance);
     const edges = await prisma.repertoireMove.findMany({ where: { fromNodeId: root.id, playerTurn: "OPPONENT" }, orderBy: { uci: "asc" } });
     assert.deepEqual(edges.map(edge => [edge.uci, edge.moveProb]), [["d2d4", 0.3], ["e2e4", 0.4]]);
+  });
+
+  it("DB.06 rule 4: EW does not ask Explorer, so the position after White's move is fetched for its name only", async () => {
+    const afterE4 = (() => { const chess = new Chess(); chess.move("e4"); return chess.fen(); })();
+    const amateur = {
+      moves: [{ san: "e4", uci: "e2e4", games: 100, white: 50, draws: 25, black: 25 }],
+      totalGames: 100, positionTotalGames: 100, unaccountedShare: 0, opening: null
+    };
+    const named: string[] = [];
+    const responseEvaluator = async (_fen: string, chess: Chess) => {
+      const move = chess.move("c5");
+      chess.undo();
+      return {
+        selectedUci: move.lan, selectedMoveSan: move.san, cp: 30, mate: null,
+        source: "Local Stockfish 19" as const, selectionMethod: "Baseline" as const, moveOrigin: "Engine Move" as const,
+        engineRank: 1
+      };
+    };
+
+    await captureLog(() => generateRepertoire(START_FEN, {
+      repertoireId, ...common,
+      fetchOpeningMetadata: async (fen: string) => {
+        named.push(fen);
+        return fen === afterE4 ? { eco: "B00", name: "King's Pawn Game" } : null;
+      },
+      responseEvaluator: responseEvaluator as any,
+      fetchDatabases: (async (fen: string) => fen === START_FEN ? amateur : empty) as any
+    }));
+
+    assert.ok(named.includes(afterE4));
+    const node = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, history: "e2e4" } });
+    assert.deepEqual([node.openingMetadataStatus, node.eco, node.openingName], ["PRESENT", "B00", "King's Pawn Game"]);
   });
 });

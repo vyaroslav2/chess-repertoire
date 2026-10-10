@@ -27,18 +27,8 @@ export interface Config {
     explorerRatings: number[];
     apiRetryDelayMs: number;
     apiRequestGapMs: number;
-    cloudEvalExtraGapMs: number;
     apiRequestTimeoutMs: number;
-    explorerEliteSpeeds: string[];
-    explorerEliteRatings: number[];
-    mastersWeight: number;
-    minimumWeightedGames: number;
-    lichessCloudEvalMultiPv: number;
-    apiToleranceCp: Record<MoveBand, number>;
-    localToleranceCp: Record<MoveBand, number>;
-    chessDbMaxAbsCp: number;
-    anchorGames: number;
-    repertoireSidePrior: number;
+    localStockfishVersion: number;
     localStockfishDepth: number;
     localStockfishMultiPv: number;
     hardcodedBlackResponses: string[];
@@ -47,9 +37,6 @@ export interface Config {
         wikibooks: {
             maxLagSeconds: number;
             userAgent: string;
-        };
-        chessDb: {
-            queryMode: "queryall";
         };
     };
 }
@@ -78,31 +65,13 @@ export const defaultConfig: Config = {
         medium: 8,
         shallow: 5
     },
-    depthCap: 5,
+    depthCap: 2,
     explorerSpeeds: ["classical", "rapid"],
     explorerRatings: [1600, 1800, 2000],
     apiRetryDelayMs: 120_000,
     apiRequestGapMs: 2_000,
-    cloudEvalExtraGapMs: 10_000,
     apiRequestTimeoutMs: 30_000,
-    explorerEliteSpeeds: ["classical", "rapid"],
-    explorerEliteRatings: [2500],
-    mastersWeight: 5,
-    minimumWeightedGames: 15,
-    lichessCloudEvalMultiPv: 5,
-    apiToleranceCp: {
-        early: 80,
-        middle: 50,
-        late: 35
-    },
-    localToleranceCp: {
-        early: 95,
-        middle: 60,
-        late: 40
-    },
-    chessDbMaxAbsCp: 1000,
-    anchorGames: 50,
-    repertoireSidePrior: 0.48,
+    localStockfishVersion: 19,
     localStockfishDepth: 24,
     localStockfishMultiPv: 1,
     hardcodedBlackResponses: ["1. e4 c6", "1. d4 d5"],
@@ -111,10 +80,6 @@ export const defaultConfig: Config = {
         wikibooks: {
             maxLagSeconds: 5,
             userAgent: "chess-repertoire/0.1 (https://github.com/vyaroslav2/chess-repertoire) Wikibooks-opening-enrichment"
-        },
-        // ChessDB request shape used for complete remote result snapshots.
-        chessDb: {
-            queryMode: "queryall"
         }
     }
 };
@@ -156,8 +121,6 @@ export function validateConfig(config: Config) {
 
     for (const key of MOVE_BANDS) {
         if (!isFraction(config.popularityThresholds?.[key])) throw new Error(`Invalid popularityThresholds.${key}`);
-        if (!isNonNegative(config.apiToleranceCp?.[key])) throw new Error(`Invalid apiToleranceCp.${key}`);
-        if (!isNonNegative(config.localToleranceCp?.[key])) throw new Error(`Invalid localToleranceCp.${key}`);
     }
 
     if (!isFraction(config.probabilityBands?.deep)) throw new Error("Invalid probabilityBands.deep");
@@ -169,22 +132,13 @@ export function validateConfig(config: Config) {
 
     if (!isNonEmptyStringList(config.explorerSpeeds)) throw new Error("Invalid explorerSpeeds");
     if (!isRatingList(config.explorerRatings)) throw new Error("Invalid explorerRatings");
-    if (!isNonEmptyStringList(config.explorerEliteSpeeds)) throw new Error("Invalid explorerEliteSpeeds");
-    if (!isRatingList(config.explorerEliteRatings)) throw new Error("Invalid explorerEliteRatings");
 
     // Lichess asks API clients to wait at least a full minute after HTTP 429.
     if (!isNonNegative(config.apiRetryDelayMs) || config.apiRetryDelayMs < 60_000) throw new Error("Invalid apiRetryDelayMs");
     if (!isNonNegative(config.apiRequestGapMs)) throw new Error("Invalid apiRequestGapMs");
-    if (!isNonNegative(config.cloudEvalExtraGapMs)) throw new Error("Invalid cloudEvalExtraGapMs");
     if (!isPositiveInteger(config.apiRequestTimeoutMs)) throw new Error("Invalid apiRequestTimeoutMs");
 
-    if (!isPositiveInteger(config.mastersWeight)) throw new Error("Invalid mastersWeight");
-    if (!isPositiveInteger(config.minimumWeightedGames)) throw new Error("Invalid minimumWeightedGames");
-    if (!isPositiveInteger(config.lichessCloudEvalMultiPv)) throw new Error("Invalid lichessCloudEvalMultiPv");
-    if (!isPositiveInteger(config.chessDbMaxAbsCp)) throw new Error("Invalid chessDbMaxAbsCp");
-    if (!isPositiveInteger(config.anchorGames)) throw new Error("Invalid anchorGames");
-    if (!isFraction(config.repertoireSidePrior)) throw new Error("Invalid repertoireSidePrior");
-
+    if (!isPositiveInteger(config.localStockfishVersion)) throw new Error("Invalid localStockfishVersion");
     if (!isPositiveInteger(config.localStockfishDepth)) throw new Error("Invalid localStockfishDepth");
     if (!isPositiveInteger(config.localStockfishMultiPv)) throw new Error("Invalid localStockfishMultiPv");
     if (config.localStockfishMultiPv !== 1) {
@@ -192,9 +146,6 @@ export function validateConfig(config: Config) {
     }
 
     if (!Array.isArray(config.hardcodedBlackResponses) || config.hardcodedBlackResponses.some(s => typeof s !== 'string' || s.trim() === '')) throw new Error("Invalid hardcodedBlackResponses");
-
-    // Validate API settings not yet covered by generation-config
-    if (config.api?.chessDb?.queryMode !== "queryall") throw new Error("Invalid api.chessDb.queryMode");
 
     const wikibooks = config.api?.wikibooks;
     if (!isPositiveInteger(wikibooks?.maxLagSeconds)) throw new Error("Invalid api.wikibooks.maxLagSeconds");
@@ -218,40 +169,18 @@ export function computeConfigHash(config: Config): string {
     return createHash('sha256').update(canonical).digest('hex');
 }
 
-export type ExplorerDataset = "MASTERS" | "ELITE" | "AMATEUR";
-
-// DB.31: the dataset is part of the cache profile, so each dataset has its own.
-export function computeExplorerCacheProfile(dataset: ExplorerDataset, config: Config): string {
-    const requestShape = dataset === "MASTERS"
-        ? { dataset, source: "masters" }
-        : dataset === "ELITE"
-            ? { dataset, source: "lichess", speeds: config.explorerEliteSpeeds, ratings: config.explorerEliteRatings }
-            : { dataset, source: "lichess", speeds: config.explorerSpeeds, ratings: config.explorerRatings };
+// DB.31: the dataset is part of the cache profile. Only Amateur is fetched (EX).
+// The shape is unchanged, so Amateur rows cached before still match.
+export function computeExplorerCacheProfile(config: Config): string {
+    const requestShape = { dataset: "AMATEUR", source: "lichess", speeds: config.explorerSpeeds, ratings: config.explorerRatings };
     return createHash('sha256').update(canonicalStringify(requestShape)).digest('hex');
 }
 
-// The old all-datasets request shape. Only used to carry old Explorer caches over.
-export function computeExplorerRequestProfile(config: Config): string {
-    const requestShape = {
-        masters: { source: "masters" },
-        elite: { source: "lichess", speeds: config.explorerEliteSpeeds, ratings: config.explorerEliteRatings },
-        amateur: { source: "lichess", speeds: config.explorerSpeeds, ratings: config.explorerRatings }
-    };
-    return createHash('sha256').update(canonicalStringify(requestShape)).digest('hex');
-}
-
-export type RemoteEngineProfileSource = "LICHESS" | "CHESSDB";
-
-export function computeRemoteEngineEvaluationProfile(source: RemoteEngineProfileSource, config: Config): string {
-    const requestShape = source === "LICHESS"
-        ? { source, multiPv: config.lichessCloudEvalMultiPv }
-        : { source, queryMode: config.api.chessDb.queryMode };
-    return createHash('sha256').update(canonicalStringify(requestShape)).digest('hex');
-}
-
+// DB.32: the Stockfish version is part of the profile, so an eval from another version is never reused.
 export function computeLocalEngineEvaluationProfile(config: Config): string {
     const searchShape = {
         role: "deep-local",
+        version: config.localStockfishVersion,
         depth: config.localStockfishDepth,
         multiPv: config.localStockfishMultiPv
     };

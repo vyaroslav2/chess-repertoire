@@ -6,7 +6,6 @@ import * as path from 'path';
 import { defaultConfig, computeLocalEngineEvaluationProfile, type Config } from './config';
 import { parseFullFen } from './fen';
 import { isValidUciMove } from './uci';
-import { verifyLocalOrdinaryCp, type PvDecision } from './verifier';
 import {
   readLocalEngineBaseline,
   readLocalEngineCandidate,
@@ -19,11 +18,20 @@ type StockfishEngine = {
   init(): Promise<void>;
   setoption(name: string, value: string): Promise<void>;
   position(fen: string): Promise<void>;
-  go(params: { depth: number; searchmoves?: string }): Promise<{ info?: unknown[] }>;
+  go(params: { depth: number; searchmoves?: string[] }): Promise<{ info?: unknown[] }>;
   quit(): Promise<void>;
 };
 
 export type LocalEngineFactory = (enginePath: string) => StockfishEngine;
+
+/** EW.09: every evaluation comes from this Stockfish version and no other. */
+export function assertStockfishVersion(uciLines: readonly string[], version: number = defaultConfig.localStockfishVersion): void {
+  const name = uciLines.find(line => line.startsWith('id name '))?.slice('id name '.length) ?? '(no name)';
+  const expected = `Stockfish ${version}`;
+  if (name !== expected && !name.startsWith(`${expected} `)) {
+    throw new Error(`The generator requires Stockfish ${version} at bin/stockfish.exe; found ${name}`);
+  }
+}
 
 /**
  * S0.04: Ctrl+C must not interrupt the current position. node-uci starts
@@ -36,8 +44,37 @@ export class ConsoleDetachedEngine extends Engine {
     this.proc = spawn(this.filePath, [], { detached: true, windowsHide: true });
     this.proc.stdout.setEncoding('utf8');
     this.write('uci');
-    await this.getBufferUntil(line => line === 'uciok');
+    const handshake = await this.getBufferUntil(line => line === 'uciok');
+    try {
+      assertStockfishVersion(handshake);
+    } catch (error) {
+      await this.quit(); // a wrong engine must not keep running
+      throw error;
+    }
   }
+
+  /**
+   * node-uci writes `go searchmoves <moves> depth <n>`, but Stockfish reads every token
+   * after `searchmoves` as a move, so the depth is lost and the search never ends.
+   * With searchmoves, write the command ourselves with searchmoves last.
+   */
+  async go(params: Record<string, unknown>): Promise<{ info?: unknown[] }> {
+    const searchmoves = params.searchmoves as string[] | undefined;
+    if (!searchmoves?.length) return super.go(params);
+    this.write(`go depth ${params.depth} searchmoves ${searchmoves.join(' ')}`);
+    const lines = await this.getBufferUntil(line => line.startsWith('bestmove '));
+    return { info: lines.map(parseInfoLine).filter(info => info !== null) };
+  }
+}
+
+/** One `info` line in the shape node-uci gives: depth, score { unit, value }, pv. Bound scores are skipped. */
+export function parseInfoLine(line: string): { depth: number; score: { unit: string; value: number }; pv: string } | null {
+  if (!line.startsWith('info ') || /\b(?:lowerbound|upperbound)\b/.test(line)) return null;
+  const depth = /\bdepth (\d+)/.exec(line);
+  const score = /\bscore (cp|mate) (-?\d+)/.exec(line);
+  const pv = / pv (.+)$/.exec(line);
+  if (!depth || !score || !pv) return null;
+  return { depth: Number(depth[1]), score: { unit: score[1], value: Number(score[2]) }, pv: pv[1].trim() };
 }
 
 export type TrustedLocalEvaluation = LocalEngineEvaluation & {
@@ -180,8 +217,8 @@ export async function runTrustedLocalSearch(
     await engine.init();
     await engine.setoption('MultiPV', settings.multiPv.toString());
     await engine.position(fullFen);
-    const goParams: { depth: number; searchmoves?: string } = { depth: settings.depth };
-    if (expectedUci !== undefined) goParams.searchmoves = expectedUci;
+    const goParams: { depth: number; searchmoves?: string[] } = { depth: settings.depth };
+    if (expectedUci !== undefined) goParams.searchmoves = [expectedUci]; // node-uci joins the list itself
     const result = await engine.go(goParams);
     const evaluations = collectLocalSearchUpdates(fullFen, result?.info, expectedUci);
     const trusted = (evaluation: CollectedEvaluation): TrustedLocalEvaluation => ({
@@ -262,57 +299,4 @@ export async function getOrCreateLocalCandidate(
     evaluation: { uci: saved.candidateUci, san: saved.san!, cp: saved.cp, mate: saved.mate },
     reused: false
   };
-}
-
-export type LocalCandidateVerification = {
-  decision: Exclude<PvDecision, 'INCONCLUSIVE'>;
-  baseline: TrustedLocalEvaluation;
-  candidate: TrustedLocalEvaluation;
-  evaluationProfile: string;
-  candidateWasBaselineBest: boolean;
-};
-
-export async function verifyLocalCandidate(
-  fullFen: string,
-  candidateUci: string,
-  toleranceCp: number,
-  config: Config = defaultConfig,
-  runner: LocalSearchRunner = runTrustedLocalSearch
-): Promise<LocalCandidateVerification> {
-  const baselineResult = await getOrCreateLocalBaseline(fullFen, config, runner);
-  if (baselineResult.evaluation.uci === candidateUci) {
-    return {
-      decision: 'ACCEPT',
-      baseline: baselineResult.evaluation,
-      candidate: baselineResult.evaluation,
-      evaluationProfile: baselineResult.evaluationProfile,
-      candidateWasBaselineBest: true
-    };
-  }
-
-  const candidateResult = await getOrCreateLocalCandidate(fullFen, candidateUci, config, runner);
-  const baseline = baselineResult.evaluation;
-  const candidate = candidateResult.evaluation;
-  // EW.10: where a mate is involved, only the same mate distance as the baseline passes.
-  const mateInvolved = baseline.mate !== null || candidate.mate !== null;
-  return {
-    decision: mateInvolved
-      ? (candidate.mate === baseline.mate ? 'ACCEPT' : 'REJECT')
-      : verifyLocalOrdinaryCp(baseline.cp!, candidate.cp!, toleranceCp),
-    baseline,
-    candidate,
-    evaluationProfile: baselineResult.evaluationProfile,
-    candidateWasBaselineBest: false
-  };
-}
-
-// Compatibility surface for old diagnostic scripts only. The B4/LS path does
-// not use broad MultiPV or artificial mate-to-cp values.
-export async function runLocalStockfish(fen: string, multiPv: number, depth: number, searchmoves?: string): Promise<any[]> {
-  const settings = { depth, multiPv };
-  if (multiPv === 1) {
-    const evaluation = await runTrustedLocalSearch(parseFullFen(fen), settings, searchmoves);
-    return [{ cp: evaluation.cp, mate: evaluation.mate, moves: evaluation.uci }];
-  }
-  throw new Error('Legacy broad MultiPV Local Stockfish searches are no longer supported');
 }

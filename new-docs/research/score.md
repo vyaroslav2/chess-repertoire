@@ -1,7 +1,9 @@
 ---
 tags:
-  - reviewed
+  - archived
 ---
+No longer used: Black plays Stockfish 19's top move, so human moves are no longer ranked by score ([[EW]]). Kept for history.
+
 ### Can we avoid a score?
 
 No. To rank moves, we must turn W/D/L into one number. So we must choose a formula.
@@ -52,7 +54,7 @@ The project uses points per game (option 1) as the raw score: `rawScore = (wins 
 
 ### Problems with the current score
 
-The current score ([[EW|EW.04]]) is option 1 with shrinkage:
+The old Black score (EW.04, now removed) was option 1 with shrinkage:
 
 `(wins + 0.5 × draws + anchorGames × repertoireSidePrior) / (games + anchorGames)`
 

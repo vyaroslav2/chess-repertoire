@@ -48,9 +48,13 @@ test('DB record shapes', async (t) => {
         }
         const moveKeys = Object.keys(prisma.repertoireMove.fields);
         for (const field of ['fromNodeId', 'toNodeId', 'san', 'uci', 'playerTurn', 'moveProb', 'stopReason',
-            'mastersGames', 'eliteGames', 'weightedGames', 'totalMastersGames', 'mastersMoveShare', 'totalEliteGames', 'eliteMoveShare',
-            'cp', 'mate', 'source', 'selectionMethod', 'moveOrigin', 'engineRank', 'deepVerified']) {
+            'cp', 'mate', 'source', 'selectionMethod', 'moveOrigin', 'engineRank']) {
             assert.ok(moveKeys.includes(field), `move is missing ${field}`);
+        }
+        // DB.13 and deepVerified are gone: Black plays Stockfish's top move.
+        for (const removed of ['mastersGames', 'eliteGames', 'weightedGames', 'totalMastersGames', 'mastersMoveShare',
+            'totalEliteGames', 'eliteMoveShare', 'deepVerified']) {
+            assert.ok(!moveKeys.includes(removed), `move still has ${removed}`);
         }
         for (const legacy of ['prob', 'routeProbability', 'trueProbability', 'routeHistory', 'humanDataSnapshotId',
             'weightedCount', 'totalRelevantGames', 'moveShare', 'localEvaluationProfile']) {
@@ -148,7 +152,7 @@ test('DB record shapes', async (t) => {
         const child = await createRepertoireNode(rep.id, AFTER_E4, "e2e4", 1.0, { displayPgn: "e4" });
         await ops.createOpponentMove({ repertoireId: rep.id, fromNodeId: root.id, toNodeId: child.id, san: "e4", uci: "e2e4", moveProb: 1 });
         await ops.saveExplorerCache(root.positionKey, "db02-profile", { positionTotalGames: 0, eco: null, openingName: null, moves: [] });
-        await ops.saveRemoteEngineResult(parseFullFen(AFTER_E4), "LICHESS", "db02-engine", []);
+        await ops.saveLocalEngineBaseline(parseFullFen(AFTER_E4), "db02-engine", { uci: "e7e5", cp: 20, mate: null });
         await prisma.openingMetadataHistoryCache.create({ data: { repertoireId: rep.id, history: "e2e4", status: "VALID_ABSENCE" } });
         await prisma.wikibooksHistoryCache.create({ data: { repertoireId: rep.id, history: "e2e4", wikiText: null } });
 
@@ -158,25 +162,25 @@ test('DB record shapes', async (t) => {
         assert.strictEqual(await prisma.repertoireMove.count({ where: { repertoireId: rep.id } }), 0);
         assert.strictEqual(await prisma.position.count({ where: { repertoireId: rep.id } }), 0);
         assert.ok(await prisma.positionCache.findUnique({ where: { positionKey_cacheProfile: { positionKey: root.positionKey, cacheProfile: "db02-profile" } } }));
-        assert.ok(await prisma.engineCache.findUnique({ where: { fullFen_engine_engineProfile: { fullFen: parseFullFen(AFTER_E4), engine: "LICHESS", engineProfile: "db02-engine" } } }));
+        assert.ok(await prisma.engineCache.findUnique({ where: { fullFen_engine_engineProfile: { fullFen: parseFullFen(AFTER_E4), engine: "LOCAL", engineProfile: "db02-engine" } } }));
         assert.strictEqual(await prisma.openingMetadataHistoryCache.count({ where: { repertoireId: rep.id } }), 1);
         assert.strictEqual(await prisma.wikibooksHistoryCache.count({ where: { repertoireId: rep.id } }), 1);
     });
 
     await t.test('DB.31 Explorer data is keyed by positionKey + cache profile and keeps eco and openingName', async () => {
         const positionKey = positionKeyFromFen(parseFullFen(START));
-        await ops.saveExplorerCache(positionKey, "masters-profile", {
+        await ops.saveExplorerCache(positionKey, "amateur-profile", {
             positionTotalGames: 10, eco: "A00", openingName: "Start",
             moves: [{ uci: "e2e4", san: "e4", games: 10, whiteWins: 4, draws: 3, blackWins: 3 }]
         });
-        const masters = await ops.readExplorerCache(positionKey, "masters-profile");
-        assert.strictEqual(masters.status, "success");
-        if (masters.status !== "success") return;
-        assert.strictEqual(masters.positionTotalGames, 10);
-        assert.strictEqual(masters.eco, "A00");
-        assert.strictEqual(masters.openingName, "Start");
-        assert.deepStrictEqual(masters.moves.map(move => move.uci), ["e2e4"]);
-        assert.deepStrictEqual(await ops.readExplorerCache(positionKey, "elite-profile"), { status: "missing" });
+        const amateur = await ops.readExplorerCache(positionKey, "amateur-profile");
+        assert.strictEqual(amateur.status, "success");
+        if (amateur.status !== "success") return;
+        assert.strictEqual(amateur.positionTotalGames, 10);
+        assert.strictEqual(amateur.eco, "A00");
+        assert.strictEqual(amateur.openingName, "Start");
+        assert.deepStrictEqual(amateur.moves.map(move => move.uci), ["e2e4"]);
+        assert.deepStrictEqual(await ops.readExplorerCache(positionKey, "other-profile"), { status: "missing" });
     });
 
     await t.test('DB.31 a position fetched with no games is stored as an empty result', async () => {
@@ -195,19 +199,18 @@ test('DB record shapes', async (t) => {
         const fenA = parseFullFen(AFTER_E4);
         const fenB = parseFullFen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 4 3");
         assert.strictEqual(positionKeyFromFen(fenA), positionKeyFromFen(fenB));
-        await ops.saveRemoteEngineResult(fenA, "LICHESS", "db32-profile", [{ uci: "e7e5", cp: 20, mate: null }]);
-        assert.strictEqual((await ops.readRemoteEngineResult(fenA, "LICHESS", "db32-profile")).status, "success");
-        assert.strictEqual((await ops.readRemoteEngineResult(fenB, "LICHESS", "db32-profile")).status, "missing");
+        await ops.saveLocalEngineBaseline(fenA, "db32-profile", { uci: "e7e5", cp: 20, mate: null });
+        assert.strictEqual((await ops.readLocalEngineBaseline(fenA, "db32-profile"))?.bestUci, "e7e5");
+        assert.strictEqual(await ops.readLocalEngineBaseline(fenB, "db32-profile"), null);
     });
 
-    await t.test('DB.32 each engine keeps its own rows', async () => {
+    await t.test('DB.32 each local Stockfish profile keeps its own rows', async () => {
         const fen = parseFullFen(AFTER_E4);
-        await ops.saveRemoteEngineResult(fen, "CHESSDB", "db32-chessdb", [{ uci: "c7c5", cp: 30, mate: null }]);
-        await ops.saveLocalEngineBaseline(fen, "db32-local", { uci: "e7e5", cp: 25, mate: null });
-        const rows = await prisma.engineCache.findMany({ where: { fullFen: fen, engineProfile: { in: ["db32-chessdb", "db32-local"] } } });
-        assert.deepStrictEqual(rows.map(row => row.engine).sort(), ["CHESSDB", "LOCAL"]);
-        assert.strictEqual((await ops.readLocalEngineBaseline(fen, "db32-local"))?.bestUci, "e7e5");
-        assert.strictEqual((await ops.readRemoteEngineResult(fen, "LICHESS", "db32-local")).status, "missing");
+        await ops.saveLocalEngineBaseline(fen, "db32-sf18", { uci: "c7c5", cp: 30, mate: null });
+        await ops.saveLocalEngineBaseline(fen, "db32-sf19", { uci: "e7e5", cp: 25, mate: null });
+        assert.strictEqual((await ops.readLocalEngineBaseline(fen, "db32-sf18"))?.bestUci, "c7c5");
+        assert.strictEqual((await ops.readLocalEngineBaseline(fen, "db32-sf19"))?.bestUci, "e7e5");
+        assert.strictEqual(await ops.readLocalEngineBaseline(fen, "db32-other"), null);
     });
 
     await t.test('DB.33 opening metadata is stored per route: repertoire + history', async () => {
@@ -220,8 +223,7 @@ test('DB record shapes', async (t) => {
 
     const responseInput = (fromNodeId: string, toNodeId: string) => ({
         fromNodeId, toNodeId, uci: "e7e5", cp: 20 as number | null, mate: null as number | null,
-        source: "Lichess Cloud Evaluation" as const, selectionMethod: "Ordinary API" as const, moveOrigin: "Human Move" as const,
-        deepVerified: false, localEvaluationProfile: null
+        source: "Local Stockfish 19" as const, selectionMethod: "Baseline" as const, moveOrigin: "Engine Move" as const
     });
 
     await t.test('DB.08 DB.09 a Black position carries exactly one RESPONSE', async () => {
@@ -255,30 +257,27 @@ test('DB record shapes', async (t) => {
         assert.throws(() => ops.validateResponsePersistence({ ...responseInput("a", "b"), cp: null, mate: null }), /exactly one/);
     });
 
-    await t.test('DB.13 the move shares are games over their totals', () => {
-        const evidence = ops.responseHumanEvidence({ mastersGames: 30, eliteGames: 5, weightedGames: 155, totalMastersGames: 120, totalEliteGames: 0 });
-        assert.strictEqual(evidence.mastersMoveShare, 0.25);
-        assert.strictEqual(evidence.eliteMoveShare, null);
-        assert.strictEqual(evidence.weightedGames, 155);
-    });
-
-    await t.test('DB.13 DB.14 a RESPONSE stores the human and engine evidence', async () => {
-        const rep = await newRepertoire("DB.13");
+    await t.test('DB.14 a RESPONSE stores the engine evidence', async () => {
+        const rep = await newRepertoire("DB.14");
         const from = await createRepertoireNode(rep.id, AFTER_E4, "e2e4", 1.0);
         const to = await createRepertoireNode(rep.id, AFTER_E4_E5, "e2e4 e7e5", 1.0);
-        const evidence = ops.responseHumanEvidence({ mastersGames: 40, eliteGames: 60, weightedGames: 260, totalMastersGames: 100, totalEliteGames: 200 });
-        const move = await ops.createResponseMove({ ...responseInput(from.id, to.id), ...evidence, engineRank: 1 });
-        assert.strictEqual(move.mastersGames, 40);
-        assert.strictEqual(move.eliteGames, 60);
-        assert.strictEqual(move.weightedGames, 260);
-        assert.strictEqual(move.totalMastersGames, 100);
-        assert.strictEqual(move.mastersMoveShare, 0.4);
-        assert.strictEqual(move.totalEliteGames, 200);
-        assert.strictEqual(move.eliteMoveShare, 0.3);
-        assert.strictEqual(move.source, "Lichess Cloud Evaluation");
-        assert.strictEqual(move.moveOrigin, "Human Move");
+        const move = await ops.createResponseMove({ ...responseInput(from.id, to.id), engineRank: 1 });
+        assert.strictEqual(move.cp, 20);
+        assert.strictEqual(move.source, "Local Stockfish 19");
+        assert.strictEqual(move.selectionMethod, "Baseline");
+        assert.strictEqual(move.moveOrigin, "Engine Move");
         assert.strictEqual(move.engineRank, 1);
-        assert.strictEqual(move.deepVerified, false);
+    });
+
+    await t.test('DB.14 only the old values are refused: API sources, human moves, engineRank other than 1', () => {
+        const bad = [
+            { source: "Lichess Cloud Evaluation" }, { source: "ChessDB" }, { selectionMethod: "Ordinary API" },
+            { moveOrigin: "Human Move" }, { engineRank: 2 }
+        ];
+        for (const change of bad) {
+            assert.throws(() => ops.validateResponsePersistence({ ...responseInput("a", "b"), ...change } as never), /Invalid RESPONSE/);
+        }
+        assert.doesNotThrow(() => ops.validateResponsePersistence({ ...responseInput("a", "b"), selectionMethod: "Hardcoded", moveOrigin: "Hardcoded Move", engineRank: null }));
     });
 
     await t.test('new Repertoire defaults to generationStatus = IDLE and completedConfigHash = null', async () => {

@@ -9,11 +9,7 @@ const START_FEN = new Chess().fen();
 
 // The root has no games, so the queue is empty once it is processed.
 const noGames = {
-  fetchDatabases: (async () => [
-    { moves: [], totalGames: 0, opening: undefined },
-    { moves: [], totalGames: 0 },
-    { moves: [], totalGames: 0 }
-  ]) as any,
+  fetchDatabases: (async () => ({ moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0, opening: null })) as any,
   fetchOpeningMetadata: async () => null,
   ensureNodeWikibooks: (async () => ({ status: "CACHED", text: null })) as any,
   wait: async () => undefined

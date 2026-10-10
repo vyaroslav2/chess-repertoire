@@ -5,13 +5,12 @@ import {
   createRepertoireNode,
   createResponseMove,
   ensureRepertoireNodeWikibooks,
-  responseHumanEvidence,
   validateOpeningMetadataState,
   type OpeningMetadataState,
   type ResponseEnding
 } from "../db/operations";
 import { parseFullFen, positionKeyFromFen } from "./fen";
-import { fetchAllDatabases, fetchMastersOpeningMetadata, pickExplorerOpening, type ExplorerOpening } from "../api/lichess";
+import { fetchExplorer, fetchOpeningMetadata as fetchAmateurOpeningMetadata, type ExplorerOpening } from "../api/lichess";
 import { defaultConfig, createRuntimeConfig, getProbabilityBand, type Config } from "../core/config";
 import { selectWhiteCandidates, evaluateBlackMove } from "./evaluator";
 import { runCascade, probabilityBalance, type CascadeRunState } from "./cascade";
@@ -34,8 +33,8 @@ const repertoireColour = "black";
 
 export type GenerateRepertoireDependencies = {
   repertoireId?: string;
-  fetchDatabases?: typeof fetchAllDatabases;
-  fetchOpeningMetadata?: typeof fetchMastersOpeningMetadata;
+  fetchDatabases?: typeof fetchExplorer;
+  fetchOpeningMetadata?: typeof fetchAmateurOpeningMetadata;
   responseEvaluator?: ResponseEvaluator;
   ensureNodeWikibooks?: typeof ensureRepertoireNodeWikibooks;
   wait?: typeof delay;
@@ -148,13 +147,13 @@ async function persistOpeningMetadata(nodeId: string, opening: ExplorerOpening |
 /**
  * Give a node its opening metadata once: from the route cache (DB.33), else by DB.06.
  * "NOT_FETCHED" is DB.06 rule 4: the position was never sent to Explorer, so fetch it
- * for the name only (Masters).
+ * for the name only (Amateur).
  */
 async function ensureNodeOpeningMetadata(
   nodeId: string,
   cache: RebuildOpeningMetadataCache,
   opening: ExplorerOpening | null | "NOT_FETCHED",
-  fetchOpeningMetadata: typeof fetchMastersOpeningMetadata
+  fetchOpeningMetadata: typeof fetchAmateurOpeningMetadata
 ) {
   if (await restoreRebuildOpeningMetadataState(nodeId, cache)) return;
   const node = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: nodeId }, select: { fullFen: true, openingMetadataStatus: true } });
@@ -224,7 +223,6 @@ export async function evaluateCanonicalResponse(input: {
   const result = await evaluator(
     input.responseNode.fullFen,
     canonicalChess,
-    fullmoveNumberFromFullFen(input.responseNode.fullFen),
     canonicalHistory
   );
   const selectedMove = canonicalChess.move({
@@ -370,7 +368,7 @@ export async function countRareDroppedMoves(repertoireId: string) {
   return prisma.repertoireMove.count({ where: { repertoireId, stopReason: "Too rare" } });
 }
 
-/** S3.11 - S3.14: the end-of-run checks. One message per check that fails; S3.15 throws on any. */
+/** S3.11, S3.13, S3.14: the end-of-run checks. One message per check that fails; S3.15 throws on any. */
 export async function endOfRunFailures(input: {
   repertoireId: string;
   tinyDroppedTotal: number;
@@ -383,15 +381,6 @@ export async function endOfRunFailures(input: {
   const balance = await probabilityBalance(repertoireId, input.tinyDroppedTotal);
   if (Math.abs(balance - 1) > input.config.probabilityTolerance) {
     failures.push(`S3.11: ending total + rareDroppedTotal + unaccountedDroppedTotal + tinyDroppedTotal is ${(balance * 100).toFixed(6)}%, not 100%.`);
-  }
-
-  // S3.12, DB.14
-  const unverified = await prisma.repertoireMove.findMany({
-    where: { repertoireId, playerTurn: "RESPONSE", deepVerified: false },
-    select: { san: true }
-  });
-  if (unverified.length > 0) {
-    failures.push(`S3.12: ${unverified.length} Black responses do not have deepVerified set (first: ${unverified[0].san}).`);
   }
 
   // S3.13, DB.06: a missing status or a half-filled pair.
@@ -449,8 +438,8 @@ export async function generateRepertoire(
   let totalDuplicateHistories = 0;
   let maximumQueueSize = 1;
 
-  const fetchDatabases = dependencies.fetchDatabases ?? fetchAllDatabases;
-  const fetchOpeningMetadata = dependencies.fetchOpeningMetadata ?? fetchMastersOpeningMetadata;
+  const fetchDatabases = dependencies.fetchDatabases ?? fetchExplorer;
+  const fetchOpeningMetadata = dependencies.fetchOpeningMetadata ?? fetchAmateurOpeningMetadata;
   const ensureNodeWikibooks = dependencies.ensureNodeWikibooks ?? ensureRepertoireNodeWikibooks;
   const wait = dependencies.wait ?? delay;
   let repertoire;
@@ -568,8 +557,8 @@ export async function generateRepertoire(
     }
     await attemptCanonicalNodeWikibooks(canonicalSourceNode.id, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
 
-    const [masters, , amateur] = await fetchDatabases(canonicalSourceNode.fullFen, ["MASTERS", "AMATEUR"]);
-    await ensureNodeOpeningMetadata(canonicalSourceNode.id, rebuildOpeningMetadataCache, pickExplorerOpening([masters, amateur]), fetchOpeningMetadata);
+    const amateur = await fetchDatabases(canonicalSourceNode.fullFen);
+    await ensureNodeOpeningMetadata(canonicalSourceNode.id, rebuildOpeningMetadataCache, amateur.opening, fetchOpeningMetadata);
     
     // EX.05: moveProb is a share of the position's total, so the games with no move are not handed to the children.
     // HM.04 / HM.05: every returned move, most popular first; a dropped move has include = false.
@@ -718,35 +707,18 @@ export async function generateRepertoire(
           evaluator: dependencies.responseEvaluator
       });
       const algoResult = canonicalSelection.result;
-      await ensureNodeOpeningMetadata(posAfterWhiteNode.id, rebuildOpeningMetadataCache, algoResult.openingMetadata ?? null, fetchOpeningMetadata);
+      // DB.06 rule 4: EW does not ask Explorer, so a position with Black to move is fetched for the name only.
+      await ensureNodeOpeningMetadata(posAfterWhiteNode.id, rebuildOpeningMetadataCache, "NOT_FETCHED", fetchOpeningMetadata);
       await attemptCanonicalNodeWikibooks(posAfterWhiteNode.id, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
-      // DB.13 the human evidence; DB.14 engineRank.
-      const responseProvenance = {
-        ...responseHumanEvidence({
-          mastersGames: algoResult.selectedStats?.mastersGames ?? null,
-          eliteGames: algoResult.selectedStats?.eliteGames ?? null,
-          weightedGames: algoResult.moveOrigin === "Human Move" ? algoResult.selectedStats?.weightedGames ?? null : null,
-          totalMastersGames: algoResult.totalMastersGames,
-          totalEliteGames: algoResult.totalEliteGames
-        }),
-        engineRank: algoResult.engineRank ?? null
-      };
-
 
       totalBlackMovesEvaluated++;
       if (algoResult.cp === null) {
           totalNaEvals++;
       }
 
-      let scoreStr = "N/A";
-      let volStr = "0";
-      if (algoResult.selectedStats) {
-          scoreStr = (algoResult.selectedStats.blackScore * 100).toFixed(1) + "%";
-          volStr = algoResult.selectedStats.weightedGames.toString();
-      }
-
-      console.log(`Black responds with: ${algoResult.selectedMoveSan} -> Score: ${scoreStr} | Weighted Vol: ${volStr} | ${algoResult.source} Eval: ${algoResult.cp !== null ? (algoResult.cp / 100).toFixed(2) : 'M' + Math.abs(algoResult.mate!)}`);
-      const explanation = `Score: ${scoreStr} | Weighted Vol: ${volStr} | Eval: ${algoResult.cp !== null ? (algoResult.cp/100).toFixed(2) : 'M' + Math.abs(algoResult.mate!)}`;
+      const evalText = algoResult.cp !== null ? (algoResult.cp / 100).toFixed(2) : 'M' + Math.abs(algoResult.mate!);
+      console.log(`Black responds with: ${algoResult.selectedMoveSan} -> ${algoResult.selectionMethod} | ${algoResult.source} Eval: ${evalText}`);
+      const explanation = `${algoResult.selectionMethod} | Eval: ${evalText}`;
 
       const selectedDestinationFen = canonicalSelection.selectedDestinationFullFen;
       const selectedHistory = [...canonicalSelection.canonicalHistory, canonicalSelection.selectedSan];
@@ -789,12 +761,10 @@ export async function generateRepertoire(
           san: algoResult.selectedMoveSan,
           cp: algoResult.cp,
           mate: algoResult.mate,
-          ...responseProvenance,
           source: algoResult.source,
           selectionMethod: algoResult.selectionMethod,
           moveOrigin: algoResult.moveOrigin,
-          deepVerified: algoResult.deepVerified,
-          localEvaluationProfile: algoResult.localEvaluationProfile
+          engineRank: algoResult.engineRank
       });
       responseId = createdResponse.id;
 

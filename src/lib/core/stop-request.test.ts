@@ -30,11 +30,7 @@ describe("S0 stop request in the main loop", () => {
         // The root has no games, so the queue is empty once it is processed.
         fetchDatabases: (async () => {
           stopRequested = true;
-          return [
-            { moves: [], totalGames: 0, opening: undefined },
-            { moves: [], totalGames: 0 },
-            { moves: [], totalGames: 0 }
-          ];
+          return { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0, opening: null };
         }) as any,
         fetchOpeningMetadata: async () => null,
         ensureNodeWikibooks: (async () => ({ status: "CACHED", text: null })) as any,

@@ -6,16 +6,16 @@ import * as path from 'path';
 import { defaultConfig, computeLocalEngineEvaluationProfile, type Config } from './config';
 import {
   ConsoleDetachedEngine,
+  assertStockfishVersion,
   collectLocalSearchUpdates,
+  parseInfoLine,
   getOrCreateLocalBaseline,
   getOrCreateLocalCandidate,
   runTrustedLocalSearch,
-  verifyLocalCandidate,
   type LocalEngineFactory,
   type LocalSearchRunner,
   type TrustedLocalEvaluation
 } from './local-engine';
-import { verifyLocalOrdinaryCp } from './verifier';
 import { readLocalEngineBaseline, readLocalEngineCandidate, saveLocalEngineBaseline, saveLocalEngineCandidate } from '../db/operations';
 
 const prisma = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
@@ -212,7 +212,7 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
       engineFactory([{ depth: 24, score: { unit: 'cp', value: -15 }, pv: 'c7c6' }], calls)
     );
     assert.equal(result.uci, 'c7c6');
-    assert.deepEqual(calls.find(call => call.kind === 'go')?.value, { depth: 24, searchmoves: 'c7c6' });
+    assert.deepEqual(calls.find(call => call.kind === 'go')?.value, { depth: 24, searchmoves: ['c7c6'] });
     await assert.rejects(
       runTrustedLocalSearch(blackFen, { depth: 24, multiPv: 1 }, 'c7c6', engineFactory([{ score: { unit: 'cp', value: 0 }, pv: 'e7e5' }], [])),
       /requested c7c6 but returned e7e5/
@@ -265,50 +265,6 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
     assert.equal(calls, 5);
   });
 
-  await t.test('baseline-best candidate skips constrained search', async () => {
-    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
-    const requested: Array<string | undefined> = [];
-    const runner: LocalSearchRunner = async (_fen, _settings, expected) => {
-      requested.push(expected);
-      return cpEval('e7e5', 'e5', -30);
-    };
-    const result = await verifyLocalCandidate(blackFen, 'e7e5', 0, defaultConfig, runner);
-    assert.equal(result.decision, 'ACCEPT');
-    assert.equal(result.candidateWasBaselineBest, true);
-    assert.deepEqual(requested, [undefined]);
-    assert.equal(await prisma.engineCacheEvaluation.count({ where: { rank: null, cache: { engine: "LOCAL" } } }), 0);
-  });
-
-  await t.test('different target runs comparable constrained search and strict cp maths', async () => {
-    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
-    const calls: Array<{ expected: string | undefined; depth: number; multiPv: number }> = [];
-    const runner: LocalSearchRunner = async (_fen, settings, expected) => {
-      calls.push({ expected, ...settings });
-      return expected ? cpEval(expected, 'c6', 65) : cpEval('e7e5', 'e5', -30);
-    };
-    const accepted = await verifyLocalCandidate(blackFen, 'c7c6', 95, defaultConfig, runner);
-    assert.equal(accepted.decision, 'ACCEPT');
-    assert.deepEqual(calls, [
-      { expected: undefined, depth: 24, multiPv: 1 },
-      { expected: 'c7c6', depth: 24, multiPv: 1 }
-    ]);
-    assert.equal(verifyLocalOrdinaryCp(-30, 65, 95), 'ACCEPT');
-    assert.equal(verifyLocalOrdinaryCp(-30, 66, 95), 'REJECT');
-    assert.throws(() => verifyLocalOrdinaryCp(-20, -30, 95), /better than baseline/);
-  });
-
-  await t.test('EW.10 where a mate is involved, only the same mate distance as the baseline passes', async () => {
-    const decide = async (baseline: TrustedLocalEvaluation, candidate: TrustedLocalEvaluation) => {
-      await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
-      const runner: LocalSearchRunner = async (_fen, _settings, expected) => expected ? candidate : baseline;
-      return (await verifyLocalCandidate(blackFen, 'c7c6', 95, defaultConfig, runner)).decision;
-    };
-    assert.equal(await decide(mateEval('e7e5', 'e5', -3), cpEval('c7c6', 'c6', -500)), 'REJECT', 'misses the mate');
-    assert.equal(await decide(mateEval('e7e5', 'e5', -3), mateEval('c7c6', 'c6', -4)), 'REJECT', 'a longer mate');
-    assert.equal(await decide(mateEval('e7e5', 'e5', -3), mateEval('c7c6', 'c6', -3)), 'ACCEPT', 'the same mate distance');
-    assert.equal(await decide(cpEval('e7e5', 'e5', -30), mateEval('c7c6', 'c6', 6)), 'REJECT', 'walks into a mate');
-  });
-
   await t.test('invalid replacement preserves trusted evidence and malformed evidence is not persisted', async () => {
     await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
     await saveLocalEngineBaseline(blackFen, profile, cpEval('e7e5', 'e5', -20));
@@ -326,12 +282,37 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
   await prisma.$disconnect();
 });
 
-test('S0.04: Stockfish started off the console still searches and quits', async () => {
+test('EW.09: only the configured Stockfish version is accepted', () => {
+  const handshake = (name: string) => ['Stockfish by the Stockfish developers', `id name ${name}`, 'id author the Stockfish developers', 'uciok'];
+  assert.doesNotThrow(() => assertStockfishVersion(handshake('Stockfish 19')));
+  assert.doesNotThrow(() => assertStockfishVersion(handshake('Stockfish 19 (dev build)')));
+  assert.throws(() => assertStockfishVersion(handshake('Stockfish 18')), /requires Stockfish 19 at bin\/stockfish\.exe; found Stockfish 18/);
+  assert.throws(() => assertStockfishVersion(handshake('Stockfish 190')), /found Stockfish 190/);
+  assert.throws(() => assertStockfishVersion(['uciok']), /found \(no name\)/);
+});
+
+test('EW.13: a searchmoves info line is read in the shape node-uci gives', () => {
+  assert.deepEqual(
+    parseInfoLine('info depth 12 seldepth 18 multipv 1 score cp -41 nodes 90000 nps 900000 time 100 pv c7c6 d2d4 d7d5'),
+    { depth: 12, score: { unit: 'cp', value: -41 }, pv: 'c7c6 d2d4 d7d5' }
+  );
+  assert.deepEqual(parseInfoLine('info depth 30 score mate -3 pv h4e1'), { depth: 30, score: { unit: 'mate', value: -3 }, pv: 'h4e1' });
+  assert.equal(parseInfoLine('info depth 12 score cp -41 lowerbound pv c7c6'), null, 'a bound is not an exact score');
+  assert.equal(parseInfoLine('info string NNUE evaluation using nn.nnue'), null);
+  assert.equal(parseInfoLine('bestmove c7c6 ponder d2d4'), null);
+});
+
+// Needs bin/stockfish.exe to be Stockfish 19.
+test('S0.04 EW.13: Stockfish started off the console still searches, with and without searchmoves, and quits', async () => {
   const engine = new ConsoleDetachedEngine(path.resolve(process.cwd(), 'bin', 'stockfish.exe'));
   await engine.init();
   await engine.position(blackFen);
   const result = await engine.go({ depth: 1 });
   assert.ok(Array.isArray(result.info) && result.info.length > 0);
+  // searchmoves must come last in the go command, or the depth is lost and the search never ends.
+  const restricted = await engine.go({ depth: 6, searchmoves: ['c7c6'] });
+  const updates = collectLocalSearchUpdates(blackFen, restricted.info, 'c7c6');
+  assert.deepEqual(updates.map(update => update.uci), ['c7c6']);
   const proc = engine.proc!;
   await engine.quit();
   assert.notEqual(proc.exitCode, null);
