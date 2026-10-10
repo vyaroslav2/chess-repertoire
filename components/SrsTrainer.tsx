@@ -397,7 +397,7 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
 
       <div
         style={{
-          width: "748px", maxWidth: "100%", marginBottom: "-14px",
+          width: "560px", maxWidth: "100%", marginBottom: "-14px",
           color: "var(--lichess-text-muted)", fontSize: "14px", lineHeight: "20px",
           whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
           // Always render placeholder text and reserve the line's height, even when there's
@@ -416,6 +416,7 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
         width: "max-content",
         height: "560px",
         margin: "0 auto",
+        position: "relative",
       }}>
         <div className={`cg-board-newspaper piece-set-merida ${testStatus !== 'idle' ? 'board-locked' : ''}`} style={{ width: "560px", height: "560px", boxShadow: "var(--glass-shadow)" }}>
           <Chessground
@@ -440,8 +441,11 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
           />
         </div>
 
-        {/* Move List Side Panel */}
-        <div style={{ 
+        {/* Move List Side Panel — out of the flow so only the board is centred (UI.01, UI.02) */}
+        <div style={{
+          position: "absolute",
+          left: "100%",
+          top: 0,
           width: "188px", 
           height: "560px", 
           overflow: "hidden",
