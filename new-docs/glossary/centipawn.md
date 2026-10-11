@@ -22,5 +22,5 @@ aliases:
 |`300`|`+3.00`|White up about a piece|
 |`-1000`|`-10.00`|Black winning|
 
-A mate is not a `cp`. It goes in `mate` instead ([[DB|DB.12]], [[DB|DB.14]]).
+A mate is not a `cp`. It goes in `mate` instead ([[DB|DB.11]], [[DB|DB.12]]).
 

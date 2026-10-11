@@ -56,11 +56,16 @@ DB.09 **One Black move per position.** A position where Black is to move carries
 
 DB.10 **White move fields.**
 * `moveProb` — the [[move-probability|move probability]].
+* The eval (DB.11).
+
+DB.11 **Every move carries an eval.** White's and Black's alike, dropped moves included. Exactly one of `cp` or `mate` — never both, never neither — and its `source`, `Local Stockfish 19`. A move without one is a hard error ([[OV|OV.20]]).
+* White move: Stockfish's eval of the position the move reaches, Black to move ([[HM|HM.09]]). For an expanded move this is the search [[EW|EW.09]] runs anyway, so it costs nothing extra.
+* Black move: Stockfish's eval of that move, from the position it is played in ([[EW|EW.10]]).
+* A move that ends the game leaves nothing to search. Checkmate: `mate = 1` if White mates, `mate = -1` if Black mates — the figure Stockfish gives the mating move itself. Stalemate: `cp = 0`.
 
 DB.12 **Mate is never zero.** `mate = 0` is invalid: there is always at least one move left in which to deliver the mate. A negative `mate` means Black mates, a positive one means White does.
 
-DB.14 **Black move fields — the engine evidence.** Exactly one of `cp` or `mate` — never both, never neither. Alongside it:
-* `source` — `Local Stockfish 19`.
+DB.14 **Black move fields — the engine evidence.** The eval (DB.11), and alongside it:
 * `selectionMethod` — which path through [[EW]] produced it: Stockfish's baseline ([[EW|EW.09]]) or a hardcoded response ([[EW|EW.13]]).
 * `moveOrigin` — `Engine Move` or `Hardcoded Move`.
 * `engineRank` — `1` if the move is Stockfish's baseline, otherwise `null`.[^4]
@@ -102,7 +107,7 @@ DB.36 **The `Position` table is not a cache.** It maps `positionKey` to the node
 
 [^5]: see [[centipawn]]
 
-[^6]: Stockfish reports from the side to move. Black is to move, so its figures are flipped on the way in.
+[^6]: Stockfish reports from the side to move. Every position we search has Black to move — after White's move for both White's eval and Black's — so its figures are flipped on the way in.
 
 
 

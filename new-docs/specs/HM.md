@@ -32,6 +32,8 @@ HM.07 Each returned move is then checked one at a time. The order is fixed and a
 
 HM.08 If Explorer returned moves but all of them were filtered away `-->` end the route, log the stop reason `"[WARNING] All opponent moves were filtered away."`, and go to [[S3|S3.01]].
 
+HM.09 **Every returned move gets an eval** ([[DB|DB.11]]), whatever the checks in HM.07 decide: too rare, repetition and transposition moves too. Run local Stockfish on the position the move reaches, through `EngineCache` as in [[EW|EW.09]]: a hit is used as-is, only a miss is run. An expanded move needs no second search, since EW searches the same position and the cache serves both. A move that ends the game by checkmate or stalemate is not searched ([[DB|DB.11]]).
+
 [^1]: see [[generation-config]] and [[popularity-thresholds|popularityThresholds]]
 
 
