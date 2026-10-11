@@ -29,7 +29,7 @@ export default function GridDemo() {
   return (
     <div style={{ display: "flex", gap: "48px", alignItems: "flex-start", justifyContent: "center", padding: "32px 20px" }}>
       <figure>
-        <figcaption style={caption}>As in the app: 188 × board height, scrolls. Click or use the arrow keys.</figcaption>
+        <figcaption style={caption}>As in the app: 220 × board height, scrolls. Click or use the arrow keys.</figcaption>
         <div style={{ ...panel, height: "var(--board-size)" }}>
           <LichessMoveList moves={moves} currentPlyIndex={ply} onMoveClick={setPly} />
         </div>
@@ -44,5 +44,5 @@ export default function GridDemo() {
   );
 }
 
-const caption = { fontFamily: "var(--font-jetbrains-mono)", fontSize: "12px", lineHeight: "20px", color: "#bababa", marginBottom: "8px", width: "188px" } as const;
-const panel = { width: "188px", backgroundColor: "var(--lichess-panel-bg)" } as const;
+const caption = { fontFamily: "var(--font-jetbrains-mono)", fontSize: "12px", lineHeight: "20px", color: "#bababa", marginBottom: "8px", width: "220px" } as const;
+const panel = { width: "220px", backgroundColor: "var(--lichess-panel-bg)" } as const;

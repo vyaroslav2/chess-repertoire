@@ -452,7 +452,7 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
           position: "absolute",
           left: "100%",
           top: 0,
-          width: "188px", 
+          width: "220px", 
           height: "var(--board-size)", 
           overflow: "hidden",
           backgroundColor: "var(--lichess-panel-bg)",

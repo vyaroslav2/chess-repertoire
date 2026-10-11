@@ -7,7 +7,7 @@ tags:
 UI describes how the board screen looks and behaves.
 
 UI.01 The chessboard is centred on the page, across and down.
-UI.02 The move list stays attached to the right edge of the board. It is 188px wide and as tall as the board. It does not count towards centring, so only the board is centred. Nothing else moves, except the opening name (UI.04).
+UI.02 The move list stays attached to the right edge of the board. It is 220px wide and as tall as the board. It does not count towards centring, so only the board is centred. Nothing else moves, except the opening name (UI.04).
 
 UI.04 The opening name above the board is as wide as the board and lines up with its left edge. A name too long for that width ends in an ellipsis.
 
@@ -22,7 +22,7 @@ UI.08 Opening name: 14px, line height 20px, letter spacing -0.0062em (-0.087px),
 UI.09 Board: 691.2 × 691.2px (UI.18), Lichess "newspaper" squares, Lichess "merida" pieces. No shadow: `--glass-shadow` is commented out.
 UI.10 Board highlights (Chessground "brown" theme): last move `rgba(155, 199, 0, 0.41)`; selected square `rgba(20, 85, 30, 0.5)`; legal-move dot `#208530`; check is a red glow.
 UI.11 Coordinates: Arial, 13px, weight 400, lower case, `#817e7a` (`--coord-text`), 4.52 : 1 on the page background: the same warm tint as the opening name, dimmer. Ranks on the left, files at the bottom. Where Arial is not installed (Linux, Android), Arimo stands in: it has Arial's letter widths, is self-hosted and is not preloaded, so only those machines download it.
-UI.12 Move list panel: 188 × 691.2px, background `#262421` (`--lichess-panel-bg`). Scrollbar 8px wide, thumb `#555` (`#777` on hover), track `#262421`.
+UI.12 Move list panel: 220 × 691.2px (275 screen px wide at 125%), background `#262421` (`--lichess-panel-bg`). Scrollbar 8px wide, thumb `#555` (`#777` on hover), track `#262421`.
 UI.13 Move numbers: Roboto, 14px, line height 26px, `#787674` (`--lichess-text-muted`), centred in a shaded cell (`#33312e`), with no dot, as on the Lichess analysis board.
 UI.14 Moves: Roboto, 16.59px, line height 26px, `#bababa` (`--lichess-text-primary`). Hover background `#363431`. The current move: background `#3692e7` (`--lichess-accent`), text `#ffffff` (`--lichess-text-bright`), weight 600.
 UI.15 Answer bar (bottom-left corner, 250 × 25px, border `#363431`): wrong `#c62828`, correct `#629924` (`--lichess-green`), revealed `#f9a825`.
