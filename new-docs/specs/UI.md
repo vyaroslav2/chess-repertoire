@@ -7,7 +7,7 @@ tags:
 UI describes how the board screen looks and behaves.
 
 UI.01 The chessboard is centred horizontally on the page.
-UI.02 The move list stays attached to the right edge of the board, at its current size. It does not count towards centring, so only the board is centred. Nothing else moves, except the opening name (UI.04).
+UI.02 The move list stays attached to the right edge of the board. It is 188px wide and as tall as the board. It does not count towards centring, so only the board is centred. Nothing else moves, except the opening name (UI.04).
 
 UI.04 The opening name above the board is as wide as the board and lines up with its left edge. A name too long for that width ends in an ellipsis.
 
@@ -19,15 +19,20 @@ UI.05 Fonts. Only JetBrains Mono is loaded by the app (Google Fonts). Inter come
 UI.06 Page background: `#161512` (`--lichess-bg`).
 UI.07 Status line above the board: 16px, normal weight, `#787674` (`--lichess-text-muted`). It is hidden until the pointer is over it.
 UI.08 Opening name: 14px, line height 20px, `#787674` (`--lichess-text-muted`).
-UI.09 Board: 560 × 560px, Lichess "newspaper" squares, Lichess "merida" pieces. No shadow: `--glass-shadow` is commented out.
+UI.09 Board: 691.2 × 691.2px (UI.18), Lichess "newspaper" squares, Lichess "merida" pieces. No shadow: `--glass-shadow` is commented out.
 UI.10 Board highlights (Chessground "brown" theme): last move `rgba(155, 199, 0, 0.41)`; selected square `rgba(20, 85, 30, 0.5)`; legal-move dot `#208530`; check is a red glow.
 UI.11 Coordinates: 13px, weight 500, lower case, `#787674` (`--lichess-text-muted`). Ranks on the left, files at the bottom.
-UI.12 Move list panel: 188 × 560px, background `#262421` (`--lichess-panel-bg`). Scrollbar 8px wide, thumb `#555` (`#777` on hover), track `#262421`.
+UI.12 Move list panel: 188 × 691.2px, background `#262421` (`--lichess-panel-bg`). Scrollbar 8px wide, thumb `#555` (`#777` on hover), track `#262421`.
 UI.13 Move numbers: 14.5px, line height 26px, `#787674` (`--lichess-text-muted`).
 UI.14 Moves: JetBrains Mono, 14.5px, line height 26px, `#bababa` (`--lichess-text-primary`). Hover background `#363431`. The current move: background `#3692e7` (`--lichess-accent`), text `#ffffff` (`--lichess-text-bright`), weight 600.
 UI.15 Answer bar (bottom-left corner, 250 × 25px, border `#363431`): wrong `#c62828`, correct `#629924` (`--lichess-green`), revealed `#f9a825`.
 UI.16 End screen: heading 32px, `#629924` (`--lichess-green`); text below it 17.6px, `#787674` (`--lichess-text-muted`).
-UI.17 The board's border is uneven. It is not a CSS border: it comes from the square outlines in Lichess's `newspaper.svg` (`#939393`, about 0.84px), and the outer half of each edge outline is cut off. At 100% display scale the left and top edges show a 1px line, the right and bottom show none, and the lines between squares are 1px. At 125% all four edges show a 1px line, but the lines between squares are 1 or 2px, unevenly. Measured in Edge; Firefox not checked. Should the app draw its own 1px `#939393` border on all four sides? #question
+UI.17 The board's border is uneven. It is not a CSS border: it comes from the square outlines in Lichess's `newspaper.svg` (`#939393`, about 0.84px), and the outer half of each edge outline is cut off. At 100% display scale the left and top edges show a 1px line, the right and bottom show none, and the lines between squares are 1px. At 125% all four edges show a 1px line, but the lines between squares are 1 or 2px, unevenly. Measured in Edge; Firefox not checked. Answer: the app draws its own `#939393` edge over the board, 1.6px (2 screen px at 125%), the same width as the lines between squares. With UI.18, every line and edge is 2 screen px. Measured in Edge at 125%.
+UI.18 Sizes are pixel-exact for one screen only: 1920 × 1080 at 125% Windows scale, browser zoom 100%. 1 CSS px = 1.25 screen px, so every size and gap above the board is a multiple of 0.8px (0.8px = 1 screen px; 4px = 5). A temporary fix; on other screens it works but is not pixel-exact. #note
+- Board: `--board-size` 691.2px = 864 screen px, 108 per square, as Lichess shows it on this screen.
+- From the top: padding 8, status line 24, gap 8, opening name 20, gap 4. Board top at 64px = 80 screen px. Placed from the top, not centred vertically.
+- Left edge, centred in 1536px: 422.4px = 528 screen px. Whole pixels only while the page has no scrollbar, so the page must fit the height (about 779px). File letters end at 775.2px.
+- The rank labels are clipped to their box: the last one's box hung below the board and made the page scroll.
 
 
 ---
@@ -47,3 +52,20 @@ Most of the colour values do come from Lichess:
 |`--lichess-border`|`#363431`|`--c-border`|`#404040`, different|
 
 So the muted text and the border are not Lichess's colours, even though their names suggest they are. I didn't check the other variables.
+
+
+---
+//- 690px-690px Lichess's board size. I want to reproduce that in my UI. -//
+%%Doable, but 690 itself is a poor size: 690 ÷ 8 = 86.25px per square. Squares that aren't whole pixels give uneven lines, as in UI.17.
+**How Lichess avoids that.** Lichess doesn't fix 690. It sizes the board to the window and lets Chessground round it down, so each square is a whole number of screen pixels (`render.ts`, line 187). So the 690 you measured is probably the outer box. At 100% scale the board inside would be 688 (86px squares).
+**Why ours is uneven.** `globals.css` forces 560px with `!important`, which switches that rounding off. At 125% each square is then 87.5 screen pixels. That is the cause of UI.17.
+**Three choices:**
+1. **688px** (86px squares). Closest to 690, exact at 100%. At 125% it's uneven again (107.5 screen pixels).
+2. **704px** (88px squares) or **672px** (84px). Exact at 100%, 125% and 150%, because each square is a multiple of 4px. 704 is the nearest such size above 690.
+3. **Do what Lichess does:** drop the `!important` override and let Chessground round. Any size then works at any scale, but the board may come out a few pixels smaller than asked. The override was added to stop "Windows DPI sub-pixel gaps", so this needs testing at 100% and 125% to check that the gaps don't come back.
+I'd take 2 (704px) for a fixed size, or 3 to match Lichess fully. Both fix only half of UI.17: the lines between squares become even, but the outer edge does not. At 100% the 560px board already has whole 70px squares, and its right and bottom edges still have no line. The SVG cuts off the outer half of the edge outlines at any size. An even outer edge needs the app's own border (UI.17's question).
+**What changes, wherever it lands:** the three `560px` sizes in `globals.css` (`.cg-wrap`, `cg-container`, `cg-board`) and four in `SrsTrainer.tsx` (the board, the row height, the move list height, the opening-name width from UI.04). Then UI.04, UI.09 and UI.12 need the new size.
+**Two side effects:**
+- Board plus move list on both sides of centre needs a window at least 704 + 2 × 188 = 1,080px wide. Below that the move list runs off the right edge.
+- Height: the board plus the two text rows above it is about 800px. A 1080p screen at 125% shows only about 730px of page height in the browser, so the page would scroll. Lichess avoids this by fitting the board to the window height.
+Decide two things: the size, and whether the move list grows to the board's height. UI.02 says it keeps its current size, 188 × 560.%%

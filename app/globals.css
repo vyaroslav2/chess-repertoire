@@ -11,6 +11,10 @@
   --lichess-green: #629924;
   --lichess-green-hover: #75b32c;
   --lichess-accent: #3692e7;
+
+  /* Lichess's board on a 1920 × 1080 screen at 125%: 864 screen px, 108 per square.
+     Pixel-exact only at that scale (UI.18). */
+  --board-size: 691.2px;
   
   /*--glass-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);*/
 
@@ -210,10 +214,10 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
 .piece-set-merida piece.queen.black { background-image: url('https://lichess1.org/assets/piece/merida/bQ.svg') !important; }
 .piece-set-merida piece.king.black { background-image: url('https://lichess1.org/assets/piece/merida/bK.svg') !important; }
 
-/* Force exactly 560px scaling to absolutely prevent Windows DPI sub-pixel gaps */
+/* Force an exact board size to prevent Windows DPI sub-pixel gaps */
 .cg-wrap, cg-container, cg-board {
-  width: 560px !important;
-  height: 560px !important;
+  width: var(--board-size) !important;
+  height: var(--board-size) !important;
 }
 
 /* Coordinates (Rank numbers on LEFT, File letters on BOTTOM) */
@@ -226,6 +230,20 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
   flex-direction: column-reverse !important;
   justify-content: space-around !important;
   align-items: flex-end !important;
+  /* Chessground shifts each label down 39%, so the last label's box hangs below
+     the board and makes the page scroll. The text itself stays inside. */
+  overflow: hidden !important;
+}
+
+/* Our own outer edge (UI.17): the SVG cuts off the outer half of the edge
+   outlines. 1.6px = 2 screen px at 125%, the same as the lines between squares. */
+.cg-board-newspaper::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1.6px solid #939393;
+  pointer-events: none;
+  z-index: 3;
 }
 
 /* Demo-mode status line (cards remaining / graduated / good streak) — kept out

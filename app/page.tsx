@@ -24,9 +24,9 @@ export default async function Home() {
   const demoStats = await fetchDemoPositions(rep.id);
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", 
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "flex-start", alignItems: "center", 
     background: "#161512", 
-    gap: "20px", padding: "20px" }}>
+    gap: "20px", padding: "8px 20px 0" }}>
       <SrsTrainer dueStats={demoStats} demoMode />
     </div>
   );

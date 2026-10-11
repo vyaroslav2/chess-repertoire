@@ -375,7 +375,7 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "20px", position: "relative" }}>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px", position: "relative" }}>
       
       {testStatus !== "idle" && (
         <div
@@ -397,7 +397,7 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
 
       <div
         style={{
-          width: "560px", maxWidth: "100%", marginBottom: "-14px",
+          width: "var(--board-size)", maxWidth: "100%", marginBottom: "-4px",
           color: "var(--lichess-text-muted)", fontSize: "14px", lineHeight: "20px",
           whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
           // Always render placeholder text and reserve the line's height, even when there's
@@ -414,11 +414,11 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
         alignItems: "flex-start", 
         justifyContent: "center", 
         width: "max-content",
-        height: "560px",
+        height: "var(--board-size)",
         margin: "0 auto",
         position: "relative",
       }}>
-        <div className={`cg-board-newspaper piece-set-merida ${testStatus !== 'idle' ? 'board-locked' : ''}`} style={{ width: "560px", height: "560px", boxShadow: "var(--glass-shadow)", position: "relative", zIndex: 1 }}>
+        <div className={`cg-board-newspaper piece-set-merida ${testStatus !== 'idle' ? 'board-locked' : ''}`} style={{ width: "var(--board-size)", height: "var(--board-size)", boxShadow: "var(--glass-shadow)", position: "relative", zIndex: 1 }}>
           <Chessground
             width="100%"
             height="100%"
@@ -447,7 +447,7 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
           left: "100%",
           top: 0,
           width: "188px", 
-          height: "560px", 
+          height: "var(--board-size)", 
           overflow: "hidden",
           backgroundColor: "var(--lichess-panel-bg)",
           boxShadow: "-4px 0 0 0 var(--lichess-panel-bg)"
