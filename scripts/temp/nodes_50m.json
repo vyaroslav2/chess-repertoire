@@ -1,0 +1,102 @@
+{
+ "config": {
+  "depths": [
+   99
+  ],
+  "multipv": 1,
+  "threads": 1,
+  "hash_mb": 256,
+  "time_cap": null,
+  "stockfish": "C:\\chess-repertoire\\stockfish-windows-x86-64-universal\\stockfish\\stockfish-windows-x86-64-universal.exe"
+ },
+ "positions": [
+  {
+   "fen": "rnbqkbnr/pp2pp1p/2pp2p1/8/3PP3/2N2N2/PPP2PPP/R1BQKB1R b KQkq - 1 4",
+   "lines": 1,
+   "seconds": 105.72,
+   "nodes": 45919158,
+   "target": 99,
+   "reached": 37,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "37": [
+     {
+      "uci": "f8g7",
+      "san": "Bg7",
+      "cp": -66,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnbqkbnr/pp1ppppp/2p5/8/3PP3/8/PPP2PPP/RNBQKBNR b KQkq - 0 2",
+   "lines": 1,
+   "seconds": 99.08,
+   "nodes": 45301145,
+   "target": 99,
+   "reached": 38,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "38": [
+     {
+      "uci": "d7d5",
+      "san": "d5",
+      "cp": -34,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnbqkbnr/pp2pppp/2p5/3P4/3P4/8/PPP2PPP/RNBQKBNR b KQkq - 0 3",
+   "lines": 1,
+   "seconds": 96.06,
+   "nodes": 46782329,
+   "target": 99,
+   "reached": 41,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "41": [
+     {
+      "uci": "c6d5",
+      "san": "cxd5",
+      "cp": -15,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnb1kbnr/pp2pppp/2p5/3q4/3P4/5N2/PPP2PPP/RNBQKB1R b KQkq - 1 4",
+   "lines": 1,
+   "seconds": 113.26,
+   "nodes": 50000452,
+   "target": 99,
+   "reached": 42,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "42": [
+     {
+      "uci": "c8g4",
+      "san": "Bg4",
+      "cp": -90,
+      "mate": null
+     }
+    ]
+   }
+  }
+ ]
+}
