@@ -97,6 +97,358 @@
      }
     ]
    }
+  },
+  {
+   "fen": "rnb1kbnr/pp2pppp/2p5/q7/3P4/2N2N2/PPP2PPP/R1BQKB1R b KQkq - 3 5",
+   "lines": 1,
+   "seconds": 86.09,
+   "nodes": 37190121,
+   "target": 99,
+   "reached": 36,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "36": [
+     {
+      "uci": "c8f5",
+      "san": "Bf5",
+      "cp": -69,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnbqkbnr/pp2pppp/2p5/3pP3/3P4/8/PPP2PPP/RNBQKBNR b KQkq - 0 3",
+   "lines": 1,
+   "seconds": 99.24,
+   "nodes": 44202395,
+   "target": 99,
+   "reached": 37,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "37": [
+     {
+      "uci": "c6c5",
+      "san": "c5",
+      "cp": -30,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnbqkbnr/1p2pppp/p1p5/3pP3/3P4/3B4/PPP2PPP/RNBQK1NR b KQkq - 1 4",
+   "lines": 1,
+   "seconds": 105.44,
+   "nodes": 50000324,
+   "target": 99,
+   "reached": 38,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "38": [
+     {
+      "uci": "c6c5",
+      "san": "c5",
+      "cp": -61,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnbqkbnr/1p2pp1p/p1p3p1/3pP3/3P4/2PB4/PP3PPP/RNBQK1NR b KQkq - 0 5",
+   "lines": 1,
+   "seconds": 113.81,
+   "nodes": 50000106,
+   "target": 99,
+   "reached": 37,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "37": [
+     {
+      "uci": "g8h6",
+      "san": "Nh6",
+      "cp": -128,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnbqkbnr/ppp1pppp/8/3p4/3P4/5N2/PPP1PPPP/RNBQKB1R b KQkq - 1 2",
+   "lines": 1,
+   "seconds": 101.59,
+   "nodes": 46895677,
+   "target": 99,
+   "reached": 41,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "41": [
+     {
+      "uci": "g8f6",
+      "san": "Nf6",
+      "cp": -16,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnbqkbnr/pp2pppp/2p5/3p4/3P4/4PN2/PPP2PPP/RNBQKB1R b KQkq - 0 3",
+   "lines": 1,
+   "seconds": 89.93,
+   "nodes": 42228991,
+   "target": 99,
+   "reached": 42,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "42": [
+     {
+      "uci": "c8f5",
+      "san": "Bf5",
+      "cp": -11,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rn1qkbnr/pp2pppp/2p5/3p4/3P2b1/4PN2/PPP1BPPP/RNBQK2R b KQkq - 2 4",
+   "lines": 1,
+   "seconds": 92.75,
+   "nodes": 40892382,
+   "target": 99,
+   "reached": 40,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "40": [
+     {
+      "uci": "b8d7",
+      "san": "Nd7",
+      "cp": -7,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "r2qkbnr/pp1npppp/2p5/3p4/3P2b1/4PN2/PPPNBPPP/R1BQK2R b KQkq - 4 5",
+   "lines": 1,
+   "seconds": 113.75,
+   "nodes": 49641431,
+   "target": 99,
+   "reached": 39,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "39": [
+     {
+      "uci": "g8f6",
+      "san": "Ngf6",
+      "cp": 0,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnbqkbnr/ppp1pppp/8/3p4/3P4/4P3/PPP2PPP/RNBQKBNR b KQkq - 0 2",
+   "lines": 1,
+   "seconds": 115.74,
+   "nodes": 44094013,
+   "target": 99,
+   "reached": 40,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "40": [
+     {
+      "uci": "g8f6",
+      "san": "Nf6",
+      "cp": -5,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rn1qkbnr/ppp1pppp/8/3p1b2/3P4/4PN2/PPP2PPP/RNBQKB1R b KQkq - 2 3",
+   "lines": 1,
+   "seconds": 123.11,
+   "nodes": 50000664,
+   "target": 99,
+   "reached": 45,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "45": [
+     {
+      "uci": "e7e6",
+      "san": "e6",
+      "cp": -10,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rn1qkbnr/ppp2ppp/4p3/3p1b2/3P4/P3PN2/1PP2PPP/RNBQKB1R b KQkq - 0 4",
+   "lines": 1,
+   "seconds": 117.3,
+   "nodes": 40423743,
+   "target": 99,
+   "reached": 40,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "40": [
+     {
+      "uci": "g8f6",
+      "san": "Nf6",
+      "cp": 3,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "r2qkbnr/pppn1ppp/4p3/3p1b2/1P1P4/P3PN2/2P2PPP/RNBQKB1R b KQkq - 0 5",
+   "lines": 1,
+   "seconds": 123.82,
+   "nodes": 39369412,
+   "target": 99,
+   "reached": 40,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "40": [
+     {
+      "uci": "c7c6",
+      "san": "c6",
+      "cp": 24,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnbqkbnr/pp1ppppp/2p5/8/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2",
+   "lines": 1,
+   "seconds": 152.79,
+   "nodes": 50000342,
+   "target": 99,
+   "reached": 41,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "41": [
+     {
+      "uci": "d7d5",
+      "san": "d5",
+      "cp": -29,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnbqkbnr/pp1ppp1p/2p3p1/8/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 1 3",
+   "lines": 1,
+   "seconds": 152.1,
+   "nodes": 50000195,
+   "target": 99,
+   "reached": 42,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "42": [
+     {
+      "uci": "d7d5",
+      "san": "d5",
+      "cp": -37,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnbqkbnr/pp2pp1p/2p3p1/3P4/2B5/5N2/PPPP1PPP/RNBQK2R b KQkq - 0 4",
+   "lines": 1,
+   "seconds": 117.02,
+   "nodes": 36894086,
+   "target": 99,
+   "reached": 40,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "40": [
+     {
+      "uci": "c6d5",
+      "san": "cxd5",
+      "cp": -8,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnbqkbnr/pp2pp1p/6p1/3p4/8/1B3N2/PPPP1PPP/RNBQK2R b KQkq - 1 5",
+   "lines": 1,
+   "seconds": 250.14,
+   "nodes": 36025444,
+   "target": 99,
+   "reached": 40,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "40": [
+     {
+      "uci": "d5d4",
+      "san": "d4",
+      "cp": 8,
+      "mate": null
+     }
+    ]
+   }
   }
  ]
 }

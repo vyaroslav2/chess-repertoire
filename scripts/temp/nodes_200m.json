@@ -1,0 +1,454 @@
+{
+ "config": {
+  "depths": [
+   245
+  ],
+  "multipv": 1,
+  "threads": 1,
+  "hash_mb": 1024,
+  "time_cap": null,
+  "stockfish": "C:\\chess-repertoire\\stockfish-windows-x86-64-universal\\stockfish\\stockfish-windows-x86-64-universal.exe"
+ },
+ "positions": [
+  {
+   "fen": "rnbqkbnr/pp2pp1p/2pp2p1/8/3PP3/2N2N2/PPP2PPP/R1BQKB1R b KQkq - 1 4",
+   "lines": 1,
+   "seconds": 969.5,
+   "nodes": 196710279,
+   "target": 245,
+   "reached": 44,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "44": [
+     {
+      "uci": "f8g7",
+      "san": "Bg7",
+      "cp": -52,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnbqkbnr/pp1ppppp/2p5/8/3PP3/8/PPP2PPP/RNBQKBNR b KQkq - 0 2",
+   "lines": 1,
+   "seconds": 806.96,
+   "nodes": 200000185,
+   "target": 245,
+   "reached": 46,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "46": [
+     {
+      "uci": "d7d5",
+      "san": "d5",
+      "cp": -38,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnbqkbnr/pp2pppp/2p5/3P4/3P4/8/PPP2PPP/RNBQKBNR b KQkq - 0 3",
+   "lines": 1,
+   "seconds": 588.01,
+   "nodes": 174262077,
+   "target": 245,
+   "reached": 49,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "49": [
+     {
+      "uci": "c6d5",
+      "san": "cxd5",
+      "cp": -15,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnb1kbnr/pp2pppp/2p5/3q4/3P4/5N2/PPP2PPP/RNBQKB1R b KQkq - 1 4",
+   "lines": 1,
+   "seconds": 365.31,
+   "nodes": 150398451,
+   "target": 245,
+   "reached": 45,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "45": [
+     {
+      "uci": "d5d8",
+      "san": "Qd8",
+      "cp": -91,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnb1kbnr/pp2pppp/2p5/q7/3P4/2N2N2/PPP2PPP/R1BQKB1R b KQkq - 3 5",
+   "lines": 1,
+   "seconds": 474.63,
+   "nodes": 194349051,
+   "target": 245,
+   "reached": 44,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "44": [
+     {
+      "uci": "c8f5",
+      "san": "Bf5",
+      "cp": -62,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnbqkbnr/pp2pppp/2p5/3pP3/3P4/8/PPP2PPP/RNBQKBNR b KQkq - 0 3",
+   "lines": 1,
+   "seconds": 451.14,
+   "nodes": 200000096,
+   "target": 245,
+   "reached": 45,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "45": [
+     {
+      "uci": "c6c5",
+      "san": "c5",
+      "cp": -37,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnbqkbnr/1p2pppp/p1p5/3pP3/3P4/3B4/PPP2PPP/RNBQK1NR b KQkq - 1 4",
+   "lines": 1,
+   "seconds": 430.93,
+   "nodes": 189777001,
+   "target": 245,
+   "reached": 45,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "45": [
+     {
+      "uci": "c6c5",
+      "san": "c5",
+      "cp": -58,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnbqkbnr/1p2pp1p/p1p3p1/3pP3/3P4/2PB4/PP3PPP/RNBQK1NR b KQkq - 0 5",
+   "lines": 1,
+   "seconds": 411.65,
+   "nodes": 182069400,
+   "target": 245,
+   "reached": 42,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "42": [
+     {
+      "uci": "c6c5",
+      "san": "c5",
+      "cp": -136,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnbqkbnr/ppp1pppp/8/3p4/3P4/5N2/PPP1PPPP/RNBQKB1R b KQkq - 1 2",
+   "lines": 1,
+   "seconds": 403.49,
+   "nodes": 188290128,
+   "target": 245,
+   "reached": 47,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "47": [
+     {
+      "uci": "g8f6",
+      "san": "Nf6",
+      "cp": -15,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnbqkbnr/pp2pppp/2p5/3p4/3P4/4PN2/PPP2PPP/RNBQKB1R b KQkq - 0 3",
+   "lines": 1,
+   "seconds": 419.86,
+   "nodes": 200000191,
+   "target": 245,
+   "reached": 49,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "49": [
+     {
+      "uci": "c8f5",
+      "san": "Bf5",
+      "cp": -4,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rn1qkbnr/pp2pppp/2p5/3p4/3P2b1/4PN2/PPP1BPPP/RNBQK2R b KQkq - 2 4",
+   "lines": 1,
+   "seconds": 335.96,
+   "nodes": 164167248,
+   "target": 245,
+   "reached": 48,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "48": [
+     {
+      "uci": "b8d7",
+      "san": "Nd7",
+      "cp": -3,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "r2qkbnr/pp1npppp/2p5/3p4/3P2b1/4PN2/PPPNBPPP/R1BQK2R b KQkq - 4 5",
+   "lines": 1,
+   "seconds": 488.95,
+   "nodes": 200000397,
+   "target": 245,
+   "reached": 54,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "54": [
+     {
+      "uci": "g8f6",
+      "san": "Ngf6",
+      "cp": 0,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnbqkbnr/ppp1pppp/8/3p4/3P4/4P3/PPP2PPP/RNBQKBNR b KQkq - 0 2",
+   "lines": 1,
+   "seconds": 483.8,
+   "nodes": 200000086,
+   "target": 245,
+   "reached": 47,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "47": [
+     {
+      "uci": "g8f6",
+      "san": "Nf6",
+      "cp": -5,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rn1qkbnr/ppp1pppp/8/3p1b2/3P4/4PN2/PPP2PPP/RNBQKB1R b KQkq - 2 3",
+   "lines": 1,
+   "seconds": 439.44,
+   "nodes": 184765637,
+   "target": 245,
+   "reached": 48,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "48": [
+     {
+      "uci": "e7e6",
+      "san": "e6",
+      "cp": -5,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rn1qkbnr/ppp2ppp/4p3/3p1b2/3P4/P3PN2/1PP2PPP/RNBQKB1R b KQkq - 0 4",
+   "lines": 1,
+   "seconds": 350.35,
+   "nodes": 158879467,
+   "target": 245,
+   "reached": 47,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "47": [
+     {
+      "uci": "b8d7",
+      "san": "Nd7",
+      "cp": 4,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "r2qkbnr/pppn1ppp/4p3/3p1b2/1P1P4/P3PN2/2P2PPP/RNBQKB1R b KQkq - 0 5",
+   "lines": 1,
+   "seconds": 375.83,
+   "nodes": 166664171,
+   "target": 245,
+   "reached": 44,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "44": [
+     {
+      "uci": "c7c6",
+      "san": "c6",
+      "cp": 22,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnbqkbnr/pp1ppppp/2p5/8/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2",
+   "lines": 1,
+   "seconds": 378.97,
+   "nodes": 173001240,
+   "target": 245,
+   "reached": 45,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "45": [
+     {
+      "uci": "d7d5",
+      "san": "d5",
+      "cp": -21,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnbqkbnr/pp1ppp1p/2p3p1/8/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 1 3",
+   "lines": 1,
+   "seconds": 340.33,
+   "nodes": 159797624,
+   "target": 245,
+   "reached": 47,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "47": [
+     {
+      "uci": "d7d5",
+      "san": "d5",
+      "cp": -23,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnbqkbnr/pp2pp1p/2p3p1/3P4/2B5/5N2/PPPP1PPP/RNBQK2R b KQkq - 0 4",
+   "lines": 1,
+   "seconds": 350.35,
+   "nodes": 161655406,
+   "target": 245,
+   "reached": 46,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "46": [
+     {
+      "uci": "c6d5",
+      "san": "cxd5",
+      "cp": -10,
+      "mate": null
+     }
+    ]
+   }
+  },
+  {
+   "fen": "rnbqkbnr/pp2pp1p/6p1/3p4/8/1B3N2/PPPP1PPP/RNBQK2R b KQkq - 1 5",
+   "lines": 1,
+   "seconds": 443.36,
+   "nodes": 200000441,
+   "target": 245,
+   "reached": 51,
+   "capped": true,
+   "stopped": false,
+   "cached": false,
+   "sign": -1,
+   "depths": {
+    "51": [
+     {
+      "uci": "d5d4",
+      "san": "d4",
+      "cp": 0,
+      "mate": null
+     }
+    ]
+   }
+  }
+ ]
+}
