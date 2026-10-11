@@ -1,6 +1,6 @@
 ---
 tags:
-  - processed
+  - reviewed
 ---
 # DB — What We Store
 

@@ -1,6 +1,6 @@
 ---
 tags:
-  - in-progress
+  - reviewed
 ---
 # UI — Board Screen
 

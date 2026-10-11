@@ -1,6 +1,6 @@
 ---
 tags:
-  - "#processed"
+  - "#reviewed"
 ---
 # HM — Human Moves
 
