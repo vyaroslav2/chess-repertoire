@@ -320,21 +320,26 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
 }
 
 .lichess-move-grid {
+  --move-number-width: 44px;
   display: grid;
-  grid-template-columns: 44px 1fr 1fr;
+  grid-template-columns: var(--move-number-width) 1fr 1fr;
   align-items: center;
   font-size: 14.5px;
   line-height: 26px;
   padding-top: 6px;
   padding-bottom: 6px;
+  /* The move-number column's shading, painted on the grid so it runs through the
+     top and bottom padding: flush with the list's top, ending with the last move. */
+  background: linear-gradient(to right, #33312e var(--move-number-width), transparent var(--move-number-width)); /* Lichess's index cell */
 }
 
+/* As on the Lichess analysis board: shaded (see .lichess-move-grid), centred, no dot.
+   Roboto like the moves; its digits are all one width, so 1 to 200 stay steady. */
 .move-number {
   color: var(--lichess-text-muted);
-  text-align: right;
-  padding-right: 12px;
+  text-align: center;
   user-select: none;
-  font-family: var(--font-modern-sans);
+  font-family: var(--font-roboto), sans-serif;
 }
 
 .move-san {

@@ -72,8 +72,8 @@ export default function LichessMoveList({ moves, currentPlyIndex, onMoveClick }:
       <div className="lichess-move-grid">
         {turns.map((turn) => (
           <React.Fragment key={turn.turnNumber}>
-            {/* Column 1: Move Number */}
-            <div className="move-number">{turn.turnNumber}.</div>
+            {/* Column 1: Move Number, no dot (as on Lichess) */}
+            <div className="move-number">{turn.turnNumber}</div>
             
             {/* Column 2: White's Move */}
             <div 

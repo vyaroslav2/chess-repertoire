@@ -23,7 +23,7 @@ UI.09 Board: 691.2 × 691.2px (UI.18), Lichess "newspaper" squares, Lichess "mer
 UI.10 Board highlights (Chessground "brown" theme): last move `rgba(155, 199, 0, 0.41)`; selected square `rgba(20, 85, 30, 0.5)`; legal-move dot `#208530`; check is a red glow.
 UI.11 Coordinates: Arial, 13px, weight 400, lower case, `#817e7a` (`--coord-text`), 4.52 : 1 on the page background: the same warm tint as the opening name, dimmer. Ranks on the left, files at the bottom. Where Arial is not installed (Linux, Android), Arimo stands in: it has Arial's letter widths, is self-hosted and is not preloaded, so only those machines download it.
 UI.12 Move list panel: 188 × 691.2px, background `#262421` (`--lichess-panel-bg`). Scrollbar 8px wide, thumb `#555` (`#777` on hover), track `#262421`.
-UI.13 Move numbers: 14.5px, line height 26px, `#787674` (`--lichess-text-muted`).
+UI.13 Move numbers: Roboto, 14.5px, line height 26px, `#787674` (`--lichess-text-muted`), centred in a shaded cell (`#33312e`), with no dot, as on the Lichess analysis board.
 UI.14 Moves: Roboto, 14.5px, line height 26px, `#bababa` (`--lichess-text-primary`). Hover background `#363431`. The current move: background `#3692e7` (`--lichess-accent`), text `#ffffff` (`--lichess-text-bright`), weight 600.
 UI.15 Answer bar (bottom-left corner, 250 × 25px, border `#363431`): wrong `#c62828`, correct `#629924` (`--lichess-green`), revealed `#f9a825`.
 UI.16 End screen: heading 32px, `#629924` (`--lichess-green`); text below it 17.6px, `#787674` (`--lichess-text-muted`).

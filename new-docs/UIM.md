@@ -89,10 +89,12 @@ Changing `--lichess-text-muted` in `globals.css` changes all four places at once
 
 Grid (move list)
 `1.4` Move numbers
-**Now:** Inter.
-%%Decided 2026-10-11, not yet in the code: Roboto, the same font as the moves, as Lichess uses one font (Noto Sans) for both. Numbers go in a shaded cell, as on the Lichess analysis board, which leaves room for evals later. Roboto's digits are all the same width, so centred numbers stay steady from 1 to 200. Still open: the dot after the number (Lichess has none), the cell width (must fit "200"; Lichess about 50px, ours 44px), the cell colours (Lichess `#6b6b6b` on `#33312e`, about 2.5 : 1) and where evals sit. Tested on the temporary `/grid` page.%%
+**Now:** Roboto, 14.5px, weight 400, line height 26px, `#787674`, centred in a shaded cell (`#33312e`, Lichess's), no dot: "1", not "1.". Cell 44 × 26px; "200" is 28px wide, so it fits with 8px either side. Done 2026-10-11.
+Shading flush, 2026-10-11: the shaded column starts at the very top of the list and ends 6px below the last move, with no gap. The grid keeps its 6px padding above the first row and below the last; the shading is painted on the whole grid (first 44px), so it runs through the padding. The strip ends with the moves, not at the panel's bottom, as on Lichess.
+Open: the number colour on the shaded cell is 2.9 : 1 (Lichess's own is 2.4 : 1); where evals will sit.
+%%Decided 2026-10-11: Roboto, the same font as the moves, as Lichess uses one font (Noto Sans) for both. Numbers go in a shaded cell, as on the Lichess analysis board, which leaves room for evals later. Roboto's digits are all the same width, so centred numbers stay steady from 1 to 200. Still open: the dot after the number (Lichess has none), the cell width (must fit "200"; Lichess about 50px, ours 44px), the cell colours (Lichess `#6b6b6b` on `#33312e`, about 2.5 : 1) and where evals sit. Tested on the temporary `/grid` page.%%
 
-**Was:** Arial, 14.5px (18.125), weight 400, line height 26px (32.5), `#787674`, right-aligned. The stack is Inter, Roboto, Noto Sans, Source Sans 3, sans-serif. None of the four is installed, so it falls to the generic sans-serif, which is Arial here.
+**Was:** Inter (after 2026-10-11), before that Arial; 14.5px (18.125), weight 400, line height 26px (32.5), `#787674`, right-aligned with a dot ("1."), no shading. The stack is Inter, Roboto, Noto Sans, Source Sans 3, sans-serif. None of the four is installed, so it falls to the generic sans-serif, which is Arial here.
 
 `1.5` Moves (SAN)
 **Now:** JetBrains Mono, self-hosted (no request to Google).
