@@ -14,9 +14,6 @@ Measured 2026-10-11 in the app's browser pane (Chromium, same Windows fonts as E
 **Now:** Inter.
 **Was:** Segoe UI, 14px (17.5), weight 400, line height 20px (25), `#787674`. 
 
-//-1.1.1 so only the font changed, everything else is the same? -//
-%%Yes. Measured again after the change: Inter, 14px, weight 400, line height 20px, `#787674`, 4px above the board. The settings are the same, but the text looks a little different: Inter's letters are wider and taller than Segoe UI's at the same 14px. "A40 Queen's Pawn Game" is about 170px wide in Inter and 154px in Segoe UI (10% wider), and a lower-case x is 8px tall instead of 7. The paragraph below describes the "Was" state: Inter is now loaded, so the fallback to Segoe UI no longer happens.%%
-
 ECO code and name share one style, e.g. "A40 Queen's Pawn Game". The stack asks for Inter first; it is not installed, nor are -apple-system and BlinkMacSystemFont, so Segoe UI is used.
 
 `1.2` Coordinates
