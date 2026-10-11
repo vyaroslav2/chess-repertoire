@@ -236,12 +236,13 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
 }
 
 /* Our own outer edge (UI.17): the SVG cuts off the outer half of the edge
-   outlines. 1.6px = 2 screen px at 125%, the same as the lines between squares. */
+   outlines. 0.8px = 1 screen px at 125%. As on Lichess, the edge is half a line
+   between squares: each square adds 1 screen px to the line it shares. */
 .cg-board-newspaper::after {
   content: "";
   position: absolute;
   inset: 0;
-  border: 1.6px solid #939393;
+  border: 0.8px solid #939393;
   pointer-events: none;
   z-index: 3;
 }
