@@ -90,6 +90,7 @@ Changing `--lichess-text-muted` in `globals.css` changes all four places at once
 Grid (move list)
 `1.4` Move numbers
 **Now:** Inter.
+%%Decided 2026-10-11, not yet in the code: Roboto, the same font as the moves, as Lichess uses one font (Noto Sans) for both. Numbers go in a shaded cell, as on the Lichess analysis board, which leaves room for evals later. Roboto's digits are all the same width, so centred numbers stay steady from 1 to 200. Still open: the dot after the number (Lichess has none), the cell width (must fit "200"; Lichess about 50px, ours 44px), the cell colours (Lichess `#6b6b6b` on `#33312e`, about 2.5 : 1) and where evals sit. Tested on the temporary `/grid` page.%%
 
 **Was:** Arial, 14.5px (18.125), weight 400, line height 26px (32.5), `#787674`, right-aligned. The stack is Inter, Roboto, Noto Sans, Source Sans 3, sans-serif. None of the four is installed, so it falls to the generic sans-serif, which is Arial here.
 
