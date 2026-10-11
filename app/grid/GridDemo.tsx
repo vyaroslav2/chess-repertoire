@@ -32,8 +32,8 @@ const evals = moves.map((san, i) => {
   return (v < 0 ? "-" : "+") + Math.abs(v).toFixed(2);
 });
 
-// The move list with an eval in each move's cell, pushed to its right edge, as on
-// Lichess (0.8 × the move size, weight 300, #949494), but in JetBrains Mono with two
+// The move list with an eval in each move's cell, pushed to its right edge and
+// centred vertically (not on the move's baseline), as on Lichess (0.8 × the move size, weight 300, #949494), but in JetBrains Mono with two
 // decimals. A copy of LichessMoveList's markup and classes; the real one is untouched.
 function EvalMoveList({ current, onClick }: { current: number; onClick: (ply: number) => void }) {
   const rows = [];
@@ -42,7 +42,7 @@ function EvalMoveList({ current, onClick }: { current: number; onClick: (ply: nu
     <div
       key={ply}
       className={`move-san ${ply === current ? "active" : ""}`}
-      style={{ display: "flex", alignItems: "baseline", padding: "0 0.3em 0 0.5em" /* Lichess */ }}
+      style={{ display: "flex", alignItems: "center", padding: "0 0.3em 0 0.5em" /* Lichess */ }}
       onClick={() => onClick(ply)}
     >
       {moves[ply]}
