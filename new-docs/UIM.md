@@ -11,10 +11,12 @@ Measured 2026-10-11 in the app's browser pane (Chromium, same Windows fonts as E
 **Was** is before the fonts were self-hosted; **Now** is after (both 2026-10-11). Sizes and colours did not change.
 
 `1.1` ECO and opening name
-**Now:** Inter.
+**Now:** Inter, letter spacing -0.0062em (-0.087px at 14px).
 **Was:** Segoe UI, 14px (17.5), weight 400, line height 20px (25), `#787674`. 
 
 ECO code and name share one style, e.g. "A40 Queen's Pawn Game". The stack asks for Inter first; it is not installed, nor are -apple-system and BlinkMacSystemFont, so Segoe UI is used.
+
+Letter spacing, chosen 2026-10-11. Inter's designer publishes a formula for tracking by size ("dynamic metrics"): letter-spacing (em) = -0.0223 + 0.185 × e^(-0.1745 × size in px). At 14px it gives -0.0062em = -0.087px. Set in `em`, so it scales if the size changes. Effect at 14px: the gap around a letter goes from about 1.4px to 1.3px, as in Roboto (Arial is about 1.1px); a long name gets about 1% narrower. -0.6px and -0.3px were tried first, while comparing zoomed text; dropped once judged at the real 14px. Inter looked loose at first out of habit: Arial spaces letters about a quarter tighter.
 
 `1.2` Coordinates
 **Now:** Inter, weight 500 (real now: Inter has a 500 weight).

@@ -18,7 +18,7 @@ These are the values in use now. Colours name their CSS variable where there is 
 UI.05 Fonts. Inter for all text except moves, which use JetBrains Mono. Both are self-hosted with `next/font/google` (`app/layout.tsx`), so they show on every machine and the browser never contacts Google. #note
 UI.06 Page background: `#161512` (`--lichess-bg`).
 UI.07 Status line, in the free space left of the board: 16px, normal weight, `#787674` (`--lichess-text-muted`), 280px wide, right-aligned, 40px left of the board, level with its top. It is hidden until the pointer is over it. Temporary.
-UI.08 Opening name: 14px, line height 20px, `#787674` (`--lichess-text-muted`).
+UI.08 Opening name: 14px, line height 20px, letter spacing -0.0062em (-0.087px), `#787674` (`--lichess-text-muted`). The spacing is Inter's recommended value for 14px.
 UI.09 Board: 691.2 × 691.2px (UI.18), Lichess "newspaper" squares, Lichess "merida" pieces. No shadow: `--glass-shadow` is commented out.
 UI.10 Board highlights (Chessground "brown" theme): last move `rgba(155, 199, 0, 0.41)`; selected square `rgba(20, 85, 30, 0.5)`; legal-move dot `#208530`; check is a red glow.
 UI.11 Coordinates: 13px, weight 500, lower case, `#787674` (`--lichess-text-muted`). Ranks on the left, files at the bottom.
