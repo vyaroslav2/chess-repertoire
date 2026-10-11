@@ -13,6 +13,10 @@ Measured 2026-10-11 in the app's browser pane (Chromium, same Windows fonts as E
 `1.1` ECO and opening name
 **Now:** Inter.
 **Was:** Segoe UI, 14px (17.5), weight 400, line height 20px (25), `#787674`. 
+
+//-1.1.1 so only the font changed, everything else is the same? -//
+%%Yes. Measured again after the change: Inter, 14px, weight 400, line height 20px, `#787674`, 4px above the board. The settings are the same, but the text looks a little different: Inter's letters are wider and taller than Segoe UI's at the same 14px. "A40 Queen's Pawn Game" is about 170px wide in Inter and 154px in Segoe UI (10% wider), and a lower-case x is 8px tall instead of 7. The paragraph below describes the "Was" state: Inter is now loaded, so the fallback to Segoe UI no longer happens.%%
+
 ECO code and name share one style, e.g. "A40 Queen's Pawn Game". The stack asks for Inter first; it is not installed, nor are -apple-system and BlinkMacSystemFont, so Segoe UI is used.
 
 `1.2` Coordinates
@@ -34,5 +38,12 @@ Grid (move list)
 
 ---
 
+//- can you center the board? you can move the status line (that shows on hover) to the left free space. it doesn't matter now, I'll remove or change it later -- the status line is temp. If there's a conflict because of how CSS centers, e.g. pixel rounding, make it near perfect centered, so that everything is intact.  -//  
+%%Done 2026-10-11. The board is centred across and down; only the board counts, as before.
+- Down: the gap above the board is half the free height, rounded to the nearest 0.8px (1 screen px at 125%). So the board stays on whole screen px, and is at most 0.4px off centre. In a 779px-high window: 44px above, 43.8px below.
+- The opening name sits 4px above the board, as before.
+- The status line is in the free space left of the board: level with the board's top, 40px left of it, 280px wide, right-aligned. It wraps onto two lines. Still hidden until hover.
+- Checked in the browser pane at 1536 × 779 (1:1 there, not 125%): no scrollbar, file letters fit below.
+UI.01, UI.07 and UI.18 in UI.md updated to match.%%
 
 

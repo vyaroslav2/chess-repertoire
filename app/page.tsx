@@ -26,7 +26,11 @@ export default async function Home() {
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "flex-start", alignItems: "center", 
     background: "#161512", 
-    gap: "20px", padding: "8px 20px 0" }}>
+    gap: "20px",
+    // Centre the board down the page (UI.01). The top gap is rounded to whole
+    // screen px at 125% (0.8px), so the board stays pixel-exact (UI.18). At least
+    // 24px, to leave room for the opening name above the board.
+    padding: "max(24px, round(calc((100vh - var(--board-size)) / 2), 0.8px)) 20px 0" }}>
       <SrsTrainer dueStats={demoStats} demoMode />
     </div>
   );

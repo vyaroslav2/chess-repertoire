@@ -387,28 +387,8 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
         />
       )}
 
-      <div style={{ color: "var(--lichess-text-bright)", textAlign: "center" }}>
-        <p className="demo-status-hover" style={{ color: "var(--lichess-text-muted)" }}>
-          {demoMode
-            ? `Black to move · ${stats.length} cards remaining · ${graduatedCount} graduated · Good ${goodHitsByCard[currentStat.demoId ?? currentStat.id] ?? 0}/2`
-            : `Position 1 of ${stats.length}`}
-        </p>
-      </div>
-
-      <div
-        style={{
-          width: "var(--board-size)", maxWidth: "100%", marginBottom: "-4px",
-          color: "var(--lichess-text-muted)", fontSize: "14px", lineHeight: "20px",
-          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-          // Always render placeholder text and reserve the line's height, even when there's
-          // nothing to show (e.g. the starting position) — hiding via display would collapse
-          // the row and shift the board down the moment real opening text appears.
-          visibility: hasPositionOpening ? "visible" : "hidden",
-        }}
-        title={hasPositionOpening ? positionOpening : undefined}
-      >
-        {hasPositionOpening ? positionOpening : "ECO Opening Name"}
-      </div>
+      {/* Board row: only the board is in the flow, so only the board is centred,
+          across and down (UI.01). Everything else hangs off it. */}
       <div style={{ 
         display: "flex", 
         alignItems: "flex-start", 
@@ -418,6 +398,30 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
         margin: "0 auto",
         position: "relative",
       }}>
+        {/* Status line, in the free space left of the board (temporary) */}
+        <p className="demo-status-hover" style={{
+          position: "absolute", right: "calc(100% + 40px)", top: 0, width: "280px",
+          textAlign: "right", color: "var(--lichess-text-muted)",
+        }}>
+          {demoMode
+            ? `Black to move · ${stats.length} cards remaining · ${graduatedCount} graduated · Good ${goodHitsByCard[currentStat.demoId ?? currentStat.id] ?? 0}/2`
+            : `Position 1 of ${stats.length}`}
+        </p>
+
+        {/* Opening name, 4px above the board (UI.04) */}
+        <div
+          style={{
+            position: "absolute", left: 0, bottom: "calc(100% + 4px)",
+            width: "var(--board-size)", maxWidth: "100%",
+            color: "var(--lichess-text-muted)", fontSize: "14px", lineHeight: "20px",
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            visibility: hasPositionOpening ? "visible" : "hidden",
+          }}
+          title={hasPositionOpening ? positionOpening : undefined}
+        >
+          {hasPositionOpening ? positionOpening : "ECO Opening Name"}
+        </div>
+
         <div className={`cg-board-newspaper piece-set-merida ${testStatus !== 'idle' ? 'board-locked' : ''}`} style={{ width: "var(--board-size)", height: "var(--board-size)", boxShadow: "var(--glass-shadow)", position: "relative", zIndex: 1 }}>
           <Chessground
             width="100%"
