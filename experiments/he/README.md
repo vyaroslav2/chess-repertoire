@@ -100,7 +100,9 @@ still take substantial time.
 
 ## Independent engine profile
 
-Searches use Stockfish 19, depth 24, MultiPV 1, Threads 1 and Hash 64 MB.
+Searches use Stockfish 19, 2,000,000 nodes (`go nodes`), MultiPV 1, Threads 1 and Hash 64 MB.
+A node limit, not a depth: about 2 s a search. Within ±300 cp it matched 200M-node searches
+closely (scripts/node_compare.py; see the 2026-10-11 session note).
 The baseline is an unrestricted root search. Each observed candidate is searched at
 the same root with searchmoves. If it is already the champion, its baseline result is reused.
 The cache lives in data/eval-cache/<profile>/, with the binary SHA-256, engine name,
@@ -109,8 +111,10 @@ before every uncached request. Raw UCI lines are retained and checked when loadi
 
 Scores are stored from White's view; for Black, cp loss is
 max(0, candidate cpWhite - champion cpWhite).
-Only exact, unbounded scores at depth 24 are accepted. A search that stops before d24
-fails instead of quietly mixing depths. Mate scores stay explicit; mate observations are
+The node limit can stop a search part-way through a depth. The result is the last exact,
+unbounded score, from the deepest completed depth; that depth is recorded with it. A root
+search reports that depth's move, which can differ from bestmove. Changing the node limit
+changes the profile, so its results are cached apart. Mate scores stay explicit; mate observations are
 excluded from the ordinary cp curve rather than converted into invented cp values.
 Finite-depth scores are estimates.
 
@@ -123,7 +127,7 @@ npx eslint experiments/he
 node --import tsx experiments/he/tests/smoke.ts stockfish-windows-x86-64-universal/stockfish/stockfish-windows-x86-64-universal.exe
 ```
 
-The optional real-engine smoke check evaluates one small legal position at d24,
+The optional real-engine smoke check evaluates one small legal position at 2M nodes,
 confirms a cached result, and exercises a restricted candidate search.
 Unit tests use synthetic games; they are not evidence for the statistical model.
 

@@ -134,16 +134,22 @@ test("bounded pilot import and diagnostic provenance", async () => {
     await rm(directory, { recursive: true }); await rm(run, { recursive: true });
   }
 });
-test("UCI parser enforces d24, exact bounds, legal root and White-view sign", () => {
+test("UCI parser takes the last exact score, legal root and White-view sign", () => {
   const row = observation();
   const lines = ["info depth 23 score cp 10 pv " + row.uci,
     "info depth 24 multipv 1 score cp 42 pv " + row.uci, "bestmove " + row.uci];
   assert.equal(parseEvaluation(lines, row.fen, row.uci).cpWhite, -42);
+  assert.equal(parseEvaluation(lines, row.fen, row.uci).depth, 24);
   const mate = ["info depth 24 score mate -3 pv " + row.uci, "bestmove " + row.uci];
   assert.equal(parseEvaluation(mate, row.fen).mateWhite, 3);
   assert.equal(parseEvaluation(mate, row.fen).cpWhite, null);
-  assert.throws(() => parseEvaluation(lines.map(s => s.replace("depth 24", "depth 23")), row.fen), /depth-24/);
-  assert.throws(() => parseEvaluation(lines.map(s => s.replace("score cp 42", "score cp 42 lowerbound")), row.fen), /depth-24/);
+  // A bound from the unfinished depth is skipped: the last completed depth counts.
+  const stopped = [...lines.slice(0, 2), "info depth 25 score cp 90 lowerbound pv " + row.uci, "bestmove " + row.uci];
+  assert.equal(parseEvaluation(stopped, row.fen, row.uci).cpWhite, -42);
+  assert.throws(() => parseEvaluation(lines.map(s => s.replace(/score cp \d+/, "$& lowerbound")), row.fen), /exact/);
+  // A root search stopped mid-depth reports the completed depth's move, not bestmove.
+  const switched = ["info depth 24 score cp 42 pv " + row.uci, "bestmove a7a6"];
+  assert.equal(parseEvaluation(switched, row.fen).uci, row.uci);
   assert.throws(() => parseEvaluation(lines, row.fen, "a7a6"), /requested/);
   assert.throws(() => parseEvaluation(["bestmove a1a8"], row.fen), /illegal/);
 });

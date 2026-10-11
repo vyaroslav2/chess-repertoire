@@ -6,7 +6,8 @@ import path from "node:path";
 import { Chess } from "chess.js";
 import { assertDataDirectory, DATA_ROOT } from "./paths";
 
-export const SETTINGS = { depth: 24, multiPv: 1, threads: 1, hashMb: 64 } as const;
+// A node limit, not a depth: 2M nodes is about 2 s and matched 200M nodes closely within ±300 cp.
+export const SETTINGS = { nodes: 2_000_000, multiPv: 1, threads: 1, hashMb: 64 } as const;
 export type Evaluation = { uci: string; depth: number; cpWhite: number | null; mateWhite: number | null };
 export type EngineProfile = { id: string; name: string; binarySha256: string; settings: typeof SETTINGS };
 export function parseEvaluation(lines: string[], fen: string, expectedUci?: string): Evaluation {
@@ -15,18 +16,23 @@ export function parseEvaluation(lines: string[], fen: string, expectedUci?: stri
   const legal = new Chess(fen).moves({ verbose: true }).some(move => move.lan === best);
   if (!legal) throw new Error("Engine returned an illegal move.");
   const multiplier = fen.split(" ")[1] === "b" ? -1 : 1;
+  // The node limit can stop the search part-way through a depth. The result is the last
+  // exact score: the deepest depth Stockfish completed. Its move can differ from bestmove,
+  // which may come from the unfinished depth, so a root search reports the completed move.
   for (const line of [...lines].reverse()) {
     if (!line.startsWith("info ") || /\b(?:lowerbound|upperbound)\b/.test(line)) continue;
     const depth = Number(/\bdepth (\d+)\b/.exec(line)?.[1]);
     const score = /\bscore (cp|mate) (-?\d+)\b/.exec(line);
     const pv = /\bpv (\S+)/.exec(line)?.[1];
     const multiPv = Number(/\bmultipv (\d+)\b/.exec(line)?.[1] ?? "1");
-    if (depth !== SETTINGS.depth || !score || pv !== best || multiPv !== 1) continue;
+    if (!depth || !score || !pv || multiPv !== 1) continue;
+    if (expectedUci && pv !== expectedUci) break;
+    if (!new Chess(fen).moves({ verbose: true }).some(move => move.lan === pv)) throw new Error("Engine returned an illegal move.");
     const value = Number(score[2]) * multiplier;
-    return { uci: best, depth, cpWhite: score[1] === "cp" ? value : null,
+    return { uci: pv, depth, cpWhite: score[1] === "cp" ? value : null,
       mateWhite: score[1] === "mate" ? value : null };
   }
-  throw new Error("Engine returned no exact, unbounded depth-24 score for its best move.");
+  throw new Error("Engine returned no exact, unbounded score for the searched move.");
 }
 
 class UciProcess {
@@ -109,7 +115,7 @@ export class HeEngine {
     }
     // Clear search history between requests so results don't depend on import order.
     await this.uci.command("ucinewgame\nsetoption name Clear Hash\nisready", line => line === "readyok");
-    const rawLines = await this.uci.command("position fen " + fen + "\ngo depth 24" +
+    const rawLines = await this.uci.command("position fen " + fen + "\ngo nodes " + SETTINGS.nodes +
       (candidate ? " searchmoves " + candidate : ""), line => line.startsWith("bestmove "));
     const evaluation = parseEvaluation(rawLines, fen, candidate);
     const temporary = cachePath + "." + process.pid + "." + Date.now() + ".tmp";

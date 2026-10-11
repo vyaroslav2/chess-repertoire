@@ -27,7 +27,7 @@ From ~100,000[^1] games in the band we choose (rating gap under 100[^2], opening
    ==2a. **Scatter check (before fitting k).** For position + move groups with 200+ games, plot real score against the curve at their eval. Spread well beyond coin-flip noise means eval is a weak guide (small k). Spread close to it means eval is reliable (big k).==
 
 3. **The minimum sample (follows from 1 and 2).** The fewest games with which a contender could ever pass.
-4. One eval source for everything: local Stockfish 19 at a fixed depth (d24). The curve, each contender's prior and the engine checks all use it. ChessDB or Lichess cloud evals would not match the curve.
+4. One eval source for everything: local Stockfish 19 at a fixed node count, 2M nodes (Threads 1, MultiPV 1, Hash 64 MB), not a fixed depth. The curve, each contender's prior and the engine checks all use it. ChessDB or Lichess cloud evals would not match the curve, and neither would deeper Stockfish evals: deeper evals may run about 8% larger. A move searched deeper elsewhere is searched again at 2M nodes for its prior.[^11] This profile is HE's only. The generator keeps its own, deeper search (`localStockfishDepth`, [[generation-config]]) to pick and store Black's move: there depth pays off, while a prior only needs to be measured the same way as the curve.
 
 ## Which games count
 - **Every game counts,** however it stopped: checkmate, resignation, time, draw. A game is never dropped for how it ended.
@@ -102,3 +102,4 @@ Open: build position + move counts from dated game files, with the same band, ga
 
 [^10]: Not guaranteed. The size of the downside must be measured.
 
+[^11]: Tested on 2026-10-11 with `scripts/depth_drift.py` and `scripts/node_compare.py`: 30 random positions from the January pilot, after the move played, searched at 2M, 50M and 200M nodes. Within ±300 cp (24 positions), 2M against 200M: average −2.6 cp, typical change 9 cp, growth 1.08 (deep evals about 8% larger, ±7%). Beyond ±300 cp deep search finds wins bigger still (4 positions, +119 to +207 cp), but there the curve is nearly flat, so a prior barely moves. 2M nodes reached depth 24 (median), about 2 s a search.
