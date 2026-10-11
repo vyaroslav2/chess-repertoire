@@ -277,9 +277,11 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
 }
 
 .cg-wrap coords coord {
-  font-family: var(--font-inter), 'Arial', sans-serif !important;
+  /* Arial for a classical look. Arimo has Arial's letter widths and stands in
+     where Arial is not installed (Linux, Android). */
+  font-family: Arial, var(--font-arimo), sans-serif !important;
   color: var(--lichess-text-muted) !important;
-  font-weight: 500 !important;
+  font-weight: 400 !important;
   font-size: 13px !important;
   text-transform: lowercase !important;
 }

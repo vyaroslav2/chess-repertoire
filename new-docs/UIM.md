@@ -19,14 +19,8 @@ ECO code and name share one style, e.g. "A40 Queen's Pawn Game". The stack asks 
 Letter spacing, chosen 2026-10-11. Inter's designer publishes a formula for tracking by size ("dynamic metrics"): letter-spacing (em) = -0.0223 + 0.185 × e^(-0.1745 × size in px). At 14px it gives -0.0062em = -0.087px. Set in `em`, so it scales if the size changes. Effect at 14px: the gap around a letter goes from about 1.4px to 1.3px, as in Roboto (Arial is about 1.1px); a long name gets about 1% narrower. -0.6px and -0.3px were tried first, while comparing zoomed text; dropped once judged at the real 14px. Inter looked loose at first out of habit: Arial spaces letters about a quarter tighter.
 
 `1.2` Coordinates
-**Now:** Inter, weight 500 (real now: Inter has a 500 weight). //- size? how to set it separately from everything else? -// 
-%%Size 13px, unchanged. It is already separate: one rule in `app/globals.css` sets it for the coordinates only, and nothing else uses it:
-`.cg-wrap coords coord { font-size: 13px !important; … }`
-Change the 13px there. (Chessground's own CSS sets 9px on the parent `coords`; this rule targets each label directly, so it wins anyway. The `!important` is there but not needed for the size.)
-- Ranks only (1–8, left): add `.cg-wrap coords.ranks coord { font-size: …px !important; }`. Files only (a–h, bottom): the same with `coords.files`.
-- Line height is 1.5 × the size (from `body`), so it follows the size by itself.
-- The labels' positions are fixed in px: ranks at `left: -18px`, files at `bottom: -20px`. A much bigger size may need these adjusted, so the labels don't touch the board or get clipped.%%
-**Was:** Arial, 13px (16.25), line height 19.5px, `#787674`, lower case. The CSS asks for weight 500, but Arial on Windows has no 500, so it renders as regular (400). Stack: Inter, Arial, sans-serif.
+
+Arial, 13px (16.25), weight 400, line height 19.5px, `#787674`, lower case. Chosen 2026-10-11 for a classical look. Stack: Arial, Arimo, sans-serif. Arimo (Google Fonts) has Arial's letter widths; it is self-hosted and downloads only on machines without Arial (Linux, Android).
 
 `1.3` Status line (shown on hover)
 **Now:** Inter.
