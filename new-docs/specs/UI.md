@@ -15,7 +15,7 @@ UI.04 The opening name above the board is as wide as the board and lines up with
 
 These are the values in use now. Colours name their CSS variable where there is one (`app/globals.css`).
 
-UI.05 Fonts. Only JetBrains Mono is loaded by the app (Google Fonts). Inter comes first in every stack but is not loaded, so it shows only where it is installed. On this Windows machine it is not, so text falls back to Segoe UI (body stack) or Arial (move numbers, coordinates). #note
+UI.05 Fonts. Inter for all text except moves, which use JetBrains Mono. Both are self-hosted with `next/font/google` (`app/layout.tsx`), so they show on every machine and the browser never contacts Google. #note
 UI.06 Page background: `#161512` (`--lichess-bg`).
 UI.07 Status line above the board: 16px, normal weight, `#787674` (`--lichess-text-muted`). It is hidden until the pointer is over it.
 UI.08 Opening name: 14px, line height 20px, `#787674` (`--lichess-text-muted`).
@@ -55,3 +55,5 @@ So the muted text and the border are not Lichess's colours, even though their na
 
 
 ---
+
+

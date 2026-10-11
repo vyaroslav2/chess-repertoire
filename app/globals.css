@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600&family=JetBrains+Mono:wght@400;600&family=Roboto+Mono:wght@400;600&display=swap');
-
 :root {
   --lichess-bg: #161512;
   --lichess-panel-bg: #262421;
@@ -19,8 +17,8 @@
   /*--glass-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);*/
 
   /* Modern Font Stacks */
-  --font-modern-sans: 'Inter', 'Roboto', 'Noto Sans', 'Source Sans 3', sans-serif;
-  --font-modern-mono: 'JetBrains Mono', 'Fira Code', 'Roboto Mono', monospace;
+  --font-modern-sans: var(--font-inter), 'Roboto', 'Noto Sans', 'Source Sans 3', sans-serif;
+  --font-modern-mono: var(--font-jetbrains-mono), monospace;
 }
 
 * {
@@ -30,7 +28,7 @@
 }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background-color: var(--lichess-bg);
   color: var(--lichess-text-primary);
   min-height: 100vh;
@@ -279,7 +277,7 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
 }
 
 .cg-wrap coords coord {
-  font-family:'Inter','Arial', sans-serif !important;
+  font-family: var(--font-inter), 'Arial', sans-serif !important;
   color: var(--lichess-text-muted) !important;
   font-weight: 500 !important;
   font-size: 13px !important;
@@ -335,7 +333,7 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
 }
 
 .move-san {
-  font-family: 'JetBrains Mono', 'Inter', sans-serif;
+  font-family: var(--font-modern-mono);
   color: var(--lichess-text-primary);
   padding-left: 4px;
   cursor: pointer;
