@@ -89,15 +89,16 @@ Changing `--lichess-text-muted` in `globals.css` changes all four places at once
 
 Grid (move list)
 `1.4` Move numbers
-**Now:** Roboto, 14.5px, weight 400, line height 26px, `#787674`, centred in a shaded cell (`#33312e`, Lichess's), no dot: "1", not "1.". Cell 44 × 26px; "200" is 28px wide, so it fits with 8px either side. Done 2026-10-11.
+**Now:** Roboto, 14px (17.5), weight 400, line height 26px, `#787674`, centred in a shaded cell (`#33312e`, Lichess's), no dot: "1", not "1.". Cell 44 × 26px; "200" is 28px wide, so it fits with 8px either side. Done 2026-10-11.
 Shading flush, 2026-10-11: the shaded column starts at the very top of the list and ends 6px below the last move, with no gap. The grid keeps its 6px padding above the first row and below the last; the shading is painted on the whole grid (first 44px), so it runs through the padding. The strip ends with the moves, not at the panel's bottom, as on Lichess.
+Sizes, 2026-10-11: numbers 14px, moves 16.59px, as on the Lichess analysis board at 1536px window width (ratio 0.84). Lichess's move size comes from the window width, hence the odd number; 16.59px is 20.7 screen px at 125%. Row height stays 26px. Still to do: breathing room. At 16.59px the widest 7-character moves fill their 72px column to 71.6px, in weight 400 or 600 alike, so they touch the next move's 4px padding.
 Open: the number colour on the shaded cell is 2.9 : 1 (Lichess's own is 2.4 : 1); where evals will sit.
 %%Decided 2026-10-11: Roboto, the same font as the moves, as Lichess uses one font (Noto Sans) for both. Numbers go in a shaded cell, as on the Lichess analysis board, which leaves room for evals later. Roboto's digits are all the same width, so centred numbers stay steady from 1 to 200. Still open: the dot after the number (Lichess has none), the cell width (must fit "200"; Lichess about 50px, ours 44px), the cell colours (Lichess `#6b6b6b` on `#33312e`, about 2.5 : 1) and where evals sit. Tested on the temporary `/grid` page.%%
 
 **Was:** Inter (after 2026-10-11), before that Arial; 14.5px (18.125), weight 400, line height 26px (32.5), `#787674`, right-aligned with a dot ("1."), no shading. The stack is Inter, Roboto, Noto Sans, Source Sans 3, sans-serif. None of the four is installed, so it falls to the generic sans-serif, which is Arial here.
 
 `1.5` Moves (SAN)
-**Now:** JetBrains Mono, self-hosted (no request to Google).
+**Now:** Roboto, 16.59px (20.7), weight 400, line height 26px, `#bababa`; current move weight 600, white on `#3692e7`. Size from Lichess, 2026-10-11 (see 1.4).
 //- chosen Roboto -// 
 %%Applied 2026-10-11: `.move-san` in `globals.css` uses Roboto, self-hosted like Inter. Size, colours and the current move's weight 600 are unchanged; Roboto has a true 600. Chosen on `/moves` against Arial and Inter, with 7-character moves covering every SAN character. Roboto is not monospace, so moves no longer take equal width per character.%%
 

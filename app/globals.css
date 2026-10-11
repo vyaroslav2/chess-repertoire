@@ -324,7 +324,6 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
   display: grid;
   grid-template-columns: var(--move-number-width) 1fr 1fr;
   align-items: center;
-  font-size: 14.5px;
   line-height: 26px;
   padding-top: 6px;
   padding-bottom: 6px;
@@ -336,6 +335,8 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
 /* As on the Lichess analysis board: shaded (see .lichess-move-grid), centred, no dot.
    Roboto like the moves; its digits are all one width, so 1 to 200 stay steady. */
 .move-number {
+  /* Lichess's sizes on a 1536px-wide window: numbers 14px, moves 16.59px. */
+  font-size: 14px;
   color: var(--lichess-text-muted);
   text-align: center;
   user-select: none;
@@ -345,6 +346,7 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
 .move-san {
   /* Roboto: chosen over Arial and Inter on /moves as the cleanest for SAN. */
   font-family: var(--font-roboto), sans-serif;
+  font-size: 16.59px;
   color: var(--lichess-text-primary);
   padding-left: 4px;
   cursor: pointer;
