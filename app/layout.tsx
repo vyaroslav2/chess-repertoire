@@ -9,7 +9,7 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 const jetbrainsMono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-jetbrains-mono" });
 // Stand-in for Arial in the coordinates. Not preloaded: only machines without Arial download it.
 const arimo = Arimo({ subsets: ["latin"], variable: "--font-arimo", preload: false });
-// Not used by any element: loaded so it can be tried in DevTools (font-family: Roboto).
+// Moves in the move list (UI.14).
 const roboto = Roboto({ subsets: ["latin"], variable: "--font-roboto" });
 
 export const metadata: Metadata = {

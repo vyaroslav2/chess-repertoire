@@ -90,11 +90,17 @@ Changing `--lichess-text-muted` in `globals.css` changes all four places at once
 Grid (move list)
 `1.4` Move numbers
 **Now:** Inter.
+
 **Was:** Arial, 14.5px (18.125), weight 400, line height 26px (32.5), `#787674`, right-aligned. The stack is Inter, Roboto, Noto Sans, Source Sans 3, sans-serif. None of the four is installed, so it falls to the generic sans-serif, which is Arial here.
 
 `1.5` Moves (SAN)
 **Now:** JetBrains Mono, self-hosted (no request to Google).
+//- chosen Roboto -// 
+%%Applied 2026-10-11: `.move-san` in `globals.css` uses Roboto, self-hosted like Inter. Size, colours and the current move's weight 600 are unchanged; Roboto has a true 600. Chosen on `/moves` against Arial and Inter, with 7-character moves covering every SAN character. Roboto is not monospace, so moves no longer take equal width per character.%%
+
 **Was:** JetBrains Mono (from Google Fonts), 14.5px (18.125), weight 400, line height 26px (32.5), `#bababa`. Current move: weight 600, `#ffffff` on `#3692e7`. Hover: background `#363431`.
+
+
 
 ---
 

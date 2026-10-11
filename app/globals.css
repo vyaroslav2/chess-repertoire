@@ -338,7 +338,8 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
 }
 
 .move-san {
-  font-family: var(--font-modern-mono);
+  /* Roboto: chosen over Arial and Inter on /moves as the cleanest for SAN. */
+  font-family: var(--font-roboto), sans-serif;
   color: var(--lichess-text-primary);
   padding-left: 4px;
   cursor: pointer;

@@ -15,7 +15,7 @@ UI.04 The opening name above the board is as wide as the board and lines up with
 
 These are the values in use now. Colours name their CSS variable where there is one (`app/globals.css`).
 
-UI.05 Fonts. Inter for all text except moves, which use JetBrains Mono, and coordinates, which use Arial (UI.11). Inter and JetBrains Mono are self-hosted with `next/font/google` (`app/layout.tsx`), so they show on every machine and the browser never contacts Google. #note
+UI.05 Fonts. Inter for all text except moves, which use Roboto (UI.14), and coordinates, which use Arial (UI.11). Inter and Roboto are self-hosted with `next/font/google` (`app/layout.tsx`), so they show on every machine and the browser never contacts Google. #note
 UI.06 Page background: `#161512` (`--lichess-bg`).
 UI.07 Status line, in the free space left of the board: 16px, normal weight, `#787674` (`--lichess-text-muted`), 280px wide, right-aligned, 40px left of the board, level with its top. It is hidden until the pointer is over it. Temporary.
 UI.08 Opening name: 14px, line height 20px, letter spacing -0.0062em (-0.087px), `#979490` (`--opening-text`), 6.05 : 1 on the page background. The spacing is Inter's recommended value for 14px.
@@ -24,7 +24,7 @@ UI.10 Board highlights (Chessground "brown" theme): last move `rgba(155, 199, 0,
 UI.11 Coordinates: Arial, 13px, weight 400, lower case, `#817e7a` (`--coord-text`), 4.52 : 1 on the page background: the same warm tint as the opening name, dimmer. Ranks on the left, files at the bottom. Where Arial is not installed (Linux, Android), Arimo stands in: it has Arial's letter widths, is self-hosted and is not preloaded, so only those machines download it.
 UI.12 Move list panel: 188 × 691.2px, background `#262421` (`--lichess-panel-bg`). Scrollbar 8px wide, thumb `#555` (`#777` on hover), track `#262421`.
 UI.13 Move numbers: 14.5px, line height 26px, `#787674` (`--lichess-text-muted`).
-UI.14 Moves: JetBrains Mono, 14.5px, line height 26px, `#bababa` (`--lichess-text-primary`). Hover background `#363431`. The current move: background `#3692e7` (`--lichess-accent`), text `#ffffff` (`--lichess-text-bright`), weight 600.
+UI.14 Moves: Roboto, 14.5px, line height 26px, `#bababa` (`--lichess-text-primary`). Hover background `#363431`. The current move: background `#3692e7` (`--lichess-accent`), text `#ffffff` (`--lichess-text-bright`), weight 600.
 UI.15 Answer bar (bottom-left corner, 250 × 25px, border `#363431`): wrong `#c62828`, correct `#629924` (`--lichess-green`), revealed `#f9a825`.
 UI.16 End screen: heading 32px, `#629924` (`--lichess-green`); text below it 17.6px, `#787674` (`--lichess-text-muted`).
 UI.17 The board's border is uneven. It is not a CSS border: it comes from the square outlines in Lichess's `newspaper.svg` (`#939393`, about 0.84px), and the outer half of each edge outline is cut off. At 100% display scale the left and top edges show a 1px line, the right and bottom show none, and the lines between squares are 1px. At 125% all four edges show a 1px line, but the lines between squares are 1 or 2px, unevenly. Measured in Edge; Firefox not checked. Answer: the app draws its own `#939393` edge over the board, 0.8px (1 screen px at 125%). As on Lichess, the edge is half a line between squares: each square adds 1 screen px to the line it shares, so lines between squares are 2 screen px and the edge is 1. Measured in Edge at 125%.
