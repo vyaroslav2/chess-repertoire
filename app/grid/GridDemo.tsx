@@ -22,9 +22,55 @@ const mix = [
 const moves: string[] = [...opening];
 for (let i = 0; moves.length < 400; i++) moves.push(mix[i % mix.length]);
 
+// Mock evals, -9.99 to +9.99 with two decimals. The first two show +0.00 and -0.00;
+// every 7-character move gets ±9.99, the widest case beside the widest moves.
+const evals = moves.map((san, i) => {
+  if (i === 0) return "+0.00";
+  if (i === 1) return "-0.00";
+  if (san.length === 7) return i % 2 ? "-9.99" : "+9.99";
+  const v = ((i * 7919) % 1999 - 999) / 100;
+  return (v < 0 ? "-" : "+") + Math.abs(v).toFixed(2);
+});
+
+// The move list with an eval in each move's cell, pushed to its right edge, as on
+// Lichess (0.8 × the move size, weight 300, #949494), but in JetBrains Mono with two
+// decimals. A copy of LichessMoveList's markup and classes; the real one is untouched.
+function EvalMoveList({ current, onClick }: { current: number; onClick: (ply: number) => void }) {
+  const rows = [];
+  for (let i = 0; i < moves.length; i += 2) rows.push(i);
+  const cell = (ply: number) => (
+    <div
+      key={ply}
+      className={`move-san ${ply === current ? "active" : ""}`}
+      style={{ display: "flex", alignItems: "baseline", padding: "0 0.3em 0 0.5em" /* Lichess */ }}
+      onClick={() => onClick(ply)}
+    >
+      {moves[ply]}
+      <span style={{
+        marginLeft: "auto", fontFamily: "var(--font-jetbrains-mono)", fontSize: "0.8em", fontWeight: 300,
+        color: ply === current ? "inherit" : "#949494",
+      }}>
+        {evals[ply]}
+      </span>
+    </div>
+  );
+  return (
+    <div className="lichess-move-list-container">
+      <div className="lichess-move-grid">
+        {rows.map((i) => [
+          <div key={`n${i}`} className="move-number">{i / 2 + 1}</div>,
+          cell(i),
+          cell(i + 1),
+        ])}
+      </div>
+    </div>
+  );
+}
+
 export default function GridDemo() {
   // Start on the first 7-character move, so the current-move style shows at once.
   const [ply, setPly] = useState(moves.indexOf("Qh3xf1#"));
+  const [evalPly, setEvalPly] = useState(moves.indexOf("Qh3xf1#"));
 
   return (
     <div style={{ display: "flex", gap: "48px", alignItems: "flex-start", justifyContent: "center", padding: "32px 20px" }}>
@@ -32,6 +78,12 @@ export default function GridDemo() {
         <figcaption style={caption}>As in the app: 220 × board height, scrolls. Click or use the arrow keys.</figcaption>
         <div style={{ ...panel, height: "var(--board-size)" }}>
           <LichessMoveList moves={moves} currentPlyIndex={ply} onMoveClick={setPly} />
+        </div>
+      </figure>
+      <figure>
+        <figcaption style={{ ...caption, width: evalPanelWidth }}>With evals: 318.4 × board height (398 screen px at 125%), scrolls. Click a move.</figcaption>
+        <div style={{ ...panel, width: evalPanelWidth, height: "var(--board-size)" }}>
+          <EvalMoveList current={evalPly} onClick={setEvalPly} />
         </div>
       </figure>
       <figure>
@@ -46,3 +98,7 @@ export default function GridDemo() {
 
 const caption = { fontFamily: "var(--font-jetbrains-mono)", fontSize: "12px", lineHeight: "20px", color: "#bababa", marginBottom: "8px", width: "220px" } as const;
 const panel = { width: "220px", backgroundColor: "var(--lichess-panel-bg)" } as const;
+// 220px plus, per move column, "+9.99" (5 × 0.6 × 13.272px = 39.8px), the 0.3em right
+// padding (5px) and the left padding grown from 4px to Lichess's 0.5em (8.3px), rounded
+// up to whole screen px at 125%: 318.4px = 398 screen px. The move text keeps its room.
+const evalPanelWidth = "318.4px";

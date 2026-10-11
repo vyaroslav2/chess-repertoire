@@ -93,7 +93,7 @@ Grid (move list)
 Shading flush, 2026-10-11: the shaded column starts at the very top of the list and ends 6px below the last move, with no gap. The grid keeps its 6px padding above the first row and below the last; the shading is painted on the whole grid (first 44px), so it runs through the padding. The strip ends with the moves, not at the panel's bottom, as on Lichess.
 Sizes, 2026-10-11: numbers 14px, moves 16.59px, as on the Lichess analysis board at 1536px window width (ratio 0.84). Lichess's move size comes from the window width, hence the odd number; 16.59px is 20.7 screen px at 125%. Row height stays 26px. Breathing room: at 16.59px the widest 7-character moves are 71.6px with padding, in weight 400 or 600 alike. In the 188px panel the move columns got 67px each (188 − 44 − 10px scrollbar, halved), too narrow, so each grew to fit its own longest move: the two came out unequal and the list scrolled sideways.
 Panel width 220px, 2026-10-11 (was 188px): each move column is now (220 − 44 − 10) ÷ 2 = 83px when the list scrolls, about 11px clear of the longest moves, and 88px when it is short enough to need no scrollbar. Checked: equal columns, no sideways scrolling. 220px is 275 screen px at 125%, so the edge stays sharp. The panel's right edge is at 1333.6px of the 1536px window. Evals in the same row would need more room later.
-Open: the number colour on the shaded cell is 2.9 : 1 (Lichess's own is 2.4 : 1); where evals will sit.
+Open: the number colour on the shaded cell is 2.9 : 1 (Lichess's own is 2.4 : 1). Evals: see 1.6.
 %%Decided 2026-10-11: Roboto, the same font as the moves, as Lichess uses one font (Noto Sans) for both. Numbers go in a shaded cell, as on the Lichess analysis board, which leaves room for evals later. Roboto's digits are all the same width, so centred numbers stay steady from 1 to 200. Still open: the dot after the number (Lichess has none), the cell width (must fit "200"; Lichess about 50px, ours 44px), the cell colours (Lichess `#6b6b6b` on `#33312e`, about 2.5 : 1) and where evals sit. Tested on the temporary `/grid` page.%%
 
 **Was:** Inter (after 2026-10-11), before that Arial; 14.5px (18.125), weight 400, line height 26px (32.5), `#787674`, right-aligned with a dot ("1."), no shading. The stack is Inter, Roboto, Noto Sans, Source Sans 3, sans-serif. None of the four is installed, so it falls to the generic sans-serif, which is Arial here.
@@ -104,6 +104,15 @@ Open: the number colour on the shaded cell is 2.9 : 1 (Lichess's own is 2.4 : 1)
 %%Applied 2026-10-11: `.move-san` in `globals.css` uses Roboto, self-hosted like Inter. Size, colours and the current move's weight 600 are unchanged; Roboto has a true 600. Chosen on `/moves` against Arial and Inter, with 7-character moves covering every SAN character. Roboto is not monospace, so moves no longer take equal width per character.%%
 
 **Was:** JetBrains Mono (from Google Fonts), 14.5px (18.125), weight 400, line height 26px (32.5), `#bababa`. Current move: weight 600, `#ffffff` on `#3692e7`. Hover: background `#363431`.
+
+`1.6` Evals (mock on `/grid`, not in the app yet)
+**Now:** in each move's cell, pushed to its right edge, as on Lichess. JetBrains Mono, 0.8em of the move size = 13.27px (16.6 screen px), weight 300, `#949494`; on the current move it takes the move's white. Two decimals, -9.99 to +9.99, e.g. `+0.00`, `-0.00`, `+9.99`. A move and its eval highlight together as one cell.
+Lichess, measured 2026-10-11 on an analysed game at 1536px width: eval inside the move cell, right edge, Roboto 13.27px (0.8 × 16.59px), weight 300, `#949494`, one decimal (`+0.2`). Move cell padding 0.5em left, 0.3em right (8.3px, 5px).
+Ours differs only in the font (JetBrains Mono, so every eval is the same width and the decimal points line up) and two decimals. "+9.99" is 5 × 0.6 × 13.27 = 39.8px.
+Cell padding matched to Lichess: 0.5em left (was 4px), 0.3em right. White's eval to Black's move: 13.3px (about 9px with 4px). Number to White's move: 8.3px.
+Panel width 318.4px (398 screen px at 125%): 220px plus, per move column, the eval (39.8px), the right padding (5px) and the extra left padding (4.3px), rounded up to a whole screen px. Move to its eval: at least 11.5px, the same room the moves have at 220px. No sideways scrolling. The panel's right edge would be at 1432px of the 1536px window.
+Mock values: the first two moves +0.00 and -0.00; every 7-character move ±9.99, the widest case next to the widest moves; the rest spread between -9.99 and +9.99.
+To bring into the app: the eval span in the move cell, the 0.5em/0.3em padding and the 318.4px panel. The real panel still has 4px left padding and 220px.
 
 
 
