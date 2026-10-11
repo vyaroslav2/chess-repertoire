@@ -18,10 +18,10 @@ These are the values in use now. Colours name their CSS variable where there is 
 UI.05 Fonts. Inter for all text except moves, which use JetBrains Mono, and coordinates, which use Arial (UI.11). Inter and JetBrains Mono are self-hosted with `next/font/google` (`app/layout.tsx`), so they show on every machine and the browser never contacts Google. #note
 UI.06 Page background: `#161512` (`--lichess-bg`).
 UI.07 Status line, in the free space left of the board: 16px, normal weight, `#787674` (`--lichess-text-muted`), 280px wide, right-aligned, 40px left of the board, level with its top. It is hidden until the pointer is over it. Temporary.
-UI.08 Opening name: 14px, line height 20px, letter spacing -0.0062em (-0.087px), `#787674` (`--lichess-text-muted`). The spacing is Inter's recommended value for 14px.
+UI.08 Opening name: 14px, line height 20px, letter spacing -0.0062em (-0.087px), `#979490` (`--opening-text`), 6.05 : 1 on the page background. The spacing is Inter's recommended value for 14px.
 UI.09 Board: 691.2 × 691.2px (UI.18), Lichess "newspaper" squares, Lichess "merida" pieces. No shadow: `--glass-shadow` is commented out.
 UI.10 Board highlights (Chessground "brown" theme): last move `rgba(155, 199, 0, 0.41)`; selected square `rgba(20, 85, 30, 0.5)`; legal-move dot `#208530`; check is a red glow.
-UI.11 Coordinates: Arial, 13px, weight 400, lower case, `#787674` (`--lichess-text-muted`). Ranks on the left, files at the bottom. Where Arial is not installed (Linux, Android), Arimo stands in: it has Arial's letter widths, is self-hosted and is not preloaded, so only those machines download it.
+UI.11 Coordinates: Arial, 13px, weight 400, lower case, `#817e7a` (`--coord-text`), 4.52 : 1 on the page background: the same warm tint as the opening name, dimmer. Ranks on the left, files at the bottom. Where Arial is not installed (Linux, Android), Arimo stands in: it has Arial's letter widths, is self-hosted and is not preloaded, so only those machines download it.
 UI.12 Move list panel: 188 × 691.2px, background `#262421` (`--lichess-panel-bg`). Scrollbar 8px wide, thumb `#555` (`#777` on hover), track `#262421`.
 UI.13 Move numbers: 14.5px, line height 26px, `#787674` (`--lichess-text-muted`).
 UI.14 Moves: JetBrains Mono, 14.5px, line height 26px, `#bababa` (`--lichess-text-primary`). Hover background `#363431`. The current move: background `#3692e7` (`--lichess-accent`), text `#ffffff` (`--lichess-text-bright`), weight 600.

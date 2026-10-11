@@ -51,7 +51,7 @@ export default function FontsPage() {
               title={text}
               style={{
                 fontFamily: font.fontFamily, fontVariationSettings: font.variation, fontSize: "14px", lineHeight: "20px",
-                color: "var(--lichess-text-muted)",
+                color: "var(--opening-text)",
                 whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
               }}
             >

@@ -413,7 +413,7 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
           style={{
             position: "absolute", left: 0, bottom: "calc(100% + 4px)",
             width: "var(--board-size)", maxWidth: "100%",
-            color: "var(--lichess-text-muted)", fontSize: "14px", lineHeight: "20px",
+            color: "var(--opening-text)", fontSize: "14px", lineHeight: "20px",
             // Inter's recommended tracking at 14px (rsms.me/inter "dynamic metrics"): -0.087px
             letterSpacing: "-0.0062em",
             whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",

@@ -34,7 +34,7 @@ export default function CoordsPage() {
           {/* Same style as the coordinates (UI.11) */}
           <span style={{
             fontFamily: font.fontFamily, fontSize: "13px", fontWeight: 400,
-            color: "var(--lichess-text-muted)", textTransform: "lowercase",
+            color: "var(--coord-text)", textTransform: "lowercase",
           }}>
             1a2b3c4d5e6f7g8h
           </span>

@@ -6,6 +6,9 @@
   --lichess-text-primary: #bababa;
   --lichess-text-bright: #ffffff;
   --lichess-text-muted: #787674;
+  /* Warm greys of one tint, each at least 4.5 : 1 on --lichess-bg (WCAG AA). */
+  --opening-text: #979490; /* 6.05 : 1 */
+  --coord-text: #817e7a;   /* 4.52 : 1, dimmer than the opening name */
   --lichess-green: #629924;
   --lichess-green-hover: #75b32c;
   --lichess-accent: #3692e7;
@@ -280,7 +283,7 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
   /* Arial for a classical look. Arimo has Arial's letter widths and stands in
      where Arial is not installed (Linux, Android). */
   font-family: Arial, var(--font-arimo), sans-serif !important;
-  color: var(--lichess-text-muted) !important;
+  color: var(--coord-text) !important;
   font-weight: 400 !important;
   font-size: 13px !important;
   text-transform: lowercase !important;
