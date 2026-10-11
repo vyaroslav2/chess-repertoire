@@ -118,7 +118,7 @@ describe("HM generator", () => {
       return {
         selectedUci: reply.lan, selectedMoveSan: reply.san, cp: -10, mate: null,
         source: "Local Stockfish 19" as const, selectionMethod: "Baseline" as const, moveOrigin: "Engine Move" as const,
-        engineRank: 1
+        engineRank: 1, baselineCp: -10, baselineMate: null
       };
     };
   }
@@ -177,6 +177,51 @@ describe("HM generator", () => {
     const afterReply = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, history: { startsWith: "e2e4 " } } });
     assert.ok(near(e4.routeProb, 0.4));
     assert.ok(near(afterReply.routeProb, 0.4));
+  });
+
+  it("HM.09 DB.11: an expanded White move takes EW's baseline eval; a White move that ends the route has none", async () => {
+    // Black's reply carries its own eval (400, as for a hardcoded move); the White move gets the baseline's (25).
+    const hardcodedLike = async (_fen: string, chess: Chess) => {
+      const reply = chess.moves({ verbose: true })[0];
+      return {
+        selectedUci: reply.lan, selectedMoveSan: reply.san, cp: 400, mate: null,
+        source: "Local Stockfish 19" as const, selectionMethod: "Hardcoded" as const, moveOrigin: "Hardcoded Move" as const,
+        engineRank: null, baselineCp: 25, baselineMate: null
+      };
+    };
+    await captureLog(() => generateRepertoire(START_FEN, {
+      repertoireId, ...common,
+      responseEvaluator: hardcodedLike as any,
+      fetchDatabases: (async (fen: string) => fen === START_FEN ? amateurAt(rootMoves()) : empty) as any
+    }));
+    const root = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, history: "" } });
+    const whiteMoves = await prisma.repertoireMove.findMany({ where: { fromNodeId: root.id, playerTurn: "OPPONENT" } });
+    for (const move of whiteMoves) {
+      if (move.stopReason === null) {
+        assert.deepEqual([move.cp, move.mate, move.source], [25, null, "Local Stockfish 19"], move.san);
+        const reply = await prisma.repertoireMove.findFirstOrThrow({ where: { fromNodeId: move.toNodeId!, playerTurn: "RESPONSE" } });
+        assert.equal(reply.cp, 400);
+      } else {
+        assert.deepEqual([move.cp, move.mate, move.source], [null, null, null], move.san);
+      }
+    }
+    assert.equal(whiteMoves.filter(move => move.stopReason === null).length, 3);
+  });
+
+  it("HM.09 DB.11: an expanded White move with neither cp nor mate is a hard error", async () => {
+    const noEval = async (_fen: string, chess: Chess) => {
+      const reply = chess.moves({ verbose: true })[0];
+      return {
+        selectedUci: reply.lan, selectedMoveSan: reply.san, cp: -10, mate: null,
+        source: "Local Stockfish 19" as const, selectionMethod: "Baseline" as const, moveOrigin: "Engine Move" as const,
+        engineRank: 1, baselineCp: null, baselineMate: null
+      };
+    };
+    await assert.rejects(captureLog(() => generateRepertoire(START_FEN, {
+      repertoireId, ...common,
+      responseEvaluator: noEval as any,
+      fetchDatabases: (async (fen: string) => fen === START_FEN ? amateurAt([amateurMove("e4", 100)]) : empty) as any
+    })), /must carry exactly one of cp or mate/);
   });
 
   it("HM.08: all returned moves dropped logs the warning and ends the route", async () => {

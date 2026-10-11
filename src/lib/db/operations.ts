@@ -497,6 +497,18 @@ export async function createOpponentMove(data: {
   });
 }
 
+/** DB.11, HM.09: an expanded White move carries exactly one of cp or mate, from local Stockfish. */
+export async function recordOpponentMoveEval(moveId: string, evaluation: { cp: number | null; mate: number | null }) {
+  if ((evaluation.cp === null) === (evaluation.mate === null)) {
+    throw new Error(`White move ${moveId} must carry exactly one of cp or mate`);
+  }
+  if (evaluation.mate === 0) throw new Error(`White move ${moveId} has mate = 0`); // DB.12
+  return prisma.repertoireMove.update({
+    where: { id: moveId },
+    data: { cp: evaluation.cp, mate: evaluation.mate, source: "Local Stockfish 19" }
+  });
+}
+
 /** HM.24, HM.29, HM.33: the White moves that end the route at their own node. */
 export const WHITE_MOVE_ENDINGS = ["Too rare", "Game over", "Repetition"] as const;
 export type WhiteMoveEnding = typeof WHITE_MOVE_ENDINGS[number];

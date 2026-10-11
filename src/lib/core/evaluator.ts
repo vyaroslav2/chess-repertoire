@@ -69,6 +69,9 @@ export type SelectedResponseResult = {
   moveOrigin: ResponseMoveOrigin;
   /** DB.14: 1 if the move is Stockfish's baseline, otherwise null. */
   engineRank: number | null;
+  /** DB.11, HM.09: the baseline's eval, which is also the eval of the White move that reached this position. */
+  baselineCp: number | null;
+  baselineMate: number | null;
 };
 
 function legalSan(chess: Chess, uci: string): string {
@@ -122,6 +125,8 @@ export async function evaluateBlackMove(
     source: "Local Stockfish 19",
     selectionMethod: hardcodedSan !== null ? "Hardcoded" : "Baseline",
     moveOrigin: hardcodedSan !== null ? "Hardcoded Move" : "Engine Move",
-    engineRank: uci === baseline.uci ? 1 : null
+    engineRank: uci === baseline.uci ? 1 : null,
+    baselineCp: baseline.cp,
+    baselineMate: baseline.mate
   };
 }

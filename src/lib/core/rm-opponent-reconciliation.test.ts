@@ -411,7 +411,9 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
         source: "Local Stockfish 19" as const,
         selectionMethod: "Baseline" as const,
         moveOrigin: "Engine Move" as const,
-        engineRank: 1
+        engineRank: 1,
+        baselineCp: cp,
+        baselineMate: null
       };
     };
     const humanRows = [
@@ -515,13 +517,13 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
 
     let reprocessedB = false;
     const mockEvaluator = async (fen: string) => {
-      if (fen === nc3_edge.destination.fullFen) return { selectedUci: "g8f6", selectedMoveSan: "Nf6", cp: -5, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1 };
-      if (fen === nf3_edge.destination.fullFen) return { selectedUci: "g8f6", selectedMoveSan: "Nf6", cp: -5, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1 };
+      if (fen === nc3_edge.destination.fullFen) return { selectedUci: "g8f6", selectedMoveSan: "Nf6", cp: -5, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1, baselineCp: -5, baselineMate: null };
+      if (fen === nf3_edge.destination.fullFen) return { selectedUci: "g8f6", selectedMoveSan: "Nf6", cp: -5, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1, baselineCp: -5, baselineMate: null };
       if (fen === a_to_x.destination.fullFen) {
         reprocessedB = true;
-        return { selectedUci: "d7d5", selectedMoveSan: "d5", cp: -10, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1 };
+        return { selectedUci: "d7d5", selectedMoveSan: "d5", cp: -10, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1, baselineCp: -10, baselineMate: null };
       }
-      return { selectedUci: "e7e5", selectedMoveSan: "e5", cp: 0, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1 };
+      return { selectedUci: "e7e5", selectedMoveSan: "e5", cp: 0, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1, baselineCp: 0, baselineMate: null };
     };
 
     // Force B to be processed first by queueing order
@@ -589,17 +591,17 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     const mockEvaluator = async (fen: string) => {
       if (fen === nc3_edge.destination.fullFen) {
         processingOrder.push("B");
-        return { selectedUci: "g8f6", selectedMoveSan: "Nf6", cp: -5, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1 };
+        return { selectedUci: "g8f6", selectedMoveSan: "Nf6", cp: -5, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1, baselineCp: -5, baselineMate: null };
       }
       if (fen === nf3_edge.destination.fullFen) {
         processingOrder.push("A");
-        return { selectedUci: "g8f6", selectedMoveSan: "Nf6", cp: -5, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1 };
+        return { selectedUci: "g8f6", selectedMoveSan: "Nf6", cp: -5, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1, baselineCp: -5, baselineMate: null };
       }
       if (fen === a_to_x.destination.fullFen) {
         reprocessedB = true;
-        return { selectedUci: "d7d5", selectedMoveSan: "d5", cp: -10, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1 };
+        return { selectedUci: "d7d5", selectedMoveSan: "d5", cp: -10, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1, baselineCp: -10, baselineMate: null };
       }
-      return { selectedUci: "e7e5", selectedMoveSan: "e5", cp: 0, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1 };
+      return { selectedUci: "e7e5", selectedMoveSan: "e5", cp: 0, mate: null, depth: 20, controlEngineId: "dummyEngine", source: "Local Stockfish 19", selectionMethod: "Baseline", moveOrigin: "Engine Move", engineRank: 1, baselineCp: 0, baselineMate: null };
     };
 
     await generateRepertoire(root.fullFen, {

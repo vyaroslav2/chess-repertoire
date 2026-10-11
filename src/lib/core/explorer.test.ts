@@ -149,7 +149,7 @@ describe("EX.05 EX.06 generator", () => {
       return {
         selectedUci: uci, selectedMoveSan: move.san, cp: -10, mate: null,
         source: "Local Stockfish 19" as const, selectionMethod: "Baseline" as const, moveOrigin: "Engine Move" as const,
-        engineRank: 1
+        engineRank: 1, baselineCp: -10, baselineMate: null
       };
     };
 
@@ -178,7 +178,7 @@ describe("EX.05 EX.06 generator", () => {
       return {
         selectedUci: move.lan, selectedMoveSan: move.san, cp: 30, mate: null,
         source: "Local Stockfish 19" as const, selectionMethod: "Baseline" as const, moveOrigin: "Engine Move" as const,
-        engineRank: 1
+        engineRank: 1, baselineCp: 30, baselineMate: null
       };
     };
 

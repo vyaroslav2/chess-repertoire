@@ -61,7 +61,8 @@ test('EW engine response', async (t) => {
     const result = await withNoFetch(() => evaluateBlackMove(ordinaryFen, new Chess(ordinaryFen), [], { localSearchRunner: engine.runner }));
     assert.deepEqual(result, {
       selectedUci: 'e7e6', selectedMoveSan: 'e6', cp: -20, mate: null,
-      source: 'Local Stockfish 19', selectionMethod: 'Baseline', moveOrigin: 'Engine Move', engineRank: 1
+      source: 'Local Stockfish 19', selectionMethod: 'Baseline', moveOrigin: 'Engine Move', engineRank: 1,
+      baselineCp: -20, baselineMate: null
     });
     assert.deepEqual(engine.searches, [undefined], 'one open search, no searchmoves');
   });
@@ -85,12 +86,13 @@ test('EW engine response', async (t) => {
     assert.equal(result.mate, -3);
   });
 
-  await t.test('EW.13 a hardcoded move keeps Stockfish\'s eval of it and is never rejected', async () => {
+  await t.test('EW.13 HM.09 a hardcoded move keeps Stockfish\'s eval of it and is never rejected; the baseline eval is returned for White\'s move', async () => {
     const engine = stockfish(sf('e7e5', 'e5', 10), { c7c6: sf('c7c6', 'c6', 400) });
     const result = await withNoFetch(() => evaluateBlackMove(e4Fen, new Chess(e4Fen), ['e4'], { localSearchRunner: engine.runner }));
     assert.deepEqual(result, {
       selectedUci: 'c7c6', selectedMoveSan: 'c6', cp: 400, mate: null,
-      source: 'Local Stockfish 19', selectionMethod: 'Hardcoded', moveOrigin: 'Hardcoded Move', engineRank: null
+      source: 'Local Stockfish 19', selectionMethod: 'Hardcoded', moveOrigin: 'Hardcoded Move', engineRank: null,
+      baselineCp: 10, baselineMate: null
     });
     assert.deepEqual(engine.searches, [undefined, 'c7c6'], 'Stockfish evaluates the baseline and the hardcoded move');
     const profile = computeLocalEngineEvaluationProfile(defaultConfig);

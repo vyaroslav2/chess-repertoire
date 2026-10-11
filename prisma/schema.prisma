@@ -197,10 +197,12 @@ model RepertoireMove {
   // DB.20
   stopReason String?
 
-  // DB.14 Black move fields: the engine evidence
+  // DB.11 the eval: every Black move, and every White move Black replies to
   cp              Float?
   mate            Int?
   source          String?
+
+  // DB.14 Black move fields: the engine evidence
   selectionMethod String?
   moveOrigin      String?
   engineRank      Int?

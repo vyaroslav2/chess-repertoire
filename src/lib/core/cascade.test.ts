@@ -84,7 +84,7 @@ describe("TR", () => {
         return {
           selectedUci: reply.lan, selectedMoveSan: reply.san, cp: -10, mate: null,
           source: "Local Stockfish 19" as const, selectionMethod: "Baseline" as const, moveOrigin: "Engine Move" as const,
-          engineRank: 1
+          engineRank: 1, baselineCp: -10, baselineMate: null
         };
       };
     }
