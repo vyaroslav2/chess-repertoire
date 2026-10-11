@@ -50,7 +50,7 @@ In each move's cell, pushed to its right edge and centred vertically in the row,
 - Lichess does the same with Roboto and one decimal. JetBrains Mono gives every eval the same width (39.8px for "+9.99"), so the decimal points line up.
 - Cell padding is Lichess's: 0.5em left, 0.3em right (8.3px, 5px). White's eval ends 13.3px before Black's move.
 - The panel grows to 318.4px (398 screen px), so the moves keep the room they have at 220px. Its right edge would be at 1432px of the 1536px window.
-- Data: every move carries an eval ([[DB|DB.11]]). The generator does not yet do this for White: today only Black's moves have one (11 of 11; White's 0 of 36).
+- Data: every move on a card carries an eval ([[DB|DB.11]]). The generator does not yet do this for White: today only Black's moves have one (11 of 11; White's 0 of 36).
 - To bring into the app: the eval in the move cell, the 0.5em/0.3em padding and the 318.4px panel.
 
 ## Layout

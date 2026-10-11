@@ -58,10 +58,10 @@ DB.10 **White move fields.**
 * `moveProb` — the [[move-probability|move probability]].
 * The eval (DB.11).
 
-DB.11 **Every move carries an eval.** White's and Black's alike, dropped moves included. Exactly one of `cp` or `mate` — never both, never neither — and its `source`, `Local Stockfish 19`. A move without one is a hard error ([[OV|OV.20]]).
-* White move: Stockfish's eval of the position the move reaches, Black to move ([[HM|HM.09]]). For an expanded move this is the search [[EW|EW.09]] runs anyway, so it costs nothing extra.
+DB.11 **Every move on a card carries an eval.** That is every Black move, and every White move Black replies to. Exactly one of `cp` or `mate` — never both, never neither — and its `source`, `Local Stockfish 19`. A move that should have one and does not is a hard error ([[OV|OV.20]]).
 * Black move: Stockfish's eval of that move, from the position it is played in ([[EW|EW.10]]).
-* A move that ends the game leaves nothing to search. Checkmate: `mate = 1` if White mates, `mate = -1` if Black mates — the figure Stockfish gives the mating move itself. Stalemate: `cp = 0`.
+* White move that is expanded: Stockfish's eval of the position it reaches, Black to move ([[HM|HM.09]]). This is the search [[EW|EW.09]] runs anyway, so it costs nothing extra.
+* White move that ends the route — `Too rare`, `Game over`, `Repetition`, `Transposition` (DB.20): no eval. Black does not reply to it, so it is on no card.[^7]
 
 DB.12 **Mate is never zero.** `mate = 0` is invalid: there is always at least one move left in which to deliver the mate. A negative `mate` means Black mates, a positive one means White does.
 
@@ -109,10 +109,4 @@ DB.36 **The `Position` table is not a cache.** It maps `positionKey` to the node
 
 [^6]: Stockfish reports from the side to move. Every position we search has Black to move — after White's move for both White's eval and Black's — so its figures are flipped on the way in.
 
-
-
-
-
-
-
-
+[^7]: A transposition gets no Black reply and no card here; the line carries on at the owner ([[TR.excalidraw|TR]]).
