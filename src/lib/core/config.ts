@@ -29,7 +29,9 @@ export interface Config {
     apiRequestGapMs: number;
     apiRequestTimeoutMs: number;
     localStockfishVersion: number;
-    localStockfishDepth: number;
+    localStockfishNodes: number;
+    localStockfishThreads: number;
+    localStockfishHashMb: number;
     localStockfishMultiPv: number;
     hardcodedBlackResponses: string[];
     // Not in generation-config: the request shapes. Retries, gaps and timeouts follow AR.
@@ -72,7 +74,9 @@ export const defaultConfig: Config = {
     apiRequestGapMs: 2_000,
     apiRequestTimeoutMs: 30_000,
     localStockfishVersion: 19,
-    localStockfishDepth: 24,
+    localStockfishNodes: 200_000_000,
+    localStockfishThreads: 1,
+    localStockfishHashMb: 1024,
     localStockfishMultiPv: 1,
     hardcodedBlackResponses: ["1. e4 c6", "1. d4 d5"],
 
@@ -139,7 +143,9 @@ export function validateConfig(config: Config) {
     if (!isPositiveInteger(config.apiRequestTimeoutMs)) throw new Error("Invalid apiRequestTimeoutMs");
 
     if (!isPositiveInteger(config.localStockfishVersion)) throw new Error("Invalid localStockfishVersion");
-    if (!isPositiveInteger(config.localStockfishDepth)) throw new Error("Invalid localStockfishDepth");
+    if (!isPositiveInteger(config.localStockfishNodes)) throw new Error("Invalid localStockfishNodes");
+    if (!isPositiveInteger(config.localStockfishThreads)) throw new Error("Invalid localStockfishThreads");
+    if (!isPositiveInteger(config.localStockfishHashMb)) throw new Error("Invalid localStockfishHashMb");
     if (!isPositiveInteger(config.localStockfishMultiPv)) throw new Error("Invalid localStockfishMultiPv");
     if (config.localStockfishMultiPv !== 1) {
         throw new Error("Invalid localStockfishMultiPv: trusted Local Deep requires MultiPV 1");
@@ -176,12 +182,14 @@ export function computeExplorerCacheProfile(config: Config): string {
     return createHash('sha256').update(canonicalStringify(requestShape)).digest('hex');
 }
 
-// DB.32: the Stockfish version is part of the profile, so an eval from another version is never reused.
+// DB.32: the profile is the version and every search setting, so an eval from another version or setting is never reused.
 export function computeLocalEngineEvaluationProfile(config: Config): string {
     const searchShape = {
         role: "deep-local",
         version: config.localStockfishVersion,
-        depth: config.localStockfishDepth,
+        nodes: config.localStockfishNodes,
+        threads: config.localStockfishThreads,
+        hashMb: config.localStockfishHashMb,
         multiPv: config.localStockfishMultiPv
     };
     return createHash('sha256').update(canonicalStringify(searchShape)).digest('hex');

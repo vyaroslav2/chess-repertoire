@@ -1,7 +1,6 @@
 import { Chess } from "chess.js";
 import {
   getOrCreateLocalBaseline,
-  getOrCreateLocalCandidate,
   runTrustedLocalSearch,
   type LocalSearchRunner
 } from "./local-engine";
@@ -69,7 +68,7 @@ export type SelectedResponseResult = {
   moveOrigin: ResponseMoveOrigin;
   /** DB.14: 1 if the move is Stockfish's baseline, otherwise null. */
   engineRank: number | null;
-  /** DB.11, HM.09: the baseline's eval, which is also the eval of the White move that reached this position. */
+  /** DB.11, HM.09: EW.09's eval of this position, which is the eval of the White move that reached it. */
   baselineCp: number | null;
   baselineMate: number | null;
 };
@@ -86,6 +85,26 @@ function legalSan(chess: Chess, uci: string): string {
   return move.san;
 }
 
+/**
+ * EW.11, DB.11: the eval of Black's move is the eval of the position it reaches, White to move.
+ * Checkmate and stalemate leave nothing to search.
+ */
+async function evaluateBlackMoveResult(
+  chess: Chess,
+  uci: string,
+  runner: LocalSearchRunner
+): Promise<{ cp: number | null; mate: number | null }> {
+  chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci.length === 5 ? uci[4] : undefined });
+  const afterFen = parseFullFen(chess.fen());
+  const checkmate = chess.isCheckmate();
+  const stalemate = chess.isStalemate();
+  chess.undo();
+  if (checkmate) return { cp: null, mate: -1 };
+  if (stalemate) return { cp: 0, mate: null };
+  const { cp, mate } = (await getOrCreateLocalBaseline(afterFen, defaultConfig, runner)).evaluation;
+  return { cp, mate };
+}
+
 /** EW: Black's move is local Stockfish's top move (EW.09), unless a hardcoded response applies (EW.13). */
 export async function evaluateBlackMove(
   fen: string,
@@ -97,20 +116,18 @@ export async function evaluateBlackMove(
   const runner = dependencies.localSearchRunner ?? runTrustedLocalSearch;
   const baseline = (await getOrCreateLocalBaseline(fullFen, defaultConfig, runner)).evaluation;
 
-  // EW.13: a hardcoded response. Stockfish evaluates it for the record and never rejects it.
+  // EW.13: a hardcoded response. Stockfish never rejects it.
   const hardcodedSan = findHardcodedResponse(previousMovesSan, defaultConfig.hardcodedBlackResponses);
   let uci = baseline.uci;
-  let evaluation = baseline;
   if (hardcodedSan !== null) {
     let hardcodedMove;
     try { hardcodedMove = chess.move(hardcodedSan); } catch { hardcodedMove = null; }
     if (!hardcodedMove) throw new Error(`Hardcoded response ${hardcodedSan} is illegal after ${previousMovesSan.join(" ")}`);
     chess.undo();
     uci = hardcodedMove.lan;
-    if (uci !== baseline.uci) {
-      evaluation = (await getOrCreateLocalCandidate(fullFen, uci, defaultConfig, runner)).evaluation;
-    }
   }
+  const selectedMoveSan = legalSan(chess, uci);
+  const evaluation = await evaluateBlackMoveResult(chess, uci, runner);
 
   // EW.12: exactly one of cp or mate.
   if ((evaluation.cp === null) === (evaluation.mate === null)) {
@@ -119,7 +136,7 @@ export async function evaluateBlackMove(
   // EW.10: what is recorded on the move.
   return {
     selectedUci: uci,
-    selectedMoveSan: legalSan(chess, uci),
+    selectedMoveSan,
     cp: evaluation.cp,
     mate: evaluation.mate,
     source: "Local Stockfish 19",

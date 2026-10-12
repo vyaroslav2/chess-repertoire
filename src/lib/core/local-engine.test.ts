@@ -10,7 +10,6 @@ import {
   collectLocalSearchUpdates,
   parseInfoLine,
   getOrCreateLocalBaseline,
-  getOrCreateLocalCandidate,
   runTrustedLocalSearch,
   type LocalEngineFactory,
   type LocalSearchRunner,
@@ -25,9 +24,11 @@ const profile = computeLocalEngineEvaluationProfile(defaultConfig);
 const cpEval = (uci: string, san: string, cp: number): TrustedLocalEvaluation => ({ uci, san, cp, mate: null });
 const mateEval = (uci: string, san: string, mate: number): TrustedLocalEvaluation => ({ uci, san, cp: null, mate });
 
-function configWithDepth(depth: number): Config {
+const SETTINGS = { nodes: 200_000_000, threads: 1, hashMb: 1024, multiPv: 1 };
+
+function configWithNodes(nodes: number): Config {
   const config = JSON.parse(JSON.stringify(defaultConfig)) as Config;
-  config.localStockfishDepth = depth;
+  config.localStockfishNodes = nodes;
   return config;
 }
 
@@ -52,26 +53,25 @@ function engineFactory(
 test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
   await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
 
-  await t.test('baseline uses exact FullFen, configured deep depth, MultiPV 1, and cleans up', async () => {
+  await t.test('EW.09 baseline uses exact FullFen, the node limit, 1 thread, 1024 MB, MultiPV 1, and cleans up', async () => {
     const calls: Array<{ kind: string; value?: unknown }> = [];
     const result = await runTrustedLocalSearch(
       blackFen,
-      { depth: 24, multiPv: 1 },
-      undefined,
+      SETTINGS,
       engineFactory([{ depth: 24, score: { unit: 'cp', value: 42 }, pv: 'e7e5' }], calls)
     );
     assert.deepEqual(result, cpEval('e7e5', 'e5', -42));
     assert.deepEqual(calls.find(call => call.kind === 'position')?.value, blackFen);
-    assert.deepEqual(calls.find(call => call.kind === 'setoption')?.value, ['MultiPV', '1']);
-    assert.deepEqual(calls.find(call => call.kind === 'go')?.value, { depth: 24 });
+    assert.deepEqual(calls.filter(call => call.kind === 'setoption').map(call => call.value),
+      [['Threads', '1'], ['Hash', '1024'], ['MultiPV', '1']]);
+    assert.deepEqual(calls.find(call => call.kind === 'go')?.value, { nodes: 200_000_000 });
     assert.equal(calls.at(-1)?.kind, 'quit');
   });
 
   await t.test('mate remains explicit and zero cp remains valid', async () => {
     const mate = await runTrustedLocalSearch(
       blackFen,
-      { depth: 24, multiPv: 1 },
-      undefined,
+      SETTINGS,
       engineFactory([{ depth: 24, score: { unit: 'mate', value: 3 }, pv: 'e7e5' }], [])
     );
     assert.deepEqual(mate, mateEval('e7e5', 'e5', -3));
@@ -110,7 +110,7 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
     for (const info of invalidStreams) {
       assert.throws(() => collectLocalSearchUpdates(blackFen, info), /score unit/);
       const runner: LocalSearchRunner = async (fen, settings) =>
-        runTrustedLocalSearch(fen, settings, undefined, engineFactory(info, []));
+        runTrustedLocalSearch(fen, settings, engineFactory(info, []));
       await assert.rejects(getOrCreateLocalBaseline(blackFen, defaultConfig, runner), /score unit/);
       assert.equal(await prisma.engineCacheEvaluation.count({ where: { rank: 1, cache: { engine: "LOCAL" } } }), 0);
     }
@@ -136,8 +136,7 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
   await t.test('unrestricted baseline uses the final update at the greatest reported depth', async () => {
     const result = await runTrustedLocalSearch(
       blackFen,
-      { depth: 24, multiPv: 1 },
-      undefined,
+      SETTINGS,
       engineFactory([
         { depth: 10, score: { unit: 'cp', value: 900 }, pv: 'c7c6' },
         { depth: 24, score: { unit: 'cp', value: 30 }, pv: 'e7e5' }
@@ -148,8 +147,7 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
 
     const withoutDepth = await runTrustedLocalSearch(
       blackFen,
-      { depth: 24, multiPv: 1 },
-      undefined,
+      SETTINGS,
       engineFactory([
         { score: { unit: 'cp', value: 900 }, pv: 'c7c6' },
         { score: { unit: 'cp', value: 30 }, pv: 'e7e5' }
@@ -164,7 +162,6 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
     const runner: LocalSearchRunner = async (fen, settings) => runTrustedLocalSearch(
       fen,
       settings,
-      undefined,
       engineFactory([
         { depth: 8, score: { unit: 'cp', value: 1200 }, pv: 'c7c6' },
         { depth: 16, score: { unit: 'cp', value: 400 }, pv: 'c7c6' },
@@ -186,7 +183,6 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
     const runner: LocalSearchRunner = async (fen, settings) => runTrustedLocalSearch(
       fen,
       settings,
-      undefined,
       engineFactory([
         { depth: 24, score: { unit: 'cp', value: 30 }, pv: 'e7e5' },
         { depth: 10, score: { unit: 'cp', value: 900 }, pv: 'c7c6' },
@@ -203,46 +199,22 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
     await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
   });
 
-  await t.test('constrained search uses identical settings and enforces expected root', async () => {
-    const calls: Array<{ kind: string; value?: unknown }> = [];
-    const result = await runTrustedLocalSearch(
-      blackFen,
-      { depth: 24, multiPv: 1 },
-      'c7c6',
-      engineFactory([{ depth: 24, score: { unit: 'cp', value: -15 }, pv: 'c7c6' }], calls)
-    );
-    assert.equal(result.uci, 'c7c6');
-    assert.deepEqual(calls.find(call => call.kind === 'go')?.value, { depth: 24, searchmoves: ['c7c6'] });
-    await assert.rejects(
-      runTrustedLocalSearch(blackFen, { depth: 24, multiPv: 1 }, 'c7c6', engineFactory([{ score: { unit: 'cp', value: 0 }, pv: 'e7e5' }], [])),
-      /requested c7c6 but returned e7e5/
-    );
-    await assert.rejects(
-      runTrustedLocalSearch(blackFen, { depth: 24, multiPv: 1 }, 'c7c6', engineFactory([], [])),
-      /no usable result|zero usable/
-    );
-    await assert.rejects(
-      runTrustedLocalSearch(blackFen, { depth: 24, multiPv: 1 }, 'c7c4', engineFactory([], [])),
-      /Illegal or unsearchable/
-    );
-  });
-
   await t.test('process failure hard-errors and still quits', async () => {
     const calls: Array<{ kind: string; value?: unknown }> = [];
     await assert.rejects(
-      runTrustedLocalSearch(blackFen, { depth: 24, multiPv: 1 }, undefined, engineFactory([], calls, new Error('go failed'))),
+      runTrustedLocalSearch(blackFen, SETTINGS, engineFactory([], calls, new Error('go failed'))),
       /go failed/
     );
     assert.equal(calls.at(-1)?.kind, 'quit');
   });
 
-  await t.test('baseline and candidate caches reuse exact FullFen/UCI/profile only', async () => {
+  await t.test('DB.32 baseline cache reuses exact FullFen/profile only', async () => {
     let calls = 0;
-    const runner: LocalSearchRunner = async (_fen, settings, expected) => {
+    const runner: LocalSearchRunner = async (_fen, settings) => {
       calls += 1;
-      assert.ok(settings.depth === 24 || settings.depth === 25);
+      assert.ok(settings.nodes === 200_000_000 || settings.nodes === 200_000_001);
       assert.equal(settings.multiPv, 1);
-      return expected ? cpEval(expected, expected === 'c7c6' ? 'c6' : 'e5', -10) : cpEval('e7e5', 'e5', -20);
+      return cpEval('e7e5', 'e5', -20);
     };
     const first = await getOrCreateLocalBaseline(blackFen, defaultConfig, runner);
     const second = await getOrCreateLocalBaseline(blackFen, defaultConfig, runner);
@@ -251,18 +223,8 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
     assert.equal(calls, 1);
 
     await getOrCreateLocalBaseline(blackFenCounters, defaultConfig, runner);
-    await getOrCreateLocalBaseline(blackFen, configWithDepth(25), runner);
+    await getOrCreateLocalBaseline(blackFen, configWithNodes(200_000_001), runner);
     assert.equal(calls, 3);
-
-    const candidate1 = await getOrCreateLocalCandidate(blackFen, 'c7c6', defaultConfig, runner);
-    const candidate2 = await getOrCreateLocalCandidate(blackFen, 'c7c6', defaultConfig, runner);
-    // DB.32: one EngineCache row per fullFen + profile, so the baseline's own move is already there.
-    const baselineMove = await getOrCreateLocalCandidate(blackFen, 'e7e5', defaultConfig, runner);
-    await getOrCreateLocalCandidate(blackFen, 'c7c6', configWithDepth(25), runner);
-    assert.equal(candidate1.reused, false);
-    assert.equal(candidate2.reused, true);
-    assert.equal(baselineMove.reused, true);
-    assert.equal(calls, 5);
   });
 
   await t.test('invalid replacement preserves trusted evidence and malformed evidence is not persisted', async () => {
@@ -291,7 +253,7 @@ test('EW.09: only the configured Stockfish version is accepted', () => {
   assert.throws(() => assertStockfishVersion(['uciok']), /found \(no name\)/);
 });
 
-test('EW.13: a searchmoves info line is read in the shape node-uci gives', () => {
+test('EW.09: an info line is read in the shape node-uci gives; a bound is dropped', () => {
   assert.deepEqual(
     parseInfoLine('info depth 12 seldepth 18 multipv 1 score cp -41 nodes 90000 nps 900000 time 100 pv c7c6 d2d4 d7d5'),
     { depth: 12, score: { unit: 'cp', value: -41 }, pv: 'c7c6 d2d4 d7d5' }
@@ -302,17 +264,30 @@ test('EW.13: a searchmoves info line is read in the shape node-uci gives', () =>
   assert.equal(parseInfoLine('bestmove c7c6 ponder d2d4'), null);
 });
 
+test('EW.09: a search stopped part-way through a depth takes the deepest completed depth', async () => {
+  // Depth 31 was cut off: only bounds and a partial line with a different move after the last complete depth.
+  const lines = [
+    'info depth 29 seldepth 40 multipv 1 score cp 31 nodes 150000000 pv e7e5 g1f3',
+    'info depth 30 seldepth 41 multipv 1 score cp 28 nodes 180000000 pv e7e5 g1f3',
+    'info depth 31 seldepth 42 multipv 1 score cp 60 lowerbound nodes 195000000 pv c7c5',
+    'info depth 31 seldepth 42 multipv 1 score cp 10 upperbound nodes 199000000 pv c7c5',
+    'bestmove c7c5 ponder g1f3'
+  ];
+  const result = await runTrustedLocalSearch(blackFen, SETTINGS, () => ({
+    async init() {}, async setoption() {}, async position() {}, async quit() {},
+    async go() { return { info: lines.map(parseInfoLine).filter(info => info !== null) }; }
+  }));
+  assert.deepEqual(result, cpEval('e7e5', 'e5', -28), 'not bestmove, not a bound');
+});
+
 // Needs bin/stockfish.exe to be Stockfish 19.
-test('S0.04 EW.13: Stockfish started off the console still searches, with and without searchmoves, and quits', async () => {
+test('S0.04 EW.09: Stockfish started off the console runs a node-limited search and quits', async () => {
   const engine = new ConsoleDetachedEngine(path.resolve(process.cwd(), 'bin', 'stockfish.exe'));
   await engine.init();
   await engine.position(blackFen);
-  const result = await engine.go({ depth: 1 });
+  const result = await engine.go({ nodes: 20_000 });
   assert.ok(Array.isArray(result.info) && result.info.length > 0);
-  // searchmoves must come last in the go command, or the depth is lost and the search never ends.
-  const restricted = await engine.go({ depth: 6, searchmoves: ['c7c6'] });
-  const updates = collectLocalSearchUpdates(blackFen, restricted.info, 'c7c6');
-  assert.deepEqual(updates.map(update => update.uci), ['c7c6']);
+  assert.ok(collectLocalSearchUpdates(blackFen, result.info).length > 0);
   const proc = engine.proc!;
   await engine.quit();
   assert.notEqual(proc.exitCode, null);

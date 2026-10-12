@@ -32,7 +32,9 @@ test('generation-config: every setting has the value in the note', () => {
     assert.strictEqual(defaultConfig.apiRequestGapMs, 2_000);
     assert.strictEqual(defaultConfig.apiRequestTimeoutMs, 30_000);
     assert.strictEqual(defaultConfig.localStockfishVersion, 19);
-    assert.strictEqual(defaultConfig.localStockfishDepth, 24);
+    assert.strictEqual(defaultConfig.localStockfishNodes, 200_000_000);
+    assert.strictEqual(defaultConfig.localStockfishThreads, 1);
+    assert.strictEqual(defaultConfig.localStockfishHashMb, 1024);
     assert.strictEqual(defaultConfig.localStockfishMultiPv, 1);
     assert.deepStrictEqual(defaultConfig.hardcodedBlackResponses, ['1. e4 c6', '1. d4 d5']);
 });
@@ -47,7 +49,7 @@ test('generation-config probabilityBands: deep >= 2%, medium >= 0.5%, shallow be
 });
 
 const AMATEUR_PROFILE = '315b7b6ed7ee94ad8b15ea57cfa4324700f8c14a4c489d1d0357e14f0faa2ead';
-const LOCAL_PROFILE = 'fb1218d1a89c424c009014609e4af0a4dd7d20e6b6fe703d81ef2ce396cac8c8';
+const LOCAL_PROFILE = 'da64ab3eb7bd609561a3badddeaa1244572475dac4a12df71e5cabb23f05e8ae';
 
 test('DB.31, DB.32: the shipped cache profiles', () => {
     // The Amateur profile is the one used before the Masters and Elite datasets were dropped,
@@ -66,9 +68,11 @@ test('23. Local Deep profile tracks material search settings only', () => {
     const same = JSON.parse(JSON.stringify(defaultConfig));
     assert.strictEqual(computeLocalEngineEvaluationProfile(defaultConfig), computeLocalEngineEvaluationProfile(same));
 
-    const changedDepth = JSON.parse(JSON.stringify(defaultConfig));
-    changedDepth.localStockfishDepth += 1;
-    assert.notStrictEqual(computeLocalEngineEvaluationProfile(defaultConfig), computeLocalEngineEvaluationProfile(changedDepth));
+    for (const setting of ['localStockfishNodes', 'localStockfishThreads', 'localStockfishHashMb']) {
+        const changed = JSON.parse(JSON.stringify(defaultConfig));
+        changed[setting] += 1;
+        assert.notStrictEqual(computeLocalEngineEvaluationProfile(defaultConfig), computeLocalEngineEvaluationProfile(changed), `DB.32 ${setting}`);
+    }
 
     const changedMultiPv = JSON.parse(JSON.stringify(defaultConfig));
     changedMultiPv.localStockfishMultiPv = 2;
@@ -113,10 +117,12 @@ test('5. invalid duration rejected', () => {
     assert.throws(() => validateConfig(cfg1), /Invalid apiRequestGapMs/);
 });
 
-test('6. invalid engine depth/MultiPV rejected', () => {
-    const cfg1 = JSON.parse(JSON.stringify(defaultConfig));
-    cfg1.localStockfishDepth = 0;
-    assert.throws(() => validateConfig(cfg1), /Invalid localStockfishDepth/);
+test('6. invalid engine nodes/threads/hash/MultiPV rejected', () => {
+    for (const setting of ['localStockfishNodes', 'localStockfishThreads', 'localStockfishHashMb']) {
+        const cfg = JSON.parse(JSON.stringify(defaultConfig));
+        cfg[setting] = 0;
+        assert.throws(() => validateConfig(cfg), new RegExp(`Invalid ${setting}`));
+    }
 
     const cfg2 = JSON.parse(JSON.stringify(defaultConfig));
     cfg2.localStockfishMultiPv = -1;
@@ -220,12 +226,12 @@ test('15. central config carries no trap/threat policy', () => {
     assert.strictEqual(keys.includes('threat'), false);
 });
 
-test('16. general config changes such as engine depth do not change the human explorer profile', () => {
+test('16. general config changes such as engine nodes do not change the human explorer profile', () => {
     
     const cfgA = JSON.parse(JSON.stringify(defaultConfig));
     const cfgB = JSON.parse(JSON.stringify(defaultConfig));
 
-    cfgB.localStockfishDepth = 30;
+    cfgB.localStockfishNodes = 30;
 
     const profileA = computeExplorerCacheProfile(cfgA);
     const profileB = computeExplorerCacheProfile(cfgB);
