@@ -2,6 +2,7 @@ import { parseArgs } from "node:util";
 import { importFiles } from "./import";
 import { downloadRun, filterDownloaded } from "./download";
 import { evaluateRun } from "./evaluate";
+import { writeJobs } from "./jobs";
 import type { Period } from "./types";
 import { resolveInputPath } from "./paths";
 import { checkConnection, loadGames } from "./db";
@@ -13,6 +14,7 @@ const HELP = String.raw`Human evidence pilot
   npm --prefix experiments/he run filter -- --run 2024-01-2500mb
   npm --prefix experiments/he run import -- --run pilot-50k --limit 50000 file.pgn [other.pgn.gz]
   npm --prefix experiments/he run evaluate -- --run pilot-50k --engine <stockfish-19-binary> [--period fit] [--limit 5]
+  npm --prefix experiments/he run jobs -- --run 2024-02-3000mb [--period fit] [--split 20000]
   npm --prefix experiments/he run db-check
   npm --prefix experiments/he run load -- --run 2024-01-2500mb [--limit 100]
 
@@ -21,6 +23,7 @@ Periods: fit (2023-24), tune (2025), test (2026).
 Input and engine paths are relative to the terminal directory where you launch npm.
 All outputs live in experiments/he/data/. Existing run/results names are protected.
 Load copies a download's sample.pgn into the MySQL games table; repeating it is safe.
+Jobs writes the groups as Colab search jobs: ids 1 to --split in jobs-a.jsonl, the rest in jobs-b.jsonl.
 Input supports .pgn and .pgn.gz. Decompress Lichess .pgn.zst exports first.
 `;
 async function main() {
@@ -28,7 +31,7 @@ async function main() {
   if (!command || command === "--help" || command === "help") { console.log(HELP); return; }
   const parsed = parseArgs({ args: process.argv.slice(3), allowPositionals: true, options: {
     run: { type: "string" }, seed: { type: "string" }, "max-gap": { type: "string" },
-    month: { type: "string" }, gb: { type: "string" }, limit: { type: "string" }, engine: { type: "string" }, period: { type: "string" }, help: { type: "boolean" },
+    month: { type: "string" }, gb: { type: "string" }, limit: { type: "string" }, engine: { type: "string" }, period: { type: "string" }, split: { type: "string" }, help: { type: "boolean" },
   } });
   const { values, positionals } = parsed;
   if (values.help) { console.log(HELP); return; }
@@ -58,6 +61,12 @@ async function main() {
       throw new Error("Load takes only --run and --limit.");
     runPath(values.run);
     console.log(JSON.stringify(await loadGames(path.join(DATA_ROOT, "downloads", values.run, "sample.pgn"), limit), null, 2));
+  } else if (command === "jobs") {
+    if (positionals.length || values.seed || values["max-gap"] || values.engine || values.limit)
+      throw new Error("Jobs takes only --run, --period and --split.");
+    const period = values.period ?? "fit";
+    if (!["fit", "tune", "test"].includes(period)) throw new Error("--period must be fit, tune or test.");
+    console.log(JSON.stringify(await writeJobs(values.run, period as Period, Number(values.split ?? 20000)), null, 2));
   } else if (command === "evaluate") {
     if (!values.engine) throw new Error("--engine is required; point to a Stockfish 19 binary.");
     if (positionals.length || values.seed || values["max-gap"]) throw new Error("Evaluate uses the import run's inputs and filters.");

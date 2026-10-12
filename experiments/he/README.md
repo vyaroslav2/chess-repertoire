@@ -118,6 +118,29 @@ changes the profile, so its results are cached apart. Mate scores stay explicit;
 excluded from the ordinary cp curve rather than converted into invented cp values.
 Finite-depth scores are estimates.
 
+## Evaluating on Google Colab
+
+The curve needs one search per group: its position, limited to the move played. These can
+run on Colab, split between two people. First write the jobs:
+
+```powershell
+npm --prefix experiments/he run jobs -- --run 2024-02-3000mb
+```
+
+This writes `jobs-a.jsonl` (ids 1 to 20,000; `--split` changes it) and `jobs-b.jsonl` (the
+rest) into the run's folder, one job per line: `id`, `positionKey`, the group's first FEN and
+`uci`. A group's FENs differ only in the clocks, so its first FEN stands for all of them.
+
+Each person puts their jobs file in their Google Drive (e.g. `MyDrive/he/`), mounts Drive in a
+Colab notebook, pastes `colab/he_colab.py` into one cell, sets `JOBS` and `RESULTS`, and runs it.
+The script downloads the Stockfish 19 Linux release, checks its SHA-256 and that `bench`
+searches 2,497,913 nodes (the same as the Windows build), then runs one single-threaded engine
+per core with the settings above. Each finished search is one line in `RESULTS`, written at
+once, so stopping or a dropped session loses only the searches in progress; running the cell
+again carries on. The score is kept as Stockfish gives it, from Black's view; the import
+(still to be written) flips it to `cpWhite`. Locally, the script gave the same score and depth as `engine.ts` on the same
+jobs.
+
 ## Checks
 
 ```powershell

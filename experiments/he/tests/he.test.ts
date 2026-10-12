@@ -7,6 +7,7 @@ import { Chess } from "chess.js";
 import { selectObservation, readGames, gameRecord } from "../pgn";
 import { importFiles, groupObservations } from "../import";
 import { parseEvaluation } from "../engine";
+import { writeJobs } from "../jobs";
 import { DATA_ROOT, assertDataDirectory, runPath } from "../paths";
 import type { Observation } from "../types";
 
@@ -186,4 +187,21 @@ test("a checkmate or stalemate on the board must match the result", () => {
   assert.equal(parsed.record.finalState, "checkmate");
   assert.deepEqual(gameRecord(mate("1-0")), { rejected: "final-state-mismatch" });
   assert.deepEqual(gameRecord(mate("1/2-1/2")), { rejected: "final-state-mismatch" });
+});
+test("jobs split one period's groups by id and keep each group's first FEN", async () => {
+  const name = "test-jobs-" + process.pid, run = runPath(name);
+  await assertDataDirectory(run);
+  const fen = "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1";
+  const group = (period: string, uci: string) => ({ period, positionKey: fen.split(" ").slice(0, 4).join(" "), uci,
+    fens: [fen, fen.replace(" 0 1", " 2 3")], games: 2, wins: 1, draws: 0, losses: 1, moveNumbers: { "1": 2 } });
+  try {
+    await writeFile(path.join(run, "groups.jsonl"),
+      [group("fit", "d7d5"), group("tune", "e7e6"), group("fit", "g8f6")].map(g => JSON.stringify(g)).join("\n") + "\n");
+    const report = await writeJobs(name, "fit", 1);
+    assert.equal(report.jobs, 2);
+    const read = async (file: string) => (await readFile(path.join(run, file), "utf8")).trim().split("\n").map(l => JSON.parse(l));
+    assert.deepEqual(await read("jobs-a.jsonl"), [{ id: 1, positionKey: group("fit", "").positionKey, fen, uci: "d7d5" }]);
+    assert.deepEqual((await read("jobs-b.jsonl")).map(job => [job.id, job.uci]), [[2, "g8f6"]]);
+    await assert.rejects(writeJobs(name, "fit", 1));
+  } finally { await rm(run, { recursive: true }); }
 });
