@@ -1,6 +1,6 @@
 ---
 tags:
-  - processed
+  - reviewed
 ---
 # DB — What We Store
 
@@ -58,10 +58,20 @@ DB.10 **White move fields.**
 * `moveProb` — the [[move-probability|move probability]].
 * The eval (DB.11).
 
-DB.11 **Every move on a card carries an eval.** That is every Black move, and every White move Black replies to. Exactly one of `cp` or `mate` — never both, never neither — and its `source`, `Local Stockfish 19`. A move that should have one and does not is a hard error ([[OV|OV.20]]).
-* Black move: Stockfish's eval of that move, from the position it is played in ([[EW|EW.10]]).
-* White move that is expanded: Stockfish's eval of the position it reaches, Black to move ([[HM|HM.09]]). This is the search [[EW|EW.09]] runs anyway, so it costs nothing extra.
-* White move that ends the route — `Too rare`, `Game over`, `Repetition`, `Transposition` (DB.20): no eval. Black does not reply to it, so it is on no card.[^7]
+DB.11 **Every move on a card carries an eval: the eval of the position the move reaches**, as on Lichess. That is every Black move, and every White move Black replies to. Exactly one of `cp` or `mate` — never both, never neither — and its `source`, `Local Stockfish 19`. A move that should have one and does not is a hard error ([[OV|OV.20]]).
+
+What is measured:
+* One search of the position the move reaches, on its own, under the generator's profile (DB.32). The score is the deepest completed depth's ([[EW|EW.09]]).
+* White move: the position after it, Black to move. This is the search [[EW|EW.09]] runs to pick Black's reply, so it costs nothing extra ([[HM|HM.09]]).
+* Black move: the position after it, White to move. A search of its own ([[EW|EW.11]]). The same for a hardcoded move.
+
+What it means:
+* One figure: Stockfish's estimate of that position with best play from there on, in White's point of view (DB.15). It says who is better and by how much.
+* Two figures in a row: the change is what the move cost. After Stockfish's own top move the two should match in principle. They differ a little only because each position is searched on its own; that is search noise, not information. A large swing after a White move means White's move was a mistake. After a hardcoded Black move, the swing is what that choice costs.
+
+Exceptions:
+* A Black move that ends the game by checkmate or stalemate leaves nothing to search. Checkmate: `mate = -1`, the figure EW.09's search gives the mating move. Stalemate: `cp = 0`.
+* A White move that ends the route — `Too rare`, `Game over`, `Repetition`, `Transposition` (DB.20): no eval. Black does not reply to it, so it is on no card.[^7]
 
 DB.12 **Mate is never zero.** `mate = 0` is invalid: there is always at least one move left in which to deliver the mate. A negative `mate` means Black mates, a positive one means White does.
 
@@ -85,7 +95,7 @@ DB.30 **Caches survive the wipe.** The tree is rebuilt from scratch on every run
 
 DB.31 **Explorer data** — one row per position, per [[cache-profile|cache profile]]. Only the Amateur dataset is fetched ([[EX]]). The dataset is part of the profile, so the key is `positionKey` + profile and nothing else ([[EX|EX.01]]). A position that was fetched and genuinely has no games is stored as an empty result, so it is never asked for twice ([[EX|EX.01]], State B). Each row also holds the `eco` and `openingName` Explorer returned with it.
 
-DB.32 **Engine evaluations** — held in `EngineCache`, stored against the local Stockfish profile and against the exact `fullFen`, not against `positionKey`. Only local Stockfish 19 writes it. The Stockfish version is part of the profile, so an eval from another version is never reused.
+DB.32 **Engine evaluations** — held in `EngineCache`, stored against the local Stockfish profile and against the exact `fullFen`, not against `positionKey`. Only local Stockfish 19 writes it. The profile is `localStockfishVersion`, `localStockfishNodes`, `localStockfishThreads`, `localStockfishHashMb` and `localStockfishMultiPv` ([[generation-config]]). A change to any of them makes a new profile, so an eval from another version or setting is never reused.
 
 DB.33 **Opening metadata** — the result of [[DB|DB.06]], stored per route: repertoire + `history`. A rebuilt tree gets its names back without asking Explorer again.
 
@@ -107,6 +117,6 @@ DB.36 **The `Position` table is not a cache.** It maps `positionKey` to the node
 
 [^5]: see [[centipawn]]
 
-[^6]: Stockfish reports from the side to move. Every position we search has Black to move — after White's move for both White's eval and Black's — so its figures are flipped on the way in.
+[^6]: Stockfish reports from the side to move. A position with Black to move (after White's move) has its figures flipped on the way in. One with White to move (after Black's move) is stored as reported.
 
 [^7]: A transposition gets no Black reply and no card here; the line carries on at the owner ([[TR.excalidraw|TR]]).

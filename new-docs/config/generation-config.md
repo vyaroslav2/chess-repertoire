@@ -22,7 +22,9 @@ tags:
 | `apiRequestGapMs`             | 2 000                                                             |                                                               |
 | `apiRequestTimeoutMs`         | 30 000                                                            |                                                               |
 | `localStockfishVersion`       | 19                                                                | related to local Stockfish  cache profile                     |
-| `localStockfishDepth`         | depth=24                                                          | related to local Stockfish  cache profile                     |
+| `localStockfishNodes`         | 200 000 000 nodes; no depth or time limit                         | related to local Stockfish  cache profile                     |
+| `localStockfishThreads`       | 1; one search at a time                                           | related to local Stockfish  cache profile                     |
+| `localStockfishHashMb`        | 1024                                                              | related to local Stockfish  cache profile                     |
 | `localStockfishMultiPv`       | 1                                                                 | related to local Stockfish  cache profile                     |
 | `hardcodedBlackResponses`[^4] | 1. e4 c6,  1. d4 d5                                               |                                                               |
 
