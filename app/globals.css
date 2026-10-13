@@ -416,7 +416,6 @@ html.coords-large .cg-wrap coords coord {
   width: 15px; /* Lichess's block gap */
   height: 100%;
   position: relative;
-  border-radius: 7px;
   background: linear-gradient(to bottom, #444 var(--eval-percent), #c0c0c0 var(--eval-percent));
   transition: --eval-percent 1s ease;
   overflow: hidden;
@@ -435,7 +434,6 @@ html.coords-large .cg-wrap coords coord {
   display: block;
   position: absolute;
   inset: 0;
-  border-radius: 7px;
   box-shadow: 0 0 5px rgb(0 0 0 / 0.5) inset;
 }
 

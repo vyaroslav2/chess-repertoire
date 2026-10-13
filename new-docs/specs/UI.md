@@ -93,7 +93,7 @@ A circle in the bottom-left corner, 16px in from each edge, shown once a move is
 **Was:** a 250 × 25px stripe flush in the corner, with a `#363431` border on its top and right.
 
 UI.31 **Eval gauge.**
-A copy of the Lichess gauge, dark theme. A bar 15px wide and as tall as the board, between the board and the move list, 4px from each, as on the Lichess analysis board. Corners 7px.
+A copy of the Lichess gauge, dark theme. A bar 15px wide and as tall as the board, between the board and the move list, 4px from each, as on the Lichess analysis board. Square ends; Lichess rounds them (7px).
 - Fill: Black's share `#444` from the top, White's `#c0c0c0` below. The split is Lichess's winning-chances curve: 2 / (1 + e^(-0.00368208 × cp)) − 1, with cp capped at ±1000. A mate counts as (21 − min(10, |mate|)) × 100 cp, so mate in 1 is 2000 and mate in 10 or more is 1100.
 - It shows the eval of the position on the board, from the same evals as the move list (UI.26). The split slides over 1s.
 - Ticks at every 12.5%: 2px ridge lines, `#888` at 40%. The middle line is 7px thick, in Lichess's accent at half strength, `hsl(22 100% 42% / 0.5)`.
