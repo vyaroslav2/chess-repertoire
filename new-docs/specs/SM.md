@@ -32,7 +32,9 @@ Copies the whole line to the clipboard, whatever the position on the board, e.g.
 
 SM.04 **Copy FEN.**
 Copies the FEN of the position on the board to the clipboard. Icon: `copy`.
-- No message on copying, for now.
+
+SM.07 **Copied message.**
+After a copy, the menu closes and `PGN copied` or `FEN copied` shows where the menu was: 4px under the button, right edges level. In the menu's style: panel colour, border and 1px corners, text as the items, padding 4px 8px. It stays 2s, fades over 0.45s, then goes. Opening the menu hides it. Shown only if the copy worked.
 
 ## Later
 

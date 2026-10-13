@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import SettingsButton from "./SettingsButton";
 
-// The settings button and its menu (SM.01–SM.04). For now the menu holds actions
+// The settings button and its menu (SM.01–SM.04, SM.06, SM.07). For now the menu holds actions
 // on the line on the board; settings come later (SM.05).
 
 interface SettingsMenuProps {
@@ -75,6 +75,18 @@ export default function SettingsMenu({ line, ply, fen, orientation }: SettingsMe
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
+  // "PGN copied", shown where the menu was, once it has closed (SM.07).
+  const [notice, setNotice] = useState<{ text: string; id: number } | null>(null);
+  const noticeTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const showNotice = (text: string) => {
+    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+    setNotice({ text, id: Date.now() }); // a new id restarts the fade
+    noticeTimerRef.current = setTimeout(() => setNotice(null), 2450);
+  };
+  useEffect(() => () => {
+    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+  }, []);
+
   // A click outside or Escape closes the menu.
   useEffect(() => {
     if (!open) return;
@@ -94,13 +106,19 @@ export default function SettingsMenu({ line, ply, fen, orientation }: SettingsMe
 
   const run = [
     () => window.open(lichessUrl(line, ply, orientation), "_blank", "noopener"),
-    () => navigator.clipboard.writeText(movetext(line)),
-    () => navigator.clipboard.writeText(fen),
+    () => navigator.clipboard.writeText(movetext(line)).then(() => showNotice("PGN copied")),
+    () => navigator.clipboard.writeText(fen).then(() => showNotice("FEN copied")),
   ];
 
   return (
     <div ref={rootRef}>
-      <SettingsButton open={open} onClick={() => setOpen((prev) => !prev)} />
+      <SettingsButton
+        open={open}
+        onClick={() => {
+          setNotice(null);
+          setOpen((prev) => !prev);
+        }}
+      />
       {open && (
         <SettingsMenuPanel
           onSelect={(index) => {
@@ -108,6 +126,11 @@ export default function SettingsMenu({ line, ply, fen, orientation }: SettingsMe
             setOpen(false);
           }}
         />
+      )}
+      {notice && !open && (
+        <div key={notice.id} className="settings-notice" role="status">
+          {notice.text}
+        </div>
       )}
     </div>
   );

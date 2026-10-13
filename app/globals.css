@@ -539,3 +539,26 @@ html.coords-large .cg-wrap coords coord {
   flex: none;
   color: var(--settings-icon);
 }
+
+/* "PGN copied" (SM.07): where the menu was, in the menu's style, then fades. */
+.settings-notice {
+  position: fixed;
+  top: calc(8px + 28px + 4px);
+  right: 8px;
+  z-index: 200;
+  padding: 4px 8px;
+  background: var(--lichess-panel-bg);
+  border: 1px solid var(--lichess-border);
+  border-radius: var(--settings-menu-radius, 1px);
+  color: var(--menu-text);
+  font-size: 14px;
+  line-height: 20px;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: settings-notice 2.45s forwards; /* 2s, then a 0.45s fade */
+}
+
+@keyframes settings-notice {
+  0%, 81.6% { opacity: 1; }
+  100% { opacity: 0; }
+}
