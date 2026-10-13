@@ -12,6 +12,7 @@
   --coord-text-large: #e0dcd6; /* 13.37 : 1, large coordinates (UI.32) */
   --settings-icon: #b5b1ab; /* Obsidian's #b3b3b3 in the same warm tint */
   --settings-hover-bg: rgb(224 220 214 / 0.075); /* Obsidian's hover: light at 7.5% */
+  --menu-text: #dad6d0; /* Obsidian's #dadada in the same warm tint */
   --lichess-green: #629924;
   --lichess-green-hover: #75b32c;
   --lichess-accent: #3692e7;
@@ -485,14 +486,56 @@ html.coords-large .cg-wrap coords coord {
   justify-content: center;
   color: var(--settings-icon);
   border-radius: var(--settings-button-radius, 4px);
+  z-index: 200;
 }
 
 .settings-button:hover,
-.settings-button.hover {
+.settings-button.hover,
+.settings-button.open {
   background: var(--settings-hover-bg);
 }
 
 .settings-button svg {
   width: 16px;
   height: 16px;
+}
+
+/* Settings menu (SM.01): under the button, right edges level, as Obsidian's menus. */
+.settings-menu {
+  position: fixed;
+  top: calc(16px + 28px + 4px);
+  right: 16px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  padding: 6px;
+  background: var(--lichess-panel-bg);
+  border: 1px solid var(--lichess-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.5);
+}
+
+.settings-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  color: var(--menu-text);
+  font-size: 14px;
+  line-height: 20px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.settings-menu-item:hover {
+  background: var(--settings-hover-bg);
+}
+
+.settings-menu-item svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--settings-icon);
 }

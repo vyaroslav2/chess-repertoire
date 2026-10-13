@@ -6,6 +6,7 @@ import "chessground/assets/chessground.base.css";
 import { Chess } from "chess.js";
 import LichessMoveList from "./LichessMoveList";
 import EvalGauge from "./EvalGauge";
+import SettingsMenu from "./SettingsMenu";
 import { logFlightBox } from "../lib/logger";
 
 interface SrsTrainerProps {
@@ -293,6 +294,9 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
   // By ply, as the moves. The answer's eval shows with the answer; a wrong move has none.
   const moveEvals = (currentStat.evalByPly || []).concat(testStatus === 'correct' || testStatus === 'revealed' ? [currentStat.targetMove] : []);
 
+  // The line for the settings menu: the move list without a wrong move (SM.02, SM.03).
+  const line = lineMoves.concat(testStatus === 'correct' || testStatus === 'revealed' ? [currentStat.targetMove.san] : []);
+
   const calcMovable = () => {
     // Only allow moves if we are idle or wrong (let them try again)
     // Completely lock the board during browsing or initialization
@@ -391,6 +395,8 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px", position: "relative" }}>
       
+      <SettingsMenu line={line} ply={Math.min(Math.max(currentPlyIndex, 0), line.length)} fen={fen} orientation={orientation} />
+
       {testStatus !== "idle" && (
         <div
           style={{
