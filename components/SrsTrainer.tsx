@@ -459,7 +459,7 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
               highlight: { lastMove: true, check: true },
               drawable: { enabled: true, visible: true },
               coordinates: true,
-              animation: { enabled: animationEnabled, duration: 200 },
+              animation: { enabled: animationEnabled, duration: 250 },
               movable: {
                 ...calcMovable(),
                 events: {

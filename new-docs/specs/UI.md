@@ -97,6 +97,16 @@ A circle in the bottom-left corner, 16px in from each edge, shown once a move is
 
 **Was:** a 250 × 25px stripe flush in the corner, with a `#363431` border on its top and right.
 
+## Motion
+
+UI.35 **Piece animation.**
+A moving piece slides over 250ms, Lichess's default ("Normal").
+- Lichess's four steps: None 0ms, Fast 120ms, Normal 250ms, Slow 500ms (`animationMillis` in lila's `Pref.scala`).
+- A new card snaps to the position before the opponent's last move with no animation; only that last move slides.
+- Since 2026-10-13.
+
+**Was:** 200ms, Chessground's default: between Fast and Normal, not a Lichess step.
+
 UI.31 **Eval gauge.**
 A copy of the Lichess gauge, dark theme. A bar 15px wide and as tall as the board, between the board and the move list, 4px from each, as on the Lichess analysis board. Square ends; Lichess rounds them (7px).
 - Fill: Black's share `#444` from the top, White's `#c0c0c0` below. The split is Lichess's winning-chances curve: 2 / (1 + e^(-0.00368208 × cp)) − 1, with cp capped at ±1000. A mate counts as (21 − min(10, |mate|)) × 100 cp, so mate in 1 is 2000 and mate in 10 or more is 1100.
