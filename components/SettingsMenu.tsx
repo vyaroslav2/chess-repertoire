@@ -39,6 +39,38 @@ const copy = (
   </svg>
 );
 
+const items = [
+  { label: "Open on Lichess", icon: externalLink },
+  { label: "Copy PGN", icon: copy },
+  { label: "Copy FEN", icon: copy },
+];
+
+interface SettingsMenuPanelProps {
+  onSelect?: (index: number) => void;
+  hoverIndex?: number; // shows that item's hover box, for the test page
+  style?: React.CSSProperties;
+}
+
+// The panel alone, so the test page can show it open (UI.29).
+export function SettingsMenuPanel({ onSelect, hoverIndex, style }: SettingsMenuPanelProps) {
+  return (
+    <div className="settings-menu" role="menu" style={style}>
+      {items.map((item, index) => (
+        <button
+          key={item.label}
+          className={`settings-menu-item${index === hoverIndex ? " hover" : ""}`}
+          role="menuitem"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => onSelect?.(index)}
+        >
+          {item.icon}
+          {item.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function SettingsMenu({ line, ply, fen, orientation }: SettingsMenuProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -60,33 +92,22 @@ export default function SettingsMenu({ line, ply, fen, orientation }: SettingsMe
     };
   }, [open]);
 
-  const items = [
-    { label: "Open on Lichess", icon: externalLink, run: () => window.open(lichessUrl(line, ply, orientation), "_blank", "noopener") },
-    { label: "Copy PGN", icon: copy, run: () => navigator.clipboard.writeText(movetext(line)) },
-    { label: "Copy FEN", icon: copy, run: () => navigator.clipboard.writeText(fen) },
+  const run = [
+    () => window.open(lichessUrl(line, ply, orientation), "_blank", "noopener"),
+    () => navigator.clipboard.writeText(movetext(line)),
+    () => navigator.clipboard.writeText(fen),
   ];
 
   return (
     <div ref={rootRef}>
       <SettingsButton open={open} onClick={() => setOpen((prev) => !prev)} />
       {open && (
-        <div className="settings-menu" role="menu">
-          {items.map((item) => (
-            <button
-              key={item.label}
-              className="settings-menu-item"
-              role="menuitem"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                item.run();
-                setOpen(false);
-              }}
-            >
-              {item.icon}
-              {item.label}
-            </button>
-          ))}
-        </div>
+        <SettingsMenuPanel
+          onSelect={(index) => {
+            run[index]();
+            setOpen(false);
+          }}
+        />
       )}
     </div>
   );

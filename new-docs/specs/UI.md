@@ -74,7 +74,7 @@ UI.27 **Centring.** The board is centred across and down; only the board counts.
 UI.28 **Opening name position.** The opening name sits 4px above the board, as wide as the board and lined up with its left edge.
 
 UI.29 **Test pages.** Temporary: `/fonts`, `/coords`, `/moves`, `/grid`, `/gauge` and `/settings`. Delete them before deploying.
-- `/settings` shows the settings button (SM.01) at up to 12×, as it is and with the hover box forced on, with a slider for the corner rounding.
+- `/settings` shows the settings button (SM.01) at up to 12× and the menu (SM.06) at up to 6×, each with its hover box forced on. Sliders set the rounding of the button, the menu panel and the items' hover box, each on its own. The real button, in its corner, opens the menu.
 - `/gauge` shows the eval gauge (UI.31) at chosen evals, without the database: one gauge you set by typing (`-0.25`, `#-3`) or with buttons, which slides as in the trainer, and every preset side by side, from `#-1` to `#1`, each with White's share.
 - `/grid` can switch its evals' zero between plain (the app's), slashed and dotted (JetBrains Mono's own). The slashed font is built by the same script and lives only in `app/grid/`.
 

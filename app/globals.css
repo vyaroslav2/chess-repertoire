@@ -512,6 +512,7 @@ html.coords-large .cg-wrap coords coord {
   padding: 6px;
   background: var(--lichess-panel-bg);
   border: 1px solid var(--lichess-border);
+  border-radius: var(--settings-menu-radius, 1px);
 }
 
 .settings-menu-item {
@@ -519,6 +520,7 @@ html.coords-large .cg-wrap coords coord {
   align-items: center;
   gap: 8px;
   padding: 4px 8px;
+  border-radius: var(--settings-menu-item-radius, 0);
   color: var(--menu-text);
   font-size: 14px;
   line-height: 20px;
@@ -526,7 +528,8 @@ html.coords-large .cg-wrap coords coord {
   white-space: nowrap;
 }
 
-.settings-menu-item:hover {
+.settings-menu-item:hover,
+.settings-menu-item.hover {
   background: var(--settings-hover-bg);
 }
 

@@ -16,7 +16,7 @@ Opens and closes the menu. Three dots stacked upright, in the top-right corner o
 
 SM.06 **Menu.**
 Opens under the button, 4px below it, right edges level, as Obsidian's menus. A click outside, Escape or choosing an item closes it.
-- Panel: `#262421`, 1px border `#363431`, square corners, no shadow, 6px padding. At least 180px wide. These are Lichess's panel and border colours, which are Obsidian's `#262626` and `#363636` in the warm tint.
+- Panel: `#262421`, 1px border `#363431`, corners rounded 1px, no shadow, 6px padding. At least 180px wide. These are Lichess's panel and border colours, which are Obsidian's `#262626` and `#363636` in the warm tint.
 - Items: Inter 14px, line height 20px, padding 4px 8px, `#dad6d0` (Obsidian's `#dadada`, warm). Square corners, the same hover colour as the button. A 16px Lucide icon, 8px before the text, in the dots' colour.
 - The line is the move list without a wrong move: before the answer, it ends at the opponent's move; after it, it includes the answer.
 
