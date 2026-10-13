@@ -152,72 +152,41 @@ h1, h2, h3 {
 
 h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
 
-/* Authentic Lichess Newspaper Board SVG */
-.cg-board-newspaper cg-board {
-  background-image: url('https://lichess1.org/assets/images/board/svg/newspaper.svg') !important;
+/* Board and pieces (SM.08, SM.09). Lichess's newspaper and merida until
+   the script in <head> or the settings menu sets others on <html>. */
+:root {
+  --board: url(/board/newspaper.svg);
+  --piece-wP: url(/piece/merida/wP.svg);
+  --piece-wN: url(/piece/merida/wN.svg);
+  --piece-wB: url(/piece/merida/wB.svg);
+  --piece-wR: url(/piece/merida/wR.svg);
+  --piece-wQ: url(/piece/merida/wQ.svg);
+  --piece-wK: url(/piece/merida/wK.svg);
+  --piece-bP: url(/piece/merida/bP.svg);
+  --piece-bN: url(/piece/merida/bN.svg);
+  --piece-bB: url(/piece/merida/bB.svg);
+  --piece-bR: url(/piece/merida/bR.svg);
+  --piece-bQ: url(/piece/merida/bQ.svg);
+  --piece-bK: url(/piece/merida/bK.svg);
+}
+
+.board-themed cg-board {
+  background-image: var(--board) !important;
   background-size: cover !important;
 }
 
-/* Piece Set Classes using Lichess CDN */
-/* cburnett */
-.piece-set-cburnett piece.pawn.white { background-image: url('https://lichess1.org/assets/piece/cburnett/wP.svg') !important; }
-.piece-set-cburnett piece.knight.white { background-image: url('https://lichess1.org/assets/piece/cburnett/wN.svg') !important; }
-.piece-set-cburnett piece.bishop.white { background-image: url('https://lichess1.org/assets/piece/cburnett/wB.svg') !important; }
-.piece-set-cburnett piece.rook.white { background-image: url('https://lichess1.org/assets/piece/cburnett/wR.svg') !important; }
-.piece-set-cburnett piece.queen.white { background-image: url('https://lichess1.org/assets/piece/cburnett/wQ.svg') !important; }
-.piece-set-cburnett piece.king.white { background-image: url('https://lichess1.org/assets/piece/cburnett/wK.svg') !important; }
-
-.piece-set-cburnett piece.pawn.black { background-image: url('https://lichess1.org/assets/piece/cburnett/bP.svg') !important; }
-.piece-set-cburnett piece.knight.black { background-image: url('https://lichess1.org/assets/piece/cburnett/bN.svg') !important; }
-.piece-set-cburnett piece.bishop.black { background-image: url('https://lichess1.org/assets/piece/cburnett/bB.svg') !important; }
-.piece-set-cburnett piece.rook.black { background-image: url('https://lichess1.org/assets/piece/cburnett/bR.svg') !important; }
-.piece-set-cburnett piece.queen.black { background-image: url('https://lichess1.org/assets/piece/cburnett/bQ.svg') !important; }
-.piece-set-cburnett piece.king.black { background-image: url('https://lichess1.org/assets/piece/cburnett/bK.svg') !important; }
-
-/* staunty */
-.piece-set-staunty piece.pawn.white { background-image: url('https://lichess1.org/assets/piece/staunty/wP.svg') !important; }
-.piece-set-staunty piece.knight.white { background-image: url('https://lichess1.org/assets/piece/staunty/wN.svg') !important; }
-.piece-set-staunty piece.bishop.white { background-image: url('https://lichess1.org/assets/piece/staunty/wB.svg') !important; }
-.piece-set-staunty piece.rook.white { background-image: url('https://lichess1.org/assets/piece/staunty/wR.svg') !important; }
-.piece-set-staunty piece.queen.white { background-image: url('https://lichess1.org/assets/piece/staunty/wQ.svg') !important; }
-.piece-set-staunty piece.king.white { background-image: url('https://lichess1.org/assets/piece/staunty/wK.svg') !important; }
-
-.piece-set-staunty piece.pawn.black { background-image: url('https://lichess1.org/assets/piece/staunty/bP.svg') !important; }
-.piece-set-staunty piece.knight.black { background-image: url('https://lichess1.org/assets/piece/staunty/bN.svg') !important; }
-.piece-set-staunty piece.bishop.black { background-image: url('https://lichess1.org/assets/piece/staunty/bB.svg') !important; }
-.piece-set-staunty piece.rook.black { background-image: url('https://lichess1.org/assets/piece/staunty/bR.svg') !important; }
-.piece-set-staunty piece.queen.black { background-image: url('https://lichess1.org/assets/piece/staunty/bQ.svg') !important; }
-.piece-set-staunty piece.king.black { background-image: url('https://lichess1.org/assets/piece/staunty/bK.svg') !important; }
-
-/* alpha */
-.piece-set-alpha piece.pawn.white { background-image: url('https://lichess1.org/assets/piece/alpha/wP.svg') !important; }
-.piece-set-alpha piece.knight.white { background-image: url('https://lichess1.org/assets/piece/alpha/wN.svg') !important; }
-.piece-set-alpha piece.bishop.white { background-image: url('https://lichess1.org/assets/piece/alpha/wB.svg') !important; }
-.piece-set-alpha piece.rook.white { background-image: url('https://lichess1.org/assets/piece/alpha/wR.svg') !important; }
-.piece-set-alpha piece.queen.white { background-image: url('https://lichess1.org/assets/piece/alpha/wQ.svg') !important; }
-.piece-set-alpha piece.king.white { background-image: url('https://lichess1.org/assets/piece/alpha/wK.svg') !important; }
-
-.piece-set-alpha piece.pawn.black { background-image: url('https://lichess1.org/assets/piece/alpha/bP.svg') !important; }
-.piece-set-alpha piece.knight.black { background-image: url('https://lichess1.org/assets/piece/alpha/bN.svg') !important; }
-.piece-set-alpha piece.bishop.black { background-image: url('https://lichess1.org/assets/piece/alpha/bB.svg') !important; }
-.piece-set-alpha piece.rook.black { background-image: url('https://lichess1.org/assets/piece/alpha/bR.svg') !important; }
-.piece-set-alpha piece.queen.black { background-image: url('https://lichess1.org/assets/piece/alpha/bQ.svg') !important; }
-.piece-set-alpha piece.king.black { background-image: url('https://lichess1.org/assets/piece/alpha/bK.svg') !important; }
-
-/* merida */
-.piece-set-merida piece.pawn.white { background-image: url('https://lichess1.org/assets/piece/merida/wP.svg') !important; }
-.piece-set-merida piece.knight.white { background-image: url('https://lichess1.org/assets/piece/merida/wN.svg') !important; }
-.piece-set-merida piece.bishop.white { background-image: url('https://lichess1.org/assets/piece/merida/wB.svg') !important; }
-.piece-set-merida piece.rook.white { background-image: url('https://lichess1.org/assets/piece/merida/wR.svg') !important; }
-.piece-set-merida piece.queen.white { background-image: url('https://lichess1.org/assets/piece/merida/wQ.svg') !important; }
-.piece-set-merida piece.king.white { background-image: url('https://lichess1.org/assets/piece/merida/wK.svg') !important; }
-
-.piece-set-merida piece.pawn.black { background-image: url('https://lichess1.org/assets/piece/merida/bP.svg') !important; }
-.piece-set-merida piece.knight.black { background-image: url('https://lichess1.org/assets/piece/merida/bN.svg') !important; }
-.piece-set-merida piece.bishop.black { background-image: url('https://lichess1.org/assets/piece/merida/bB.svg') !important; }
-.piece-set-merida piece.rook.black { background-image: url('https://lichess1.org/assets/piece/merida/bR.svg') !important; }
-.piece-set-merida piece.queen.black { background-image: url('https://lichess1.org/assets/piece/merida/bQ.svg') !important; }
-.piece-set-merida piece.king.black { background-image: url('https://lichess1.org/assets/piece/merida/bK.svg') !important; }
+.board-themed piece.pawn.white { background-image: var(--piece-wP) !important; }
+.board-themed piece.knight.white { background-image: var(--piece-wN) !important; }
+.board-themed piece.bishop.white { background-image: var(--piece-wB) !important; }
+.board-themed piece.rook.white { background-image: var(--piece-wR) !important; }
+.board-themed piece.queen.white { background-image: var(--piece-wQ) !important; }
+.board-themed piece.king.white { background-image: var(--piece-wK) !important; }
+.board-themed piece.pawn.black { background-image: var(--piece-bP) !important; }
+.board-themed piece.knight.black { background-image: var(--piece-bN) !important; }
+.board-themed piece.bishop.black { background-image: var(--piece-bB) !important; }
+.board-themed piece.rook.black { background-image: var(--piece-bR) !important; }
+.board-themed piece.queen.black { background-image: var(--piece-bQ) !important; }
+.board-themed piece.king.black { background-image: var(--piece-bK) !important; }
 
 /* Force an exact board size to prevent Windows DPI sub-pixel gaps */
 .cg-wrap, cg-container, cg-board {
@@ -242,8 +211,9 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
 
 /* Our own outer edge (UI.17): the SVG cuts off the outer half of the edge
    outlines. 0.8px = 1 screen px at 125%. As on Lichess, the edge is half a line
-   between squares: each square adds 1 screen px to the line it shares. */
-.cg-board-newspaper::after {
+   between squares: each square adds 1 screen px to the line it shares.
+   Newspaper only: the other boards have no lines. */
+html[data-board="newspaper"] .board-themed::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -561,4 +531,82 @@ html.coords-large .cg-wrap coords coord {
 @keyframes settings-notice {
   0%, 81.6% { opacity: 1; }
   100% { opacity: 0; }
+}
+
+/* Board and Piece set (SM.08, SM.09): a line above them, as Obsidian's menus,
+   and a chevron on the right that says they open a list. */
+.settings-menu-separator {
+  height: 1px;
+  margin: 6px -6px;
+  background: var(--lichess-border);
+}
+
+.settings-menu-item .chevron {
+  margin-left: auto;
+}
+
+/* The lists replace the menu in the same panel, as in Lichess's own menu:
+   222px inside, Lichess's width. */
+.settings-menu.picker {
+  width: calc(222px + 2 * 6px + 2px);
+}
+
+.settings-picker {
+  display: grid;
+  max-height: calc(100vh - 150px);
+  overflow-y: auto;
+}
+
+/* Boards: three to a row, each 64 × 32, two squares. Lichess's hover and green. */
+.settings-picker.boards {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.settings-picker.boards button {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.settings-picker.boards span {
+  width: 64px;
+  height: 32px;
+  background-size: cover;
+}
+
+/* Newspaper has no thumbnail: its top two squares, from the SVG. */
+.settings-picker.boards span.svg {
+  background-size: 256px 256px;
+  background-position: 0 0;
+}
+
+.settings-picker.boards button:hover {
+  filter: brightness(1.05);
+}
+
+.settings-picker.boards button:hover span {
+  transform: scale(1.05);
+}
+
+.settings-picker.boards button.active {
+  background: #629924;
+}
+
+/* Piece sets: four to a row, the white knight. Lichess's hover and orange. */
+.settings-picker.pieces {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.settings-picker.pieces button {
+  aspect-ratio: 1;
+  background-size: cover;
+}
+
+.settings-picker.pieces button:hover {
+  background-color: rgb(250 250 250 / 0.15);
+}
+
+.settings-picker.pieces button.active {
+  background-color: rgb(191 128 29 / 0.7);
 }

@@ -486,7 +486,7 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
           {hasPositionOpening ? positionOpening : "ECO Opening Name"}
         </div>
 
-        <div className={`cg-board-newspaper piece-set-merida ${testStatus !== 'idle' ? 'board-locked' : ''}`} style={{ width: "var(--board-size)", height: "var(--board-size)", boxShadow: "var(--glass-shadow)", position: "relative", zIndex: 1 }}>
+        <div className={`board-themed ${testStatus !== 'idle' ? 'board-locked' : ''}`} style={{ width: "var(--board-size)", height: "var(--board-size)", boxShadow: "var(--glass-shadow)", position: "relative", zIndex: 1 }}>
           <Chessground
             width="100%"
             height="100%"

@@ -9,11 +9,10 @@ import LichessMoveList from "./LichessMoveList";
 interface ChessBoardWidgetProps {
   initialFen?: string;
   pgn?: string;
-  pieceSet?: "cburnett" | "staunty" | "alpha" | "merida";
   onMove?: (move: string, fen: string) => void;
 }
 
-export default function ChessBoardWidget({ initialFen, pgn, pieceSet = "merida", onMove }: ChessBoardWidgetProps) {
+export default function ChessBoardWidget({ initialFen, pgn, onMove }: ChessBoardWidgetProps) {
   const [chess] = useState(new Chess());
   const [fen, setFen] = useState(chess.fen());
   const [lastMove, setLastMove] = useState<[string, string] | undefined>();
@@ -124,7 +123,7 @@ export default function ChessBoardWidget({ initialFen, pgn, pieceSet = "merida",
       margin: "0 auto",
       backgroundColor: "var(--lichess-panel-bg)"
     }}>
-      <div className={`cg-board-newspaper piece-set-${pieceSet}`} style={{ width: "560px", height: "560px" }}>
+      <div className="board-themed" style={{ width: "560px", height: "560px" }}>
         <Chessground
           width="100%"
           height="100%"
