@@ -288,6 +288,8 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
   font-weight: 400 !important;
   font-size: 13px !important;
   text-transform: lowercase !important;
+  /* A drag in empty space would otherwise select the labels. */
+  user-select: none;
 }
 
 /* Large coordinates (UI.32), toggled with Ctrl + Alt + Shift + C + U.

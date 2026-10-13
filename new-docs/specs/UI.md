@@ -19,6 +19,7 @@ UI.21 **Coordinates.**
 Arial, 13px (16.25), weight 400, line height 19.5px, lower case, `#817e7a` (4.52 : 1).
 - Arial for a classical look. Stack: Arial, Arimo, sans-serif. Arimo has Arial's letter widths; it is self-hosted and not preloaded, so only machines without Arial (Linux, Android) download it.
 - `#817e7a` is the same warm tint as the opening name, at about 70% of its brightness: the dimmest of this tint that passes 4.5 : 1.
+- Not selectable (`user-select: none`), since 2026-10-13: a drag through empty space had highlighted them.
 - Large coordinates: see UI.32.
 
 UI.32 **Large coordinates.**
