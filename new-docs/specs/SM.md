@@ -7,7 +7,7 @@ tags:
 A button on the board screen opens the settings menu. For now it holds actions on the current position; real settings come later. Board screen styles are in [[UI]].
 
 SM.01 **Settings button.**
-Opens and closes the menu. Three dots stacked upright, in the top-right corner of the window, 16px in from each edge. No tooltip.
+Opens and closes the menu. Three dots stacked upright, in the top-right corner of the window, 8px in from each edge. No tooltip.
 - Copied from Obsidian's "More options" button, but square: a 16px icon in a 28 × 28px box (35 × 35 screen px), 6px of space on each side. Obsidian's box is 28 × 24px. The dots are Lucide's `ellipsis-vertical`, which Obsidian uses.
 - Dots: `#b5b1ab`, Obsidian's `#b3b3b3` in the warm tint of UI.20.
 - On hover, a box fills behind the dots: `rgb(224 220 214 / 0.075)`, as Obsidian's hover, light at 7.5%. Corners rounded 4px, as Obsidian and most design systems (Bootstrap 4, Tailwind's `rounded`, Fluent 2). The box stays lit while the menu is open.
@@ -16,8 +16,8 @@ Opens and closes the menu. Three dots stacked upright, in the top-right corner o
 
 SM.06 **Menu.**
 Opens under the button, 4px below it, right edges level, as Obsidian's menus. A click outside, Escape or choosing an item closes it.
-- Panel: `#262421`, 1px border `#363431`, 8px corners, 6px padding, shadow `0 4px 16px` black at 50%. At least 180px wide. These are Lichess's panel and border colours, which are Obsidian's `#262626` and `#363636` in the warm tint.
-- Items: Inter 14px, line height 20px, padding 4px 8px, `#dad6d0` (Obsidian's `#dadada`, warm). 4px corners, the same hover as the button. A 16px Lucide icon, 8px before the text, in the dots' colour.
+- Panel: `#262421`, 1px border `#363431`, square corners, no shadow, 6px padding. At least 180px wide. These are Lichess's panel and border colours, which are Obsidian's `#262626` and `#363636` in the warm tint.
+- Items: Inter 14px, line height 20px, padding 4px 8px, `#dad6d0` (Obsidian's `#dadada`, warm). Square corners, the same hover colour as the button. A 16px Lucide icon, 8px before the text, in the dots' colour.
 - The line is the move list without a wrong move: before the answer, it ends at the opponent's move; after it, it includes the answer.
 
 ## Actions

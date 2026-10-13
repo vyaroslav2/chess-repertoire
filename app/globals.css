@@ -477,8 +477,8 @@ html.coords-large .cg-wrap coords coord {
    them on hover. Sizes from Obsidian's "More options" button. */
 .settings-button {
   position: fixed;
-  top: 16px;
-  right: 16px;
+  top: 8px;
+  right: 8px;
   width: 28px;
   height: 28px;
   display: flex;
@@ -503,8 +503,8 @@ html.coords-large .cg-wrap coords coord {
 /* Settings menu (SM.01): under the button, right edges level, as Obsidian's menus. */
 .settings-menu {
   position: fixed;
-  top: calc(16px + 28px + 4px);
-  right: 16px;
+  top: calc(8px + 28px + 4px);
+  right: 8px;
   z-index: 200;
   display: flex;
   flex-direction: column;
@@ -512,8 +512,6 @@ html.coords-large .cg-wrap coords coord {
   padding: 6px;
   background: var(--lichess-panel-bg);
   border: 1px solid var(--lichess-border);
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgb(0 0 0 / 0.5);
 }
 
 .settings-menu-item {
@@ -521,7 +519,6 @@ html.coords-large .cg-wrap coords coord {
   align-items: center;
   gap: 8px;
   padding: 4px 8px;
-  border-radius: 4px;
   color: var(--menu-text);
   font-size: 14px;
   line-height: 20px;
