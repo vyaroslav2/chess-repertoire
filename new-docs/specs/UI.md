@@ -34,10 +34,10 @@ UI.23 **Panel.** The panel is 220 × 691.2px (275 screen px wide), background `#
 UI.24 **Move numbers.**
 Roboto, 14px (17.5), weight 400, `#787674`, centred, no dot ("1", not "1."), in a shaded column, `#33312e`, as on the Lichess analysis board.
 - The same font as the moves, as Lichess uses Noto Sans for both. Roboto's digits are all one width, so numbers stay steady from 1 to 200. "200" is 28px wide.
-- The shading is painted on the whole grid, so it runs flush from the list's top to 6px below the last move. The grid keeps its 6px padding above the first row and below the last.
+- The shading is painted on the grid, so it runs flush from the list's top and ends level with the last move's cell, as on Lichess. The grid keeps its 6px padding above the first row and below the last; only the top padding is shaded.
 - Open: the numbers are only 2.9 : 1 on the shading (Lichess: 2.4 : 1).
 
-**Was:** Inter (Arial before that), 14.5px, right-aligned with a dot, no shading.
+**Was:** Inter (Arial before that), 14.5px, right-aligned with a dot, no shading. Until 2026-10-13 the shading ran 6px below the last move, through the bottom padding.
 
 UI.25 **Moves (SAN).**
 Roboto, 16.59px (20.7), weight 400, `#bababa`. Hover: background `#363431`. Current move: weight 600, `#ffffff` on `#3692e7`.

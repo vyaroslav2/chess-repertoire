@@ -325,11 +325,14 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
   grid-template-columns: var(--move-number-width) 1fr 1fr;
   align-items: center;
   line-height: 26px;
-  padding-top: 6px;
-  padding-bottom: 6px;
+  --grid-padding: 6px;
+  padding-top: var(--grid-padding);
+  padding-bottom: var(--grid-padding);
   /* The move-number column's shading, painted on the grid so it runs through the
-     top and bottom padding: flush with the list's top, ending with the last move. */
-  background: linear-gradient(to right, #33312e var(--move-number-width), transparent var(--move-number-width)); /* Lichess's index cell */
+     top padding, flush with the list's top. It stops short of the bottom padding,
+     so it ends level with the last move's cell, as on Lichess. */
+  background: linear-gradient(to right, #33312e var(--move-number-width), transparent var(--move-number-width))
+    top left / 100% calc(100% - var(--grid-padding)) no-repeat; /* Lichess's index cell */
 }
 
 /* As on the Lichess analysis board: shaded (see .lichess-move-grid), centred, no dot.
