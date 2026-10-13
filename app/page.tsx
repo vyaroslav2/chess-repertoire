@@ -1,6 +1,7 @@
 import React from "react";
 export const dynamic = "force-dynamic";
 import SrsTrainer from "../components/SrsTrainer";
+import SettingsButton from "../components/SettingsButton";
 import { fetchDemoPositions } from "./actions";
 import { PrismaClient } from "@prisma/client";
 
@@ -32,6 +33,7 @@ export default async function Home() {
     // 24px, to leave room for the opening name above the board.
     padding: "max(24px, round(calc((100vh - var(--board-size)) / 2), 0.8px)) 20px 0" }}>
       <SrsTrainer dueStats={demoStats} demoMode />
+      <SettingsButton />
     </div>
   );
 }

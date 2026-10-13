@@ -10,6 +10,8 @@
   --opening-text: #979490; /* 6.05 : 1 */
   --coord-text: #817e7a;   /* 4.52 : 1, dimmer than the opening name */
   --coord-text-large: #e0dcd6; /* 13.37 : 1, large coordinates (UI.32) */
+  --settings-icon: #b5b1ab; /* Obsidian's #b3b3b3 in the same warm tint */
+  --settings-hover-bg: rgb(224 220 214 / 0.075); /* Obsidian's hover: light at 7.5% */
   --lichess-green: #629924;
   --lichess-green-hover: #75b32c;
   --lichess-accent: #3692e7;
@@ -468,4 +470,29 @@ html.coords-large .cg-wrap coords coord {
   opacity: 1;
   border-bottom: 7px solid hsl(22 100% 42% / 0.5);
   margin-top: -3px;
+}
+
+/* Settings button (SM.01): three dots in the top-right corner, a box behind
+   them on hover. Sizes from Obsidian's "More options" button. */
+.settings-button {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--settings-icon);
+  border-radius: var(--settings-button-radius, 4px);
+}
+
+.settings-button:hover,
+.settings-button.hover {
+  background: var(--settings-hover-bg);
+}
+
+.settings-button svg {
+  width: 16px;
+  height: 16px;
 }
