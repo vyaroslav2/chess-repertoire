@@ -5,6 +5,7 @@ import Chessground from "@react-chess/chessground";
 import "chessground/assets/chessground.base.css";
 import { Chess } from "chess.js";
 import LichessMoveList from "./LichessMoveList";
+import EvalGauge from "./EvalGauge";
 import { logFlightBox } from "../lib/logger";
 
 interface SrsTrainerProps {
@@ -279,6 +280,9 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
   const baseOrientation = currentStat.repertoire.color.toLowerCase() === "black" ? "black" : "white";
   const orientation = flipped ? (baseOrientation === "black" ? "white" : "black") : baseOrientation;
 
+  // By ply, as the moves. The answer's eval shows with the answer; a wrong move has none.
+  const moveEvals = (currentStat.evalByPly || []).concat(testStatus === 'correct' || testStatus === 'revealed' ? [currentStat.targetMove] : []);
+
   const calcMovable = () => {
     // Only allow moves if we are idle or wrong (let them try again)
     // Completely lock the board during browsing or initialization
@@ -450,23 +454,26 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
           />
         </div>
 
+        {/* Eval gauge between the board and the move list, 4px from each (UI.31) */}
+        <div style={{ position: "absolute", left: "calc(100% + 4px)", top: 0, height: "var(--board-size)" }}>
+          <EvalGauge evaluation={moveEvals[currentPlyIndex - 1] ?? null} orientation={orientation} />
+        </div>
+
         {/* Move List Side Panel — out of the flow so only the board is centred (UI.01, UI.02) */}
         <div style={{
           position: "absolute",
-          left: "100%",
+          left: "calc(100% + 23px)", // past the gauge: 4px + 15px + 4px (UI.31)
           top: 0,
           width: "318.4px", // UI.26: 220px plus room for the evals (398 screen px)
           height: "var(--board-size)", 
           overflow: "hidden",
           backgroundColor: "var(--lichess-panel-bg)",
-          boxShadow: "-4px 0 0 0 var(--lichess-panel-bg)"
         }}>
           <LichessMoveList 
             moves={(currentStat?.lineMoves || []).concat(testStatus === 'correct' || testStatus === 'revealed' || testStatus === 'wrong' ? [
               testStatus === 'wrong' && lastMove ? chess.history()[chess.history().length-1] : currentStat.targetMove.san
             ] : [])}
-            // The answer's eval shows with the answer; a wrong move has none.
-            evals={(currentStat?.evalByPly || []).concat(testStatus === 'correct' || testStatus === 'revealed' ? [currentStat.targetMove] : [])}
+            evals={moveEvals}
             currentPlyIndex={currentPlyIndex - 1}
             onMoveClick={(index) => {
               logFlightBox("ACTION_CLICK_MOVE_LIST", { targetIndex: index + 1 });

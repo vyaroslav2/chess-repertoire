@@ -386,3 +386,60 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
   color: inherit;
 }
 
+
+/* ======================================================== */
+/* Eval gauge (UI.31)                                       */
+/* ======================================================== */
+
+/* A copy of Lichess's dark-theme gauge (lila, ui/lib/css/ceval/_eval-gauge.scss).
+   --eval-percent is Black's share, from the top; registered so it can slide. */
+@property --eval-percent {
+  syntax: '<percentage>';
+  inherits: false;
+  initial-value: 50%;
+}
+
+.eval-gauge {
+  width: 15px; /* Lichess's block gap */
+  height: 100%;
+  position: relative;
+  border-radius: 7px;
+  background: linear-gradient(to bottom, #444 var(--eval-percent), #c0c0c0 var(--eval-percent));
+  transition: --eval-percent 1s ease;
+  overflow: hidden;
+}
+
+.eval-gauge.empty {
+  opacity: 0.5;
+}
+
+.eval-gauge.reverse {
+  transform: rotateX(180deg);
+}
+
+.eval-gauge::after {
+  content: '';
+  display: block;
+  position: absolute;
+  inset: 0;
+  border-radius: 7px;
+  box-shadow: 0 0 5px rgb(0 0 0 / 0.5) inset;
+}
+
+/* Lines at every 12.5%: each tick is a box from the top whose bottom border is the line. */
+.eval-gauge-tick {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  opacity: 0.4;
+  border-bottom: 2px ridge #888;
+}
+
+/* The middle line: thick and in Lichess's accent at half strength. */
+.eval-gauge-tick.zero {
+  top: 6px;
+  opacity: 1;
+  border-bottom: 7px solid hsl(22 100% 42% / 0.5);
+  margin-top: -3px;
+}

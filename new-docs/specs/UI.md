@@ -28,6 +28,7 @@ Inter, 16px (20), weight 400, line height 24px, `#787674`. Hidden until the poin
 ### Move list
 UI.23 **Panel.** The panel is 220 × 691.2px (275 screen px wide), background `#262421`, attached to the board's right edge. Rows are 26px. The move-number column is 44px; the two move columns share the rest: (220 − 44 − 10px scrollbar) ÷ 2 = 83px when the list scrolls, 88px when it doesn't. The longest moves (7 characters, 71.6px with padding) have about 11px to spare.
 - Since 2026-10-13 the panel is 318.4px wide, to make room for the evals (UI.26).
+- Since 2026-10-13 the eval gauge sits between the board and the panel (UI.31), so the panel starts 23px right of the board.
 
 **Was:** 188px wide. At the new move size the columns were too narrow: they grew unequal and the list scrolled sideways.
 
@@ -81,3 +82,14 @@ A circle in the bottom-left corner, 16px in from each edge, shown once a move is
 - Inset from the corner, not flush: a circle touching both edges looks clipped.
 
 **Was:** a 250 × 25px stripe flush in the corner, with a `#363431` border on its top and right.
+
+UI.31 **Eval gauge.**
+A copy of the Lichess gauge, dark theme. A bar 15px wide and as tall as the board, between the board and the move list, 4px from each, as on the Lichess analysis board. Corners 7px.
+- Fill: Black's share `#444` from the top, White's `#c0c0c0` below. The split is Lichess's winning-chances curve: 2 / (1 + e^(-0.00368208 × cp)) − 1, with cp capped at ±1000. A mate counts as (21 − min(10, |mate|)) × 100 cp, so mate in 1 is 2000 and mate in 10 or more is 1100.
+- It shows the eval of the position on the board, from the same evals as the move list (UI.26). The split slides over 1s.
+- Ticks at every 12.5%: 2px ridge lines, `#888` at 40%. The middle line is 7px thick, in Lichess's accent at half strength, `hsl(22 100% 42% / 0.5)`.
+- An inner shadow, 5px, black at 50%.
+- A position without an eval (the start, a wrong move) keeps the last split at 50% opacity, as on Lichess.
+- Flipped with the board: from Black's side, White's share is at the top.
+- Written from Lichess's source, not copied: lila is AGPL-3.0.
+- In the app since 2026-10-13.
