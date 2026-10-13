@@ -29,6 +29,18 @@ export async function getDatabaseRepertoire() {
   ];
 }
 
+// The eval of each move in a line (DB.11), by ply: the move out of the node at
+// each history prefix. Null where a move carries none.
+async function lineEvals(repertoireId: string, historyUcis: string[]) {
+  const histories = historyUcis.map((_, index) => historyUcis.slice(0, index).join(" "));
+  const moves = await prisma.repertoireMove.findMany({
+    where: { repertoireId, uci: { in: historyUcis }, fromNode: { history: { in: histories } } },
+    select: { uci: true, cp: true, mate: true, fromNode: { select: { history: true } } }
+  });
+  const byRoute = new Map(moves.map(move => [`${move.fromNode.history}|${move.uci}`, { cp: move.cp, mate: move.mate }]));
+  return historyUcis.map((uci, index) => byRoute.get(`${histories[index]}|${uci}`) ?? null);
+}
+
 export async function fetchDuePositions(repertoireId: string) {
   const stats = await prisma.repertoirePositionStat.findMany({
     where: {
@@ -82,7 +94,8 @@ export async function fetchDuePositions(repertoireId: string) {
         openingMetadataStatus: terminal.status
       } : null);
     }
-    return { ...stat, lineMoves, openingByPly };
+    const evalByPly = await lineEvals(repertoireId, historyUcis);
+    return { ...stat, lineMoves, openingByPly, evalByPly };
   }));
 
   // Sort by depth (shallower lines first) to ensure new cards are introduced logically
@@ -156,6 +169,7 @@ export async function fetchDemoPositions(repertoireId: string) {
       node: branch.toNode,
       lineMoves,
       openingByPly,
+      evalByPly: await lineEvals(repertoireId, historyUcis),
       routeLabel: lineMoves.join(" "),
     };
   }))).filter((card): card is NonNullable<typeof card> => card !== null);

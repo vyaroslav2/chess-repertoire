@@ -27,6 +27,7 @@ Inter, 16px (20), weight 400, line height 24px, `#787674`. Hidden until the poin
 
 ### Move list
 UI.23 **Panel.** The panel is 220 × 691.2px (275 screen px wide), background `#262421`, attached to the board's right edge. Rows are 26px. The move-number column is 44px; the two move columns share the rest: (220 − 44 − 10px scrollbar) ÷ 2 = 83px when the list scrolls, 88px when it doesn't. The longest moves (7 characters, 71.6px with padding) have about 11px to spare.
+- Since 2026-10-13 the panel is 318.4px wide, to make room for the evals (UI.26).
 
 **Was:** 188px wide. At the new move size the columns were too narrow: they grew unequal and the list scrolled sideways.
 
@@ -45,13 +46,14 @@ Roboto, 16.59px (20.7), weight 400, `#bababa`. Hover: background `#363431`. Curr
 
 **Was:** JetBrains Mono, 14.5px.
 
-UI.26 **Evals (designed; a mock on `/grid` only).**
+UI.26 **Evals.**
 In each move's cell, pushed to its right edge and centred vertically in the row, as on Lichess. Lichess centres the number, move and eval each in its row rather than sharing a baseline, so smaller text sits about 2px higher; ours: eval 1px, number 2px above the move's baseline. JetBrains Mono, 0.8em of the move size = 13.27px (16.6), weight 300, `#949494`; on the current move it turns white with the move. Two decimals, -9.99 to +9.99, e.g. `+0.00`, `-0.00`, `+9.99`. A move and its eval highlight as one cell.
 - Lichess does the same with Roboto and one decimal. JetBrains Mono gives every eval the same width (39.8px for "+9.99"), so the decimal points line up.
 - Cell padding is Lichess's: 0.5em left, 0.3em right (8.3px, 5px). White's eval ends 13.3px before Black's move.
 - The panel grows to 318.4px (398 screen px), so the moves keep the room they have at 220px. Its right edge would be at 1432px of the 1536px window.
-- Data: every move on a card carries an eval ([[DB|DB.11]]). The generator does not yet do this for White: today only Black's moves have one (11 of 11; White's 0 of 36).
-- To bring into the app: the eval in the move cell, the 0.5em/0.3em padding and the 318.4px panel.
+- Data: every move on a card carries an eval ([[DB|DB.11]]), in White's view. The card's answer shows its eval once played or revealed. A wrong move shows none.
+- Beyond ±9.99 the eval keeps two decimals (e.g. `+12.34`). A mate shows as on Lichess: `#3` (White mates), `#-3` (Black mates).
+- In the app since 2026-10-13. `/grid` keeps the mock.
 
 ## Layout
 

@@ -2,13 +2,23 @@
 
 import React, { useEffect, useRef, useCallback } from 'react';
 
+export type MoveEval = { cp: number | null; mate: number | null };
+
 interface LichessMoveListProps {
   moves: string[]; // e.g. ['d4', 'd5', 'c4', 'dxc4']
+  evals?: (MoveEval | null)[]; // by ply, as moves (DB.11); null shows nothing
   currentPlyIndex: number; // -1 for start, 0 for White's first move, 1 for Black's, etc.
   onMoveClick: (index: number) => void;
 }
 
-export default function LichessMoveList({ moves, currentPlyIndex, onMoveClick }: LichessMoveListProps) {
+// UI.26: two decimals with a sign, in White's view; a mate as on Lichess, "#3" or "#-3".
+function formatEval({ cp, mate }: MoveEval) {
+  if (mate !== null) return `#${mate}`;
+  if (cp === null) return "";
+  return (cp < 0 ? "-" : "+") + (Math.abs(cp) / 100).toFixed(2);
+}
+
+export default function LichessMoveList({ moves, evals, currentPlyIndex, onMoveClick }: LichessMoveListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const activeMoveRef = useRef<HTMLDivElement>(null);
 
@@ -52,6 +62,11 @@ export default function LichessMoveList({ moves, currentPlyIndex, onMoveClick }:
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [currentPlyIndex, moves.length, onMoveClick]);
 
+  const evalAt = (index: number) => {
+    const moveEval = evals?.[index];
+    return moveEval ? <span className="move-eval">{formatEval(moveEval)}</span> : null;
+  };
+
   // Group linear moves into [turnNumber, whiteMove, blackMove]
   const turns = [];
   for (let i = 0; i < moves.length; i += 2) {
@@ -82,6 +97,7 @@ export default function LichessMoveList({ moves, currentPlyIndex, onMoveClick }:
               onClick={() => onMoveClick(turn.whiteIndex)}
             >
               {turn.whiteMove}
+              {evalAt(turn.whiteIndex)}
             </div>
 
             {/* Column 3: Black's Move */}
@@ -92,6 +108,7 @@ export default function LichessMoveList({ moves, currentPlyIndex, onMoveClick }:
                 onClick={() => onMoveClick(turn.blackIndex)}
               >
                 {turn.blackMove}
+                {evalAt(turn.blackIndex)}
               </div>
             )}
           </React.Fragment>

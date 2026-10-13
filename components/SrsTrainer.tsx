@@ -455,7 +455,7 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
           position: "absolute",
           left: "100%",
           top: 0,
-          width: "220px", 
+          width: "318.4px", // UI.26: 220px plus room for the evals (398 screen px)
           height: "var(--board-size)", 
           overflow: "hidden",
           backgroundColor: "var(--lichess-panel-bg)",
@@ -464,7 +464,9 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
           <LichessMoveList 
             moves={(currentStat?.lineMoves || []).concat(testStatus === 'correct' || testStatus === 'revealed' || testStatus === 'wrong' ? [
               testStatus === 'wrong' && lastMove ? chess.history()[chess.history().length-1] : currentStat.targetMove.san
-            ] : [])} 
+            ] : [])}
+            // The answer's eval shows with the answer; a wrong move has none.
+            evals={(currentStat?.evalByPly || []).concat(testStatus === 'correct' || testStatus === 'revealed' ? [currentStat.targetMove] : [])}
             currentPlyIndex={currentPlyIndex - 1}
             onMoveClick={(index) => {
               logFlightBox("ACTION_CLICK_MOVE_LIST", { targetIndex: index + 1 });
