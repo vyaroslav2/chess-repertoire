@@ -381,7 +381,7 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
         <div
           style={{
             position: "fixed", bottom: "16px", left: "16px",
-            width: "clamp(10px, 0.8vw, 20px)", height: "clamp(10px, 0.8vw, 20px)", borderRadius: "50%",
+            width: "clamp(12px, 0.9vw, 18px)", height: "clamp(12px, 0.9vw, 18px)", borderRadius: "50%",
             background: testStatus === "wrong" ? "#c62828" : testStatus === "correct" ? "var(--lichess-green)" : "#f9a825",
             border: `1px solid ${testStatus === "wrong" ? "#8e1b1b" : testStatus === "correct" ? "#456b19" : "#b87a14"}`,
             zIndex: 100,

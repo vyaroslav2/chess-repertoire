@@ -62,7 +62,7 @@ UI.28 **Opening name position.** The opening name sits 4px above the board, as w
 UI.29 **Test pages.** Temporary: `/fonts`, `/coords`, `/moves` and `/grid`. Delete them before deploying.
 
 UI.30 **Status light.**
-A circle in the bottom-left corner, 16px in from each edge, shown once a move is made or revealed. Diameter `clamp(10px, 0.8vw, 20px)`: 12.3px (15.4) in a 1536px window. Fill by state, with a 1px border about 30% darker in the same hue:
+A circle in the bottom-left corner, 16px in from each edge, shown once a move is made or revealed. Diameter `clamp(12px, 0.9vw, 18px)`: 13.8px (17.3) in a 1536px window; 12px up to 1333px, 17.3px at 1920px, 18px from 2000px up. Fill by state, with a 1px border about 30% darker in the same hue:
 
 | State | Fill | Border |
 |---|---|---|
@@ -70,7 +70,11 @@ A circle in the bottom-left corner, 16px in from each edge, shown once a move is
 | correct | `#629924` (`--lichess-green`) | `#456b19` |
 | revealed | `#f9a825` | `#b87a14` |
 
-- Modelled on the macOS window buttons ("traffic lights"): 12pt across, about 0.8% of the width of a 13" MacBook Air (1470pt). 0.8vw keeps that share of the window; the clamp stops it getting too small or too large.
+- Modelled on the macOS window buttons ("traffic lights"), which are always 12pt across. Larger here because a macOS button is something you aim the pointer at; this light is seen out of the corner of the eye while looking at the board, and side vision needs more area to notice colour.
+- Grows with the window's width: the board stays centred, so on a wider window the corner is further from it and further out of view.
+- 12px floor: smaller is hard to notice. 18px cap: larger reads as a button or a warning. The light is secondary, since the board already shows the result (a wrong move snaps back).
+- If the board ever scales with the window, tie the light to the board instead: about 2% of `--board-size`.
+- Tried and dropped: 0.8vw with a 10–20px clamp (12pt's share of a 13" MacBook Air's 1470pt), then a fixed 12px (macOS's exact size).
 - A darker ring of the same hue, as on macOS, gives a crisp edge. A border in the fill colour can't be seen; a grey one looks like a socket and dulls the colour.
 - Inset from the corner, not flush: a circle touching both edges looks clipped.
 
