@@ -6,6 +6,8 @@ import * as path from 'path';
 import { defaultConfig, computeLocalEngineEvaluationProfile, type Config } from './config';
 import {
   ConsoleDetachedEngine,
+  formatSearchProgress,
+  formatSearchSummary,
   assertStockfishVersion,
   collectLocalSearchUpdates,
   parseInfoLine,
@@ -291,4 +293,15 @@ test('S0.04 EW.09: Stockfish started off the console runs a node-limited search 
   const proc = engine.proc!;
   await engine.quit();
   assert.notEqual(proc.exitCode, null);
+});
+
+test('TGL: the live progress line and the log line after each search', () => {
+  const state = { nodes: 45_000_000, nps: 1_000_000, depth: 27 };
+  assert.equal(formatSearchProgress(state, 200_000_000, 62_000),
+    'Stockfish: ~62.0M / 200.0M nodes (31%)  depth 27  1:02  1.0M nodes/s');
+  assert.equal(formatSearchProgress({ nodes: 0, nps: 0, depth: 0 }, 200_000_000, 1_000),
+    'Stockfish: ~0.0M / 200.0M nodes (0%)  0:01', 'before Stockfish reports anything');
+  assert.equal(formatSearchProgress(state, 200_000_000, 900_000).startsWith('Stockfish: ~200.0M / 200.0M nodes (100%)'), true, 'never past the limit');
+  assert.equal(formatSearchSummary({ nodes: 200_000_123, nps: 990_000, depth: 31 }, 201_000),
+    '[STOCKFISH] 200.0M nodes; depth 31; 3:21; 1.0M nodes/s');
 });

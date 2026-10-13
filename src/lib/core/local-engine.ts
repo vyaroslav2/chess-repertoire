@@ -56,9 +56,82 @@ export class ConsoleDetachedEngine extends Engine {
    * stops part-way through a depth, where bounds are common, so read the lines ourselves.
    */
   async go(params: Record<string, unknown>): Promise<{ info?: unknown[] }> {
-    this.write(`go nodes ${params.nodes}`);
-    const lines = await this.getBufferUntil(line => line.startsWith('bestmove '));
-    return { info: lines.map(parseInfoLine).filter(info => info !== null) };
+    const progress = new SearchProgress(Number(params.nodes));
+    const listener = (chunk: string) => progress.read(chunk);
+    const stdout = this.proc?.stdout;
+    if (!stdout) throw new Error('Stockfish is not running');
+    stdout.on('data', listener);
+    const timer = setInterval(() => progress.draw(), 1000);
+    try {
+      this.write(`go nodes ${params.nodes}`);
+      const lines = await this.getBufferUntil(line => line.startsWith('bestmove '));
+      return { info: lines.map(parseInfoLine).filter(info => info !== null) };
+    } finally {
+      clearInterval(timer);
+      stdout.off('data', listener);
+      progress.finish();
+    }
+  }
+}
+
+export type SearchProgressState = { nodes: number; nps: number; depth: number };
+
+const millions = (nodes: number) => `${(nodes / 1_000_000).toFixed(1)}M`;
+const clock = (ms: number) => {
+  const seconds = Math.floor(ms / 1000);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+};
+
+/**
+ * TGL: the live line shown while Stockfish searches. Stockfish reports nodes only when a depth
+ * ends, so between reports the count is estimated from its last speed, marked with `~`.
+ */
+export function formatSearchProgress(state: SearchProgressState, limit: number, elapsedMs: number): string {
+  const estimated = Math.min(limit, Math.max(state.nodes, Math.round(state.nps * elapsedMs / 1000)));
+  const share = Math.floor(100 * estimated / limit);
+  const depth = state.depth > 0 ? `  depth ${state.depth}` : '';
+  const speed = state.nps > 0 ? `  ${millions(state.nps)} nodes/s` : '';
+  return `Stockfish: ~${millions(estimated)} / ${millions(limit)} nodes (${share}%)${depth}  ${clock(elapsedMs)}${speed}`;
+}
+
+/** TGL: the log line after each search. */
+export function formatSearchSummary(state: SearchProgressState, elapsedMs: number): string {
+  return `[STOCKFISH] ${millions(state.nodes)} nodes; depth ${state.depth}; ${clock(elapsedMs)}; ${millions(state.nps)} nodes/s`;
+}
+
+/** Reads Stockfish's info lines as they arrive. The live line goes to the terminal only, never the log file. */
+class SearchProgress {
+  private readonly startedAt = Date.now();
+  private readonly state: SearchProgressState = { nodes: 0, nps: 0, depth: 0 };
+  private backlog = '';
+  private drawn = false;
+
+  constructor(private readonly limit: number) {}
+
+  read(chunk: string): void {
+    this.backlog += chunk;
+    const lines = this.backlog.split('\n');
+    this.backlog = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line.startsWith('info ')) continue;
+      const depth = /\bdepth (\d+)/.exec(line);
+      const nodes = /\bnodes (\d+)/.exec(line);
+      const nps = /\bnps (\d+)/.exec(line);
+      if (depth) this.state.depth = Number(depth[1]);
+      if (nodes) this.state.nodes = Number(nodes[1]);
+      if (nps) this.state.nps = Number(nps[1]);
+    }
+  }
+
+  draw(): void {
+    if (!process.stdout.isTTY) return;
+    process.stdout.write(`\r${formatSearchProgress(this.state, this.limit, Date.now() - this.startedAt).padEnd(100)}`);
+    this.drawn = true;
+  }
+
+  finish(): void {
+    if (this.drawn) process.stdout.write(`\r${' '.repeat(100)}\r`);
+    if (this.state.nodes > 0) console.log(formatSearchSummary(this.state, Date.now() - this.startedAt));
   }
 }
 
