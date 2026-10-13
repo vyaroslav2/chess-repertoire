@@ -380,10 +380,13 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
       {testStatus !== "idle" && (
         <div
           style={{
-            position: "fixed", bottom: 0, left: 0, width: "250px", height: "25px",
+            position: "fixed", bottom: "16px", left: "16px",
+            width: "clamp(10px, 0.8vw, 20px)", height: "clamp(10px, 0.8vw, 20px)", borderRadius: "50%",
             background: testStatus === "wrong" ? "#c62828" : testStatus === "correct" ? "var(--lichess-green)" : "#f9a825",
-            borderTop: "1px solid var(--lichess-border)", borderRight: "1px solid var(--lichess-border)", zIndex: 100,
+            border: `1px solid ${testStatus === "wrong" ? "#8e1b1b" : testStatus === "correct" ? "#456b19" : "#b87a14"}`,
+            zIndex: 100,
           }}
+          aria-label={`Status: ${testStatus}`}
         />
       )}
 

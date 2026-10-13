@@ -60,3 +60,18 @@ UI.27 **Centring.** The board is centred across and down; only the board counts.
 UI.28 **Opening name position.** The opening name sits 4px above the board, as wide as the board and lined up with its left edge.
 
 UI.29 **Test pages.** Temporary: `/fonts`, `/coords`, `/moves` and `/grid`. Delete them before deploying.
+
+UI.30 **Status light.**
+A circle in the bottom-left corner, 16px in from each edge, shown once a move is made or revealed. Diameter `clamp(10px, 0.8vw, 20px)`: 12.3px (15.4) in a 1536px window. Fill by state, with a 1px border about 30% darker in the same hue:
+
+| State | Fill | Border |
+|---|---|---|
+| wrong | `#c62828` | `#8e1b1b` |
+| correct | `#629924` (`--lichess-green`) | `#456b19` |
+| revealed | `#f9a825` | `#b87a14` |
+
+- Modelled on the macOS window buttons ("traffic lights"): 12pt across, about 0.8% of the width of a 13" MacBook Air (1470pt). 0.8vw keeps that share of the window; the clamp stops it getting too small or too large.
+- A darker ring of the same hue, as on macOS, gives a crisp edge. A border in the fill colour can't be seen; a grey one looks like a socket and dulls the colour.
+- Inset from the corner, not flush: a circle touching both edges looks clipped.
+
+**Was:** a 250 × 25px stripe flush in the corner, with a `#363431` border on its top and right.
