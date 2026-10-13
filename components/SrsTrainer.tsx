@@ -16,11 +16,24 @@ interface SrsTrainerProps {
 
 type TestStatus = "idle" | "wrong" | "correct" | "revealed";
 
+// The session as it was just before a grade: all a grade changes (UN.01).
+interface UndoStep {
+  stats: any[];
+  goodHitsByCard: Record<string, number>;
+  graduatedCount: number;
+}
+
 export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerProps) {
   const [stats, setStats] = useState(dueStats);
   const [graduatedCount, setGraduatedCount] = useState(0);
   const [goodHitsByCard, setGoodHitsByCard] = useState<Record<string, number>>({});
-  
+
+  // One step per grade, empty at page load; Ctrl + Z takes the last one back (UN.01, UN.02).
+  const undoStepsRef = useRef<UndoStep[]>([]);
+  // Counts the cards shown, so a card starts afresh even when the same card
+  // comes round again (graded Again as the only card left, or undone to itself).
+  const [showing, setShowing] = useState(0);
+
   // The state machine
   const [testStatus, setTestStatus] = useState<TestStatus>("idle");
   const [chess] = useState(new Chess());
@@ -32,6 +45,7 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
   const [isInitializing, setIsInitializing] = useState(true);
   const isInitializingRef = useRef(true);
   const animTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const snapBackTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Only true while the opponent's move is actually being revealed — every other
   // position change (new card, browsing, skipping) is a dead instant jump, no glide.
@@ -91,6 +105,11 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
       clearTimeout(animTimerRef.current);
       animTimerRef.current = null;
     }
+    // A wrong move's snap-back belongs to the card before; it must not touch this one.
+    if (snapBackTimerRef.current) {
+      clearTimeout(snapBackTimerRef.current);
+      snapBackTimerRef.current = null;
+    }
 
     setIsInitializing(true);
     isInitializingRef.current = true;
@@ -145,7 +164,7 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
         clearTimeout(animTimerRef.current);
       }
     };
-  }, [currentStat, chess]);
+  }, [currentStat, chess, showing]);
 
   // Browsing Effect
   useEffect(() => {
@@ -189,8 +208,24 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
   // Keyboard Controller
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!currentStat) return;
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      // Ctrl + Z: back to the previous card (UN.02). Checked first, so the
+      // animation skip below can't swallow it, and before the end screen's
+      // early return, so it works from there too. By position, on any layout (UN.05).
+      if (e.code === "KeyZ" && e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
+        e.preventDefault();
+        const step = undoStepsRef.current.pop();
+        logFlightBox("ACTION_UNDO", { undone: !!step, stepsLeft: undoStepsRef.current.length });
+        if (!step) return; // The first card: nothing to go back to.
+        setStats(step.stats);
+        setGoodHitsByCard(step.goodHitsByCard);
+        setGraduatedCount(step.graduatedCount);
+        setShowing((previous) => previous + 1);
+        return;
+      }
+
+      if (!currentStat) return;
 
       logFlightBox("KEY_PRESS", { key: e.key, isInitializing: isInitializingRef.current, isBrowsing, testStatus });
 
@@ -338,7 +373,8 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
           setCurrentPlyIndex(targetPlyIndex + 1);
           
           // Snap back after a very short delay
-          setTimeout(() => {
+          snapBackTimerRef.current = setTimeout(() => {
+            snapBackTimerRef.current = null;
             chess.undo();
             setFen(chess.fen());
             
@@ -377,6 +413,9 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
     const graduates = isEasy || (isGood && goodHits >= 1);
 
     logFlightBox("ACTION_DEMO_RATE", { quality, cardId: cardKey, goodHits, graduates });
+
+    undoStepsRef.current.push({ stats, goodHitsByCard, graduatedCount });
+    setShowing((previous) => previous + 1);
 
     if (isGood && !graduates) {
       setGoodHitsByCard((previous) => ({ ...previous, [cardKey]: goodHits + 1 }));

@@ -1,6 +1,6 @@
 ---
 tags:
-  - reviewed
+  - processed
 ---
 # UN — Undo
 
@@ -19,6 +19,7 @@ UN.02 **Undo.**
 - Pressed again, it goes back one more card, and so on to the first card of the session.
 - On the first card, the history is empty, so nothing happens. No message.
 - It works from the end screen ("Demo complete"): the last card comes back.
+- In the app since 2026-10-13.
 
 UN.03 **Mid-card.**
 Whatever state the current card is in — a move played, a wrong move, the answer revealed, browsing the move list, the opening move still sliding in — `Ctrl + Z` goes straight to the previous card. It never takes back a single move. The current card is not graded and adds no step.
