@@ -31,7 +31,6 @@ export default function RootLayout({
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable} ${arimo.variable} ${roboto.variable} ${evalMono.variable}`}>
       <body>
         <HotkeyToggle keys={["KeyC", "KeyU"]} className="coords-large" />
-        <HotkeyToggle keys={["KeyG", "KeyU"]} className="gauge-hidden" />
         {children}
       </body>
     </html>

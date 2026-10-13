@@ -108,8 +108,14 @@ A copy of the Lichess gauge, dark theme. A bar 15px wide and as tall as the boar
 - The split is rounded to 0.01% (0.07px). Node and the browser can differ in the last digits of `Math.exp`, and the server-drawn page then fails to match the browser's.
 - In the app since 2026-10-13.
 
-UI.33 **Hiding the gauge.**
-Ctrl + Alt + Shift + G + U hides the eval gauge (UI.31) and brings it back. Hidden, the move list goes back flush against the board, with its 4px shadow hiding the seam, as before the gauge. The choice is kept in the browser (localStorage).
-- The same kind of shortcut as UI.32, and the same code (`HotkeyToggle`): deliberately awkward, keys read by position (`e.code`), G and U in either order.
-- The choice is read once the page has loaded, so a hidden gauge may show for a moment on reload. UI.32 does the same.
+UI.34 **Showing evals.**
+The evals (UI.26) and the eval gauge (UI.31) are hidden at the start of each card. `E` shows them; a second press hides them again. Each new card starts hidden again.
+- Why: cards are Anki style, and a game has no evals. The eval on the opponent's last move is the eval of the position you face, so it gives away roughly how strong the best reply is. The gauge shows the same figure.
+- Why not remove them: they are worth a look after answering, or when stuck. One press spoils only the current card.
+- Hidden, the move list's cells keep their width with no eval in them, and the gauge's slot stays empty, so nothing moves when they show.
+- Not clipped when hidden: a narrower panel would make every move jump sideways on each press, and the space saved is no use, since only the board is centred (UI.27).
+- A plain key, read as `e.key`, like `F` for flipping.
+- Not built: showing evals only once the answer is in. The answer's own eval already waits for it (UI.26); build the rest only if needed.
 - In the app since 2026-10-13.
+
+**Was:** UI.33, Ctrl + Alt + Shift + G + U, hid the gauge alone and kept the choice in localStorage. Removed: hiding the gauge without the move list's evals hides nothing.

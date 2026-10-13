@@ -2,8 +2,8 @@
 
 import { useEffect } from "react";
 
-// Ctrl + Alt + Shift + two letter keys toggles a class on <html>: large coordinates
-// (C + U, UI.32), hidden eval gauge (G + U, UI.33). Deliberately awkward, so it never
+// Ctrl + Alt + Shift + two letter keys toggles a class on <html>, e.g. large
+// coordinates (C + U, UI.32). Deliberately awkward, so it never
 // clashes with the browser or the trainer. The choice is kept in localStorage.
 
 interface HotkeyToggleProps {

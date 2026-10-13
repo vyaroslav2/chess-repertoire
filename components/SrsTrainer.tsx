@@ -39,6 +39,9 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
   // Manual board flip, toggled with the 'f' key.
   const [flipped, setFlipped] = useState(false);
 
+  // Evals and gauge, shown with the 'e' key; hidden again at each new card (UI.34).
+  const [evalsShown, setEvalsShown] = useState(false);
+
   // Sound ref
   const moveSoundRef = useRef<HTMLAudioElement | null>(null);
 
@@ -105,6 +108,7 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
     chess.load(tempChess.fen());
     setLastMove(undefined);
     setTestStatus("idle");
+    setEvalsShown(false);
     setCurrentPlyIndex(priorMoves.length);
 
     if (!finalMove) {
@@ -193,6 +197,12 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
       if (e.key === "f" || e.key === "F") {
         setFlipped((prev) => !prev);
         logFlightBox("ACTION_FLIP_BOARD", {});
+        return;
+      }
+
+      // Show or hide the evals and gauge (UI.34)
+      if (e.key === "e" || e.key === "E") {
+        setEvalsShown((prev) => !prev);
         return;
       }
 
@@ -454,8 +464,8 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
           />
         </div>
 
-        {/* Eval gauge between the board and the move list, 4px from each (UI.31); hideable (UI.33) */}
-        <div className="trainer-gauge">
+        {/* Eval gauge between the board and the move list, 4px from each (UI.31); hidden until 'e' (UI.34) */}
+        <div className="trainer-gauge" style={{ visibility: evalsShown ? "visible" : "hidden" }}>
           <EvalGauge evaluation={moveEvals[currentPlyIndex - 1] ?? null} orientation={orientation} />
         </div>
 
@@ -472,7 +482,7 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
             moves={(currentStat?.lineMoves || []).concat(testStatus === 'correct' || testStatus === 'revealed' || testStatus === 'wrong' ? [
               testStatus === 'wrong' && lastMove ? chess.history()[chess.history().length-1] : currentStat.targetMove.san
             ] : [])}
-            evals={moveEvals}
+            evals={evalsShown ? moveEvals : undefined}
             currentPlyIndex={currentPlyIndex - 1}
             onMoveClick={(index) => {
               logFlightBox("ACTION_CLICK_MOVE_LIST", { targetIndex: index + 1 });

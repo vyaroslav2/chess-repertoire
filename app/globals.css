@@ -452,17 +452,6 @@ html.coords-large .cg-wrap coords coord {
   left: calc(100% + 23px);
 }
 
-/* UI.33: gauge hidden (Ctrl + Alt + Shift + G + U). The move list goes back flush
-   against the board, its 4px shadow hiding the seam, as before the gauge. */
-html.gauge-hidden .trainer-gauge {
-  display: none;
-}
-
-html.gauge-hidden .trainer-move-list {
-  left: 100%;
-  box-shadow: -4px 0 0 0 var(--lichess-panel-bg);
-}
-
 /* Lines at every 12.5%: each tick is a box from the top whose bottom border is the line. */
 .eval-gauge-tick {
   position: absolute;
