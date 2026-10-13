@@ -3,6 +3,7 @@ import { Arimo, Inter, JetBrains_Mono, Roboto } from "next/font/google";
 import "chessground/assets/chessground.base.css";
 import "chessground/assets/chessground.brown.css";
 import "./globals.css";
+import CoordsHotkey from "../components/CoordsHotkey";
 
 // Self-hosted at build time, so every visitor gets these fonts without a request to Google.
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
@@ -24,7 +25,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable} ${arimo.variable} ${roboto.variable}`}>
-      <body>{children}</body>
+      <body>
+        <CoordsHotkey />
+        {children}
+      </body>
     </html>
   );
 }

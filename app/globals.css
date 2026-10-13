@@ -9,6 +9,7 @@
   /* Warm greys of one tint, each at least 4.5 : 1 on --lichess-bg (WCAG AA). */
   --opening-text: #979490; /* 6.05 : 1 */
   --coord-text: #817e7a;   /* 4.52 : 1, dimmer than the opening name */
+  --coord-text-large: #e0dcd6; /* 13.37 : 1, large coordinates (UI.32) */
   --lichess-green: #629924;
   --lichess-green-hover: #75b32c;
   --lichess-accent: #3692e7;
@@ -287,6 +288,18 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
   font-weight: 400 !important;
   font-size: 13px !important;
   text-transform: lowercase !important;
+}
+
+/* Large coordinates (UI.32), toggled with Ctrl + Alt + Shift + C + U.
+   Off-white, not white: pure white glares on a dark page. */
+html.coords-large .cg-wrap coords {
+  opacity: 1 !important;
+}
+
+html.coords-large .cg-wrap coords coord {
+  color: var(--coord-text-large) !important;
+  font-size: 16px !important;
+  text-transform: uppercase !important;
 }
 
 /* ======================================================== */

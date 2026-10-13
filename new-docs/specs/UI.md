@@ -19,6 +19,15 @@ UI.21 **Coordinates.**
 Arial, 13px (16.25), weight 400, line height 19.5px, lower case, `#817e7a` (4.52 : 1).
 - Arial for a classical look. Stack: Arial, Arimo, sans-serif. Arimo has Arial's letter widths; it is self-hosted and not preloaded, so only machines without Arial (Linux, Android) download it.
 - `#817e7a` is the same warm tint as the opening name, at about 70% of its brightness: the dimmest of this tint that passes 4.5 : 1.
+- Large coordinates: see UI.32.
+
+UI.32 **Large coordinates.**
+Ctrl + Alt + Shift + C + U switches the coordinates to a large style and back. Arial, 16px (20), weight 400, upper case, `#e0dcd6` (13.37 : 1), full opacity. The choice is kept in the browser (localStorage).
+- The shortcut is deliberately awkward, so it never clashes with the browser or the trainer. Keys are read by position (`e.code`), so it works on any layout, and C and U can be pressed in either order.
+- Size: upper case at 16px gives capitals 11.5px tall, against the 6.7px x-height of the normal style: clearly larger, yet still about an eighth of a square, so the labels stay beside the board, not over it. Weight stays 400: bold Arial looks heavy at this size.
+- Colour: off-white, not white. Pure white on a near-black page glares and seems to bleed (halation); Material Design's dark theme uses white at 87% for high-emphasis text. `#e0dcd6` is that brightness in the same warm tint as UI.20 and UI.21.
+- Chessground draws coordinates at 0.8 opacity; the large style sets it to 1, so the colour is exact.
+- In the app since 2026-10-13.
 
 UI.22 **Status line (temporary).**
 Inter, 16px (20), weight 400, line height 24px, `#787674`. Hidden until the pointer is over it. It sits in the free space left of the board: level with the board's top, 40px left of it, 280px wide, right-aligned. It will be redone.
