@@ -106,3 +106,9 @@ A copy of the Lichess gauge, dark theme. A bar 15px wide and as tall as the boar
 - Written from Lichess's source, not copied: lila is AGPL-3.0.
 - The split is rounded to 0.01% (0.07px). Node and the browser can differ in the last digits of `Math.exp`, and the server-drawn page then fails to match the browser's.
 - In the app since 2026-10-13.
+
+UI.33 **Hiding the gauge.**
+Ctrl + Alt + Shift + G + U hides the eval gauge (UI.31) and brings it back. Hidden, the move list goes back flush against the board, with its 4px shadow hiding the seam, as before the gauge. The choice is kept in the browser (localStorage).
+- The same kind of shortcut as UI.32, and the same code (`HotkeyToggle`): deliberately awkward, keys read by position (`e.code`), G and U in either order.
+- The choice is read once the page has loaded, so a hidden gauge may show for a moment on reload. UI.32 does the same.
+- In the app since 2026-10-13.

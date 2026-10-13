@@ -454,15 +454,14 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
           />
         </div>
 
-        {/* Eval gauge between the board and the move list, 4px from each (UI.31) */}
-        <div style={{ position: "absolute", left: "calc(100% + 4px)", top: 0, height: "var(--board-size)" }}>
+        {/* Eval gauge between the board and the move list, 4px from each (UI.31); hideable (UI.33) */}
+        <div className="trainer-gauge">
           <EvalGauge evaluation={moveEvals[currentPlyIndex - 1] ?? null} orientation={orientation} />
         </div>
 
         {/* Move List Side Panel — out of the flow so only the board is centred (UI.01, UI.02) */}
-        <div style={{
+        <div className="trainer-move-list" style={{
           position: "absolute",
-          left: "calc(100% + 23px)", // past the gauge: 4px + 15px + 4px (UI.31)
           top: 0,
           width: "318.4px", // UI.26: 220px plus room for the evals (398 screen px)
           height: "var(--board-size)", 

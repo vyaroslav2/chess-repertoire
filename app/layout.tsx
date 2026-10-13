@@ -4,7 +4,7 @@ import localFont from "next/font/local";
 import "chessground/assets/chessground.base.css";
 import "chessground/assets/chessground.brown.css";
 import "./globals.css";
-import CoordsHotkey from "../components/CoordsHotkey";
+import HotkeyToggle from "../components/HotkeyToggle";
 
 // Self-hosted at build time, so every visitor gets these fonts without a request to Google.
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
@@ -30,7 +30,8 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable} ${arimo.variable} ${roboto.variable} ${evalMono.variable}`}>
       <body>
-        <CoordsHotkey />
+        <HotkeyToggle keys={["KeyC", "KeyU"]} className="coords-large" />
+        <HotkeyToggle keys={["KeyG", "KeyU"]} className="gauge-hidden" />
         {children}
       </body>
     </html>
