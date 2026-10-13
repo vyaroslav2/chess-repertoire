@@ -59,6 +59,7 @@ Roboto, 16.59px (20.7), weight 400, `#bababa`. Hover: background `#363431`. Curr
 UI.26 **Evals.**
 In each move's cell, pushed to its right edge and centred vertically in the row, as on Lichess. Lichess centres the number, move and eval each in its row rather than sharing a baseline, so smaller text sits about 2px higher; ours: eval 1px, number 2px above the move's baseline. JetBrains Mono, 0.8em of the move size = 13.27px (16.6), weight 300, `#949494`; on the current move it turns white with the move. Two decimals, -9.99 to +9.99, e.g. `+0.00`, `-0.00`, `+9.99`. A move and its eval highlight as one cell.
 - Lichess does the same with Roboto and one decimal. JetBrains Mono gives every eval the same width (39.8px for "+9.99"), so the decimal points line up.
+- The font is Eval Mono: JetBrains Mono Light with the dot taken out of the zero. A dotted zero tells 0 from O in code; evals have no letters, so the dot is only clutter. JetBrains Mono has no plain zero (its one alternate is slashed), so `scripts/build_eval_font.py` builds a 1.2 KB copy: weight fixed at 300, only `0`–`9 + - . #`, renamed as the SIL Open Font License asks of a changed copy. Font and licence are in `app/_fonts/`.
 - Cell padding is Lichess's: 0.5em left, 0.3em right (8.3px, 5px). White's eval ends 13.3px before Black's move.
 - The panel grows to 318.4px (398 screen px), so the moves keep the room they have at 220px. Its right edge would be at 1432px of the 1536px window.
 - Data: every move on a card carries an eval ([[DB|DB.11]]), in White's view. The card's answer shows its eval once played or revealed. A wrong move shows none.
@@ -71,7 +72,9 @@ UI.27 **Centring.** The board is centred across and down; only the board counts.
 
 UI.28 **Opening name position.** The opening name sits 4px above the board, as wide as the board and lined up with its left edge.
 
-UI.29 **Test pages.** Temporary: `/fonts`, `/coords`, `/moves` and `/grid`. Delete them before deploying.
+UI.29 **Test pages.** Temporary: `/fonts`, `/coords`, `/moves`, `/grid` and `/gauge`. Delete them before deploying.
+- `/gauge` shows the eval gauge (UI.31) at chosen evals, without the database: one gauge you set by typing (`-0.25`, `#-3`) or with buttons, which slides as in the trainer, and every preset side by side, from `#-1` to `#1`, each with White's share.
+- `/grid` can switch its evals' zero between plain (the app's), slashed and dotted (JetBrains Mono's own). The slashed font is built by the same script and lives only in `app/grid/`.
 
 UI.30 **Status light.**
 A circle in the bottom-left corner, 16px in from each edge, shown once a move is made or revealed. Diameter `clamp(12px, 0.9vw, 18px)`: 13.8px (17.3) in a 1536px window; 12px up to 1333px, 17.3px at 1920px, 18px from 2000px up. Fill by state, with a 1px border about 30% darker in the same hue:
@@ -101,4 +104,5 @@ A copy of the Lichess gauge, dark theme. A bar 15px wide and as tall as the boar
 - A position without an eval (the start, a wrong move) keeps the last split at 50% opacity, as on Lichess.
 - Flipped with the board: from Black's side, White's share is at the top.
 - Written from Lichess's source, not copied: lila is AGPL-3.0.
+- The split is rounded to 0.01% (0.07px). Node and the browser can differ in the last digits of `Math.exp`, and the server-drawn page then fails to match the browser's.
 - In the app since 2026-10-13.

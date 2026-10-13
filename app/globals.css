@@ -386,10 +386,11 @@ html.coords-large .cg-wrap coords coord {
 }
 
 /* UI.26: as on Lichess (0.8 × the move size, weight 300, #949494), but JetBrains
-   Mono with two decimals, so the decimal points line up. White on the current move. */
+   Mono with two decimals, so the decimal points line up. White on the current move.
+   Eval Mono is JetBrains Mono Light with the dot taken out of the zero. */
 .move-eval {
   margin-left: auto;
-  font-family: var(--font-jetbrains-mono), monospace;
+  font-family: var(--font-eval-mono), var(--font-jetbrains-mono), monospace;
   font-size: 0.8em;
   font-weight: 300;
   color: #949494;

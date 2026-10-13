@@ -36,7 +36,8 @@ export default function EvalGauge({ evaluation, orientation }: EvalGaugeProps) {
   return (
     <div
       className={`eval-gauge${chances === null ? " empty" : ""}${orientation === "black" ? " reverse" : ""}`}
-      style={{ "--eval-percent": `${100 - (shown + 1) * 50}%` } as React.CSSProperties}
+      // Rounded: Node's and the browser's Math.exp can differ in the last digits, which breaks hydration.
+      style={{ "--eval-percent": `${(100 - (shown + 1) * 50).toFixed(2)}%` } as React.CSSProperties}
     >
       {ticks}
     </div>

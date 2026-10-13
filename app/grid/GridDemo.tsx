@@ -35,7 +35,7 @@ const evals = moves.map((san, i) => {
 // The move list with an eval in each move's cell, pushed to its right edge and
 // centred vertically (not on the move's baseline), as on Lichess (0.8 × the move size, weight 300, #949494), but in JetBrains Mono with two
 // decimals. A copy of LichessMoveList's markup and classes; the real one is untouched.
-function EvalMoveList({ current, onClick }: { current: number; onClick: (ply: number) => void }) {
+function EvalMoveList({ current, onClick, evalFont }: { current: number; onClick: (ply: number) => void; evalFont: string }) {
   const rows = [];
   for (let i = 0; i < moves.length; i += 2) rows.push(i);
   const cell = (ply: number) => (
@@ -47,7 +47,7 @@ function EvalMoveList({ current, onClick }: { current: number; onClick: (ply: nu
     >
       {moves[ply]}
       <span style={{
-        marginLeft: "auto", fontFamily: "var(--font-jetbrains-mono)", fontSize: "0.8em", fontWeight: 300,
+        marginLeft: "auto", fontFamily: evalFont, fontSize: "0.8em", fontWeight: 300,
         color: ply === current ? "inherit" : "#949494",
       }}>
         {evals[ply]}
@@ -67,10 +67,13 @@ function EvalMoveList({ current, onClick }: { current: number; onClick: (ply: nu
   );
 }
 
-export default function GridDemo() {
+export default function GridDemo({ slashedFont }: { slashedFont: string }) {
   // Start on the first 7-character move, so the current-move style shows at once.
   const [ply, setPly] = useState(moves.indexOf("Qh3xf1#"));
   const [evalPly, setEvalPly] = useState(moves.indexOf("Qh3xf1#"));
+  // The evals' zero (UI.26): plain is the app's; slashed and dotted are JetBrains Mono's own.
+  const zeroStyles = { plain: "var(--font-eval-mono)", slashed: slashedFont, dotted: "var(--font-jetbrains-mono)" };
+  const [zero, setZero] = useState<keyof typeof zeroStyles>("plain");
 
   return (
     <div style={{ display: "flex", gap: "48px", alignItems: "flex-start", justifyContent: "center", padding: "32px 20px" }}>
@@ -81,9 +84,20 @@ export default function GridDemo() {
         </div>
       </figure>
       <figure>
-        <figcaption style={{ ...caption, width: evalPanelWidth }}>With evals: 318.4 × board height (398 screen px at 125%), scrolls. Click a move.</figcaption>
+        <figcaption style={{ ...caption, width: evalPanelWidth }}>
+          With evals: 318.4 × board height (398 screen px at 125%), scrolls. Click a move.
+          <div style={{ display: "flex", gap: "12px" }}>
+            Zero:
+            {(Object.keys(zeroStyles) as (keyof typeof zeroStyles)[]).map((style) => (
+              <label key={style} style={{ display: "flex", gap: "4px", alignItems: "center", cursor: "pointer" }}>
+                <input type="radio" name="zero" checked={zero === style} onChange={() => setZero(style)} />
+                {style}{style === "plain" && " (app)"}
+              </label>
+            ))}
+          </div>
+        </figcaption>
         <div style={{ ...panel, width: evalPanelWidth, height: "var(--board-size)" }}>
-          <EvalMoveList current={evalPly} onClick={setEvalPly} />
+          <EvalMoveList current={evalPly} onClick={setEvalPly} evalFont={zeroStyles[zero]} />
         </div>
       </figure>
       <figure>

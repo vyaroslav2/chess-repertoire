@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Arimo, Inter, JetBrains_Mono, Roboto } from "next/font/google";
+import localFont from "next/font/local";
 import "chessground/assets/chessground.base.css";
 import "chessground/assets/chessground.brown.css";
 import "./globals.css";
@@ -12,6 +13,9 @@ const jetbrainsMono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-jet
 const arimo = Arimo({ subsets: ["latin"], variable: "--font-arimo", preload: false });
 // Moves in the move list (UI.14).
 const roboto = Roboto({ subsets: ["latin"], variable: "--font-roboto" });
+// Evals in the move list (UI.26): JetBrains Mono Light with a plain zero, no dot.
+// Built by scripts/build_eval_font.py; licence in app/_fonts/OFL.txt.
+const evalMono = localFont({ src: "./_fonts/EvalMono-Light.woff2", weight: "300", variable: "--font-eval-mono" });
 
 export const metadata: Metadata = {
   title: "Chess Repertoire Training",
@@ -24,7 +28,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable} ${arimo.variable} ${roboto.variable}`}>
+    <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable} ${arimo.variable} ${roboto.variable} ${evalMono.variable}`}>
       <body>
         <CoordsHotkey />
         {children}
