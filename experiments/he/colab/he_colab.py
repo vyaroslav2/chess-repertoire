@@ -12,7 +12,7 @@ import hashlib, json, os, queue, re, subprocess, tarfile, threading, time, urlli
 
 JOBS = "/content/drive/MyDrive/he/jobs-a.jsonl"
 RESULTS = "/content/drive/MyDrive/he/results-a.jsonl"
-LIMIT = 50                         # e.g. 50 for a test run: only the first 50 jobs
+LIMIT = 50                         # e.g. 50 for a test run: only the first 50 jobs; None for all jobs 
 ENGINES = os.cpu_count() or 1        # one single-threaded engine per core
 
 # Fixed. Do not change: they define the eval profile.
