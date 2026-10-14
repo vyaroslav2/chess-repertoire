@@ -59,6 +59,8 @@ export default function SrsTrainer({
   const ankiGradedCardsRef = useRef<number[]>([]);
   // A request to Anki is on its way: further grades and undos wait for it.
   const ankiBusyRef = useRef(false);
+  // Why an undo did nothing (AD.05, AD.07); cleared by the next card from Anki.
+  const [ankiNotice, setAnkiNotice] = useState<string | null>(null);
 
   // Counts the cards shown, so a card starts afresh even when the same card
   // comes round again (graded Again as the only card left, or undone to itself).
@@ -294,7 +296,16 @@ export default function SrsTrainer({
           if (ankiBusyRef.current) return;
           const gradedCardId = ankiGradedCardsRef.current.pop();
           if (gradedCardId === undefined) return; // Nothing graded on this page (AK.13).
-          sendToAnki(ankiUndo(gradedCardId));
+          sendToAnki(
+            ankiUndo(gradedCardId).then((result) => {
+              if (result.undone) return result.session;
+              // AD.05, AD.07: nothing changed in Anki, so the grade is still
+              // there to undo, and the card on screen stays as it is.
+              ankiGradedCardsRef.current.push(gradedCardId);
+              setAnkiNotice(result.notice ?? null);
+              return result.session ?? null;
+            }),
+          );
           return;
         }
         const step = undoStepsRef.current.pop();
@@ -557,12 +568,14 @@ export default function SrsTrainer({
   };
 
   // Shows what Anki sends back: its current card, the end, or an error.
-  function sendToAnki(request: Promise<AnkiSession>) {
+  function sendToAnki(request: Promise<AnkiSession | null>) {
     if (ankiBusyRef.current) return;
     ankiBusyRef.current = true;
     request
       .then((session) => {
-        logFlightBox("ANKI_SESSION", { status: session.status });
+        logFlightBox("ANKI_SESSION", { status: session?.status ?? "unchanged" });
+        if (!session) return;
+        setAnkiNotice(null);
         setStats(session.status === "card" ? [session.card] : []);
         setAnkiCounts(session.status === "card" ? session.counts : null);
         setAnkiError(session.status === "error" ? session.message : null);
@@ -687,6 +700,20 @@ export default function SrsTrainer({
               ? `Black to move · ${stats.length} cards remaining · ${graduatedCount} graduated · Good ${goodHitsByCard[currentStat.demoId ?? currentStat.id] ?? 0}/2`
               : `Position 1 of ${stats.length}`}
         </p>
+        {ankiNotice && (
+          <p
+            style={{
+              position: "absolute",
+              right: "calc(100% + 40px)",
+              top: "48px",
+              width: "280px",
+              textAlign: "right",
+              color: "#f9a825",
+            }}
+          >
+            {ankiNotice}
+          </p>
+        )}
 
         {/* Opening name, 4px above the board (UI.04) */}
         <div

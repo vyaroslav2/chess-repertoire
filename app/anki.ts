@@ -175,16 +175,35 @@ export async function ankiGrade(cardId: number, ease: number) {
   });
 }
 
-// AK.13: gradedCardId is the card of the grade to take back; it comes back.
-export async function ankiUndo(gradedCardId: number) {
-  return session(async deckName => {
-    const repsBefore = await cardReps(gradedCardId);
-    await anki("guiUndo");
-    // The reviewer does not show the card again until Anki's window has focus,
-    // so restart it once the undo is saved. The undone card heads the queue.
-    await waitForReviewer(deckName, async () => await cardReps(gradedCardId) < repsBefore);
-    await anki("guiDeckReview", { name: deckName });
-    await waitForReviewer(deckName, shown => shown?.cardId === gradedCardId);
-    return nextCard(deckName);
-  });
+// Undone: Anki's current card. Not undone: why, and the page keeps its card.
+export type AnkiUndo = { undone: true; session: AnkiSession } | { undone: false; notice?: string; session?: AnkiSession };
+
+// AK.13, AD.04: gradedCardId is the card of the grade to take back. Our add-on's
+// chessUndo undoes it only if it is Anki's next undo step, and puts it back on screen.
+export async function ankiUndo(gradedCardId: number): Promise<AnkiUndo> {
+  let undo: { undone: boolean; step?: string; isGrade?: boolean };
+  try {
+    undo = await anki("chessUndo", { cardId: gradedCardId });
+  } catch (error) {
+    const message = (error as Error).message;
+    // AD.07: the add-on is missing.
+    if (message.endsWith("unsupported action")) return { undone: false, notice: "Undo needs the Chess Repertoire add-on in Anki." };
+    return { undone: false, session: await session(async () => { throw error; }) };
+  }
+  if (!undo.undone) {
+    // AD.05: blocked. Nothing changed in Anki.
+    const notice = !undo.step
+      ? "Anki has nothing to undo."
+      : undo.isGrade
+        ? "Anki's last grade was of another card, so nothing was undone."
+        : `Anki's last change was '${undo.step}', not a grade, so nothing was undone. To undo it, use Ctrl + Z in Anki.`;
+    return { undone: false, notice };
+  }
+  return {
+    undone: true,
+    session: await session(async deckName => {
+      await waitForReviewer(deckName, shown => shown?.cardId === gradedCardId);
+      return nextCard(deckName);
+    }),
+  };
 }
