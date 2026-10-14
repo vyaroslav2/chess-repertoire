@@ -8,10 +8,12 @@
   --lichess-text-muted: #787674;
   /* Warm greys of one tint, each at least 4.5 : 1 on --lichess-bg (WCAG AA). */
   --opening-text: #979490; /* 6.05 : 1 */
-  --coord-text: #817e7a;   /* 4.52 : 1, dimmer than the opening name */
+  --coord-text: #817e7a; /* 4.52 : 1, dimmer than the opening name */
   --coord-text-large: #e0dcd6; /* 13.37 : 1, large coordinates (UI.32) */
   --settings-icon: #b5b1ab; /* Obsidian's #b3b3b3 in the same warm tint */
-  --settings-hover-bg: rgb(224 220 214 / 0.075); /* Obsidian's hover: light at 7.5% */
+  --settings-hover-bg: rgb(
+    224 220 214 / 0.075
+  ); /* Obsidian's hover: light at 7.5% */
   --menu-text: #dad6d0; /* Obsidian's #dadada in the same warm tint */
   --lichess-green: #629924;
   --lichess-green-hover: #75b32c;
@@ -20,11 +22,12 @@
   /* Lichess's board on a 1920 × 1080 screen at 125%: 864 screen px, 108 per square.
      Pixel-exact only at that scale (UI.18). */
   --board-size: 691.2px;
-  
+
   /*--glass-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);*/
 
   /* Modern Font Stacks */
-  --font-modern-sans: var(--font-inter), 'Roboto', 'Noto Sans', 'Source Sans 3', sans-serif;
+  --font-modern-sans:
+    var(--font-inter), "Roboto", "Noto Sans", "Source Sans 3", sans-serif;
   --font-modern-mono: var(--font-jetbrains-mono), monospace;
 }
 
@@ -35,7 +38,15 @@
 }
 
 body {
-  font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family:
+    var(--font-inter),
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
   background-color: var(--lichess-bg);
   color: var(--lichess-text-primary);
   min-height: 100vh;
@@ -95,7 +106,8 @@ button {
   letter-spacing: 0.5px;
 }
 
-.lichess-header nav a:hover, .lichess-header nav a.active {
+.lichess-header nav a:hover,
+.lichess-header nav a.active {
   color: var(--lichess-text-bright);
 }
 
@@ -136,21 +148,42 @@ button {
 }
 
 /* Anki SRS Buttons */
-.btn-again { background-color: #c62828; color: white; }
-.btn-hard { background-color: #ef6c00; color: white; }
-.btn-good { background-color: #2e7d32; color: white; }
-.btn-easy { background-color: #1565c0; color: white; }
+.btn-again {
+  background-color: #c62828;
+  color: white;
+}
+.btn-hard {
+  background-color: #ef6c00;
+  color: white;
+}
+.btn-good {
+  background-color: #2e7d32;
+  color: white;
+}
+.btn-easy {
+  background-color: #1565c0;
+  color: white;
+}
 
-.btn-again:hover, .btn-hard:hover, .btn-good:hover, .btn-easy:hover {
+.btn-again:hover,
+.btn-hard:hover,
+.btn-good:hover,
+.btn-easy:hover {
   filter: brightness(1.15);
 }
 
 /* Typography */
-h1, h2, h3 {
+h1,
+h2,
+h3 {
   color: var(--lichess-text-bright);
 }
 
-h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
+h2 {
+  font-size: 1.4rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
 
 /* Board and pieces (SM.08, SM.09). Lichess's newspaper and merida until
    the script in <head> or the settings menu sets others on <html>. */
@@ -175,21 +208,47 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
   background-size: cover !important;
 }
 
-.board-themed piece.pawn.white { background-image: var(--piece-wP) !important; }
-.board-themed piece.knight.white { background-image: var(--piece-wN) !important; }
-.board-themed piece.bishop.white { background-image: var(--piece-wB) !important; }
-.board-themed piece.rook.white { background-image: var(--piece-wR) !important; }
-.board-themed piece.queen.white { background-image: var(--piece-wQ) !important; }
-.board-themed piece.king.white { background-image: var(--piece-wK) !important; }
-.board-themed piece.pawn.black { background-image: var(--piece-bP) !important; }
-.board-themed piece.knight.black { background-image: var(--piece-bN) !important; }
-.board-themed piece.bishop.black { background-image: var(--piece-bB) !important; }
-.board-themed piece.rook.black { background-image: var(--piece-bR) !important; }
-.board-themed piece.queen.black { background-image: var(--piece-bQ) !important; }
-.board-themed piece.king.black { background-image: var(--piece-bK) !important; }
+.board-themed piece.pawn.white {
+  background-image: var(--piece-wP) !important;
+}
+.board-themed piece.knight.white {
+  background-image: var(--piece-wN) !important;
+}
+.board-themed piece.bishop.white {
+  background-image: var(--piece-wB) !important;
+}
+.board-themed piece.rook.white {
+  background-image: var(--piece-wR) !important;
+}
+.board-themed piece.queen.white {
+  background-image: var(--piece-wQ) !important;
+}
+.board-themed piece.king.white {
+  background-image: var(--piece-wK) !important;
+}
+.board-themed piece.pawn.black {
+  background-image: var(--piece-bP) !important;
+}
+.board-themed piece.knight.black {
+  background-image: var(--piece-bN) !important;
+}
+.board-themed piece.bishop.black {
+  background-image: var(--piece-bB) !important;
+}
+.board-themed piece.rook.black {
+  background-image: var(--piece-bR) !important;
+}
+.board-themed piece.queen.black {
+  background-image: var(--piece-bQ) !important;
+}
+.board-themed piece.king.black {
+  background-image: var(--piece-bK) !important;
+}
 
 /* Force an exact board size to prevent Windows DPI sub-pixel gaps */
-.cg-wrap, cg-container, cg-board {
+.cg-wrap,
+cg-container,
+cg-board {
   width: var(--board-size) !important;
   height: var(--board-size) !important;
 }
@@ -287,7 +346,7 @@ html.coords-large .cg-wrap coords coord {
   height: 100%;
   width: 100%;
   font-family: var(--font-modern-sans);
-  
+
   /* Webkit custom scrollbar */
   scrollbar-width: thin;
   scrollbar-color: #555 #262421;
@@ -297,14 +356,14 @@ html.coords-large .cg-wrap coords coord {
   width: 8px;
 }
 .lichess-move-list-container::-webkit-scrollbar-track {
-  background: #262421; 
+  background: #262421;
 }
 .lichess-move-list-container::-webkit-scrollbar-thumb {
-  background-color: #555; 
+  background-color: #555;
   border-radius: 4px;
 }
 .lichess-move-list-container::-webkit-scrollbar-thumb:hover {
-  background-color: #777; 
+  background-color: #777;
 }
 
 .lichess-move-grid {
@@ -319,7 +378,11 @@ html.coords-large .cg-wrap coords coord {
   /* The move-number column's shading, painted on the grid so it runs through the
      top padding, flush with the list's top. It stops short of the bottom padding,
      so it ends level with the last move's cell, as on Lichess. */
-  background: linear-gradient(to right, #33312e var(--move-number-width), transparent var(--move-number-width))
+  background: linear-gradient(
+      to right,
+      #33312e var(--move-number-width),
+      transparent var(--move-number-width)
+    )
     top left / 100% calc(100% - var(--grid-padding)) no-repeat; /* Lichess's index cell */
 }
 
@@ -375,7 +438,6 @@ html.coords-large .cg-wrap coords coord {
   color: inherit;
 }
 
-
 /* ======================================================== */
 /* Eval gauge (UI.31)                                       */
 /* ======================================================== */
@@ -383,7 +445,7 @@ html.coords-large .cg-wrap coords coord {
 /* A copy of Lichess's dark-theme gauge (lila, ui/lib/css/ceval/_eval-gauge.scss).
    --eval-percent is Black's share, from the top; registered so it can slide. */
 @property --eval-percent {
-  syntax: '<percentage>';
+  syntax: "<percentage>";
   inherits: false;
   initial-value: 50%;
 }
@@ -392,7 +454,11 @@ html.coords-large .cg-wrap coords coord {
   width: 15px; /* Lichess's block gap */
   height: 100%;
   position: relative;
-  background: linear-gradient(to bottom, #444 var(--eval-percent), #c0c0c0 var(--eval-percent));
+  background: linear-gradient(
+    to bottom,
+    #444 var(--eval-percent),
+    #c0c0c0 var(--eval-percent)
+  );
   transition: --eval-percent 1s ease;
   overflow: hidden;
 }
@@ -406,7 +472,7 @@ html.coords-large .cg-wrap coords coord {
 }
 
 .eval-gauge::after {
-  content: '';
+  content: "";
   display: block;
   position: absolute;
   inset: 0;
@@ -510,11 +576,36 @@ html.coords-large .cg-wrap coords coord {
   color: var(--settings-icon);
 }
 
-/* "PGN copied" (SM.07): where the menu was, in the menu's style, then fades. */
+/* "PGN copied" (SM.07, MS.02): where the menu was, in the menu's style, then fades. */
 .settings-notice {
-  position: fixed;
   top: calc(8px + 28px + 4px);
   right: 8px;
+  animation: settings-notice 2.45s forwards; /* 2s, then a 0.45s fade */
+}
+
+/* "Answer undone" (MS.01): bottom left, 8px above the status light (UI.30), left edges level. */
+.undo-notice {
+  left: 16px;
+  bottom: calc(16px + clamp(12px, 0.9vw, 18px) + 8px);
+  animation: undo-notice 3.45s forwards; /* 3s, then the same 0.45s fade */
+}
+
+@keyframes undo-notice {
+  0%, 86.96% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* "Nothing undone" (MS.03): stays, and wraps at the status line's width. */
+.undo-notice.undo-notice-stays {
+  animation: none;
+  max-width: 280px;
+  white-space: normal;
+}
+
+/* The two share one look (MS.02). */
+.settings-notice,
+.undo-notice {
+  position: fixed;
   z-index: 200;
   padding: 4px 8px;
   background: var(--lichess-panel-bg);
@@ -525,12 +616,16 @@ html.coords-large .cg-wrap coords coord {
   line-height: 20px;
   white-space: nowrap;
   pointer-events: none;
-  animation: settings-notice 2.45s forwards; /* 2s, then a 0.45s fade */
 }
 
 @keyframes settings-notice {
-  0%, 81.6% { opacity: 1; }
-  100% { opacity: 0; }
+  0%,
+  81.6% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
 }
 
 /* Board and Piece set (SM.08, SM.09): a line above them, as Obsidian's menus,

@@ -194,7 +194,7 @@ export default function SettingsMenu({ line, ply, fen, orientation }: SettingsMe
   const [picker, setPicker] = useState<Picker | null>(null); // a list in the menu's place
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // "PGN copied", shown where the menu was, once it has closed (SM.07).
+  // "PGN copied", shown where the menu was, once it has closed (SM.07, MS.02).
   const [notice, setNotice] = useState<{ text: string; id: number } | null>(null);
   const noticeTimerRef = useRef<NodeJS.Timeout | null>(null);
   const showNotice = (text: string) => {

@@ -176,7 +176,11 @@ export async function ankiGrade(cardId: number, ease: number) {
 }
 
 // Undone: Anki's current card. Not undone: why, and the page keeps its card.
-export type AnkiUndo = { undone: true; session: AnkiSession } | { undone: false; notice?: string; session?: AnkiSession };
+// Undone: Anki's current card. Not undone: why (MS.03), and the page keeps its card;
+// forget: Anki has nothing to undo, so the page's grades can never come back (AD.05).
+export type AnkiUndo =
+  | { undone: true; session: AnkiSession }
+  | { undone: false; notice?: string; forget?: boolean; session?: AnkiSession };
 
 // AK.13, AD.04: gradedCardId is the card of the grade to take back. Our add-on's
 // chessUndo undoes it only if it is Anki's next undo step, and puts it back on screen.
@@ -187,16 +191,15 @@ export async function ankiUndo(gradedCardId: number): Promise<AnkiUndo> {
   } catch (error) {
     const message = (error as Error).message;
     // AD.07: the add-on is missing.
-    if (message.endsWith("unsupported action")) return { undone: false, notice: "Undo needs the Chess Repertoire add-on in Anki." };
+    if (message.endsWith("unsupported action")) return { undone: false, notice: "Undo needs the Chess Repertoire add-on in Anki." }; // MS.03
     return { undone: false, session: await session(async () => { throw error; }) };
   }
   if (!undo.undone) {
     // AD.05: blocked. Nothing changed in Anki.
-    const notice = !undo.step
-      ? "Anki has nothing to undo."
-      : undo.isGrade
-        ? "Anki's last grade was of another card, so nothing was undone."
-        : `Anki's last change was '${undo.step}', not a grade, so nothing was undone. To undo it, use Ctrl + Z in Anki.`;
+    if (!undo.step) return { undone: false, forget: true };
+    const notice = undo.isGrade // MS.03
+      ? "Nothing undone. Anki's last answer wasn't made on this page: undo it in Anki first."
+      : `Nothing undone. Anki's last change was '${undo.step}': undo it in Anki first.`;
     return { undone: false, notice };
   }
   return {

@@ -59,8 +59,18 @@ export default function SrsTrainer({
   const ankiGradedCardsRef = useRef<number[]>([]);
   // A request to Anki is on its way: further grades and undos wait for it.
   const ankiBusyRef = useRef(false);
-  // Why an undo did nothing (AD.05, AD.07); cleared by the next card from Anki.
-  const [ankiNotice, setAnkiNotice] = useState<string | null>(null);
+  // The undo message, bottom left: "Answer undone" (MS.01) goes after its 3s
+  // and fade; "Nothing undone" (MS.03) stays until the next grade or Ctrl + Z.
+  // A new id restarts it.
+  const [undoMessage, setUndoMessage] = useState<{ text: string; id: number; stays: boolean } | null>(null);
+  const undoMessageTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const showUndoMessage = (message: { text: string; stays: boolean } | null) => {
+    if (undoMessageTimerRef.current) clearTimeout(undoMessageTimerRef.current);
+    setUndoMessage(message && { ...message, id: Date.now() });
+    if (message && !message.stays) {
+      undoMessageTimerRef.current = setTimeout(() => setUndoMessage(null), 3450);
+    }
+  };
 
   // Counts the cards shown, so a card starts afresh even when the same card
   // comes round again (graded Again as the only card left, or undone to itself).
@@ -294,15 +304,21 @@ export default function SrsTrainer({
             gradesLeft: ankiGradedCardsRef.current.length,
           });
           if (ankiBusyRef.current) return;
+          showUndoMessage(null);
           const gradedCardId = ankiGradedCardsRef.current.pop();
           if (gradedCardId === undefined) return; // Nothing graded on this page (AK.13).
           sendToAnki(
             ankiUndo(gradedCardId).then((result) => {
-              if (result.undone) return result.session;
-              // AD.05, AD.07: nothing changed in Anki, so the grade is still
-              // there to undo, and the card on screen stays as it is.
-              ankiGradedCardsRef.current.push(gradedCardId);
-              setAnkiNotice(result.notice ?? null);
+              if (result.undone) {
+                showUndoMessage({ text: "Answer undone", stays: false });
+                return result.session;
+              }
+              // AD.05, AD.07: nothing changed in Anki, and the card on screen
+              // stays as it is. The grade is still there to undo, unless Anki
+              // has nothing to undo at all: then none of the page's can come back.
+              if (result.forget) ankiGradedCardsRef.current = [];
+              else ankiGradedCardsRef.current.push(gradedCardId);
+              if (result.notice) showUndoMessage({ text: result.notice, stays: true });
               return result.session ?? null;
             }),
           );
@@ -573,9 +589,10 @@ export default function SrsTrainer({
     ankiBusyRef.current = true;
     request
       .then((session) => {
-        logFlightBox("ANKI_SESSION", { status: session?.status ?? "unchanged" });
+        logFlightBox("ANKI_SESSION", {
+          status: session?.status ?? "unchanged",
+        });
         if (!session) return;
-        setAnkiNotice(null);
         setStats(session.status === "card" ? [session.card] : []);
         setAnkiCounts(session.status === "card" ? session.counts : null);
         setAnkiError(session.status === "error" ? session.message : null);
@@ -593,6 +610,7 @@ export default function SrsTrainer({
         quality,
         ankiCardId: currentStat.ankiCardId,
       });
+      showUndoMessage(null);
       ankiGradedCardsRef.current.push(currentStat.ankiCardId);
       sendToAnki(ankiGrade(currentStat.ankiCardId, quality + 1));
       return;
@@ -647,6 +665,16 @@ export default function SrsTrainer({
         orientation={orientation}
       />
 
+      {undoMessage && (
+        <div
+          key={undoMessage.id}
+          className={undoMessage.stays ? "undo-notice undo-notice-stays" : "undo-notice"}
+          role="status"
+        >
+          {undoMessage.text}
+        </div>
+      )}
+
       {testStatus !== "idle" && (
         <div
           style={{
@@ -700,20 +728,6 @@ export default function SrsTrainer({
               ? `Black to move · ${stats.length} cards remaining · ${graduatedCount} graduated · Good ${goodHitsByCard[currentStat.demoId ?? currentStat.id] ?? 0}/2`
               : `Position 1 of ${stats.length}`}
         </p>
-        {ankiNotice && (
-          <p
-            style={{
-              position: "absolute",
-              right: "calc(100% + 40px)",
-              top: "48px",
-              width: "280px",
-              textAlign: "right",
-              color: "#f9a825",
-            }}
-          >
-            {ankiNotice}
-          </p>
-        )}
 
         {/* Opening name, 4px above the board (UI.04) */}
         <div
