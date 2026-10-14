@@ -15,11 +15,9 @@ AK.02 **The deck.**
 20 cards: the 20 Black replies with the highest `cumProb`, from 1. e4 c6 (64%) down to about 1%. One card per reply (`RepertoirePositionStat`).
 - Deck: `Chess Repertoire`. Profile: `User test New` while we test. 
 
-==`AK.02.03` //- Can we make a 10 cards deck, as an exception? (bypassing the block of when the generation is running) -//==
-==`AK.02.04` //- How to open Anki log to see key pressed or notes updates -- due times, or whatever it shows? -//== 
-
 - Made by `scripts/anki_export.ts`. It reads the database and writes nothing to it.
 - It refuses to run unless every repertoire's `generationStatus` is `IDLE`. A tree being built is wiped and only half there; on 2026-10-14 a run during generation made a deck of 15 cards.
+- A one-off for testing during a run: `npx tsx scripts/anki_export.ts --limit 10 --while-generating`. `--limit` sets the number of cards (20 if left out); `--while-generating` skips the check above. The cards are correct, but they are the top 10 of the tree built so far, not the real top 10. 
 
 AK.03 **The note type.**
 `Chess Repertoire`, with four fields:
@@ -43,11 +41,12 @@ AnkiWeb sync carries the note type and its fields. On any device, the app finds 
 
 AK.07 **Reviews from the web app.**
 Anki's own reviewer runs the session; the web app is its screen. `/` trains from Anki.
-- The app starts Anki's reviewer on the deck (`guiDeckReview`) and reads the card it shows (`guiCurrentCard`). Anki picks the card, with its learning steps and daily limits.
-- A grade goes back with `guiShowAnswer` then `guiAnswerCard`, as if pressed in Anki. 1–4 are Again, Hard, Good, Easy; Enter is Good.
+- The app opens Anki's study screen on the deck (`guiDeckReview`) and shows the card Anki shows there (`guiCurrentCard`). Anki picks the card, with its learning steps and daily limits.
+- Cards are answered and graded as in [[GR]]. ==🔵Each grade goes to Anki with `guiShowAnswer` then `guiAnswerCard`, as if pressed in Anki.==
 - The deck is found by note type (AK.06): the deck of the first `Chess Repertoire` card. The app does not switch profiles.
-- The app asks Anki only when it needs a card, on page load and after each grade, so it always gets Anki's current card. No polling.
-- Why not `answerCards`: then the app would pick the order, not Anki, and Anki would log each answer as taking 0s.
+==`AK.07.02` //- #roadmap multi decks support. -//==
+- The app asks Anki only when it needs a card: on page load and after each grade. No polling.
+- Why not `answerCards`: the app would pick the order, not Anki, and Anki would log each answer as taking 0s.
 - Downside: while you train, Anki's main window stays on its study screen for our deck, out of sight behind the browser. Anki is not frozen: Browse works as usual, and the main window can go elsewhere, but the app switches it back at the next card.
 - In the app since 2026-10-14.
 
@@ -64,21 +63,110 @@ The card has the line, the opening and the answer. The evals (UI.26) and the ope
 
 AK.12 **Status line.**
 Left of the board, Anki's counts for the deck: `Black to move · 12 new · 3 learning · 5 due`.
+==AK.12.01 //- #roadmap  polish the status line -//==
 
 AK.13 **Undo.**
 `Ctrl + Z` is Anki's undo (`guiUndo`): the last grade is taken back in Anki and its card comes back. Replaces the local history of [[UN]] on `/`.
-- Only grades made on this page are undone. Anki's undo would take back anything, so on the page's first card nothing happens (UN.02).
-- Anki's reviewer does not show the undone card until its window has focus. So once the undo is saved, the app restarts the reviewer (`guiDeckReview`); the undone card heads Anki's queue.
+- Only grades made on this page are undone. On the page's first card nothing happens (UN.02).
+
+
+
+
+==`AK.13.12`== 
+==//- the problem is that I don't want to alter native Anki tooltip, I only want to alter it when our web app is up and running. perhaps we can switch it on/off depending whether we use our app or not. hopefully -//==
+%%Yes, and it can be even narrower than on/off. The page wouldn't use AnkiConnect's `guiUndo` any more, but our own action, say `chessUndo`. That action runs Anki's undo itself, without Anki's tooltip, and shows our own instead. So only undos asked for by the page get our tooltip. `Ctrl + Z` in Anki's own window still goes through Anki's code, with its native tooltip, whether the page is open or not.
+That's better than a switch: there's no state to forget. A switch left on after you close the page would keep changing Anki's tooltips. Per call, nothing needs turning off.
+Our tooltip is a small window of our own, so we can style it as we like. Like Anki's, it floats on top of the browser.%%
+
+
+==`AK.13.13`== 
+==//- I wanted to polish Anki's tooltips anyway, I wouldn't leave them as it is. it seems the addon is unavoidable. if so, we are close to make the decision on this -- we will write our our addon. and we'll decide the logic later, either stick to anki's native behaviour or to block ctrl+z if it is not answer undo. we'll figure out what's better/simpler later. am I right in my deduction? we need to figure out no addon or addon before we can proceed -//== 
+%%Yes, your deduction is right, with one note.
+- Right: nothing outside Anki can change Anki's tooltips. If you want to polish them, an add-on is unavoidable.
+- Right: add-on or not comes first. The undo logic depends on it. With the add-on, "check before undoing" becomes possible. Without it, the page can only notice a wrong undo after it has happened, and block.
+- Right: the undo logic can wait. Once the add-on exists, either logic is a few lines.
+The note: "polish Anki's tooltips" can mean two things.
+1. Only the tooltips the page causes: a grade or an undo from the page (AK.13.12). Easy, and Anki stays native otherwise.
+2. All Anki's tooltips, also when you use Anki on its own. Also possible, but that's changing Anki itself, not just our link to it. It works by replacing Anki's tooltip code at start-up, and an Anki update could break it.
+Which one you mean decides how deep the add-on goes. Either way, the decision we need now is "add-on: yes". The rest can follow.%%
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+"Send `Ctrl + Z` only once before Anki replies" is already the case: further presses are ignored while Anki works (AK.16).
+Suggested text for AK.13:
+"- If an undo doesn't take back the expected grade (the card's review count doesn't go down), Anki has undone some other change, e.g. an edit made in Browse. The page then shows: 'Anki's last change was not a grade, so Anki undid that instead. To get it back, use Edit → Redo in Anki. Undo here is off until you reload the page.' From then on, `Ctrl + Z` does nothing until the page is reloaded.
+- Why not an add-on that checks first: this is an edge case, and Anki's own `Ctrl + Z` behaves the same way. The block keeps it to one wrong undo, and Anki's redo puts it right."%%
+
+- After an undo, Anki's study screen doesn't redraw until you click on Anki's window, so it would still show the old card. The app therefore reopens the study screen (`guiDeckReview`); the undone card comes first.
 - In the app since 2026-10-14.
+
+==`AK.13.01` //- #roadmap polish undo tooltip -//==
 
 AK.16 **Waiting for Anki.**
 After a grade, Anki says 'done' before it has saved the grade and shown the next card. So the app keeps asking for Anki's current card, every 0.1s for up to 3s, until it is a different card or the deck is finished. If the same card rightly comes back (Again on the last card left), the app takes it once the grade is saved, plus 0.3s.
 - Every grade or undo takes about 0.5s. The old card stays on screen meanwhile. A grade or `Ctrl + Z` pressed during that time is ignored.
+==`AK.16.01` //- #roadmap robust oprimisation -//==
 
 AK.14 **Errors.**
 - Anki not running: "Anki is not running. Start Anki, then reload."
 - No `Chess Repertoire` cards in the open profile: "No Chess Repertoire cards in profile [X]. Open profile User test New in Anki, then reload."
 - Nothing due: "You're all caught up!", "No more cards due in Anki."
+==`AK.14.01` //- #roadmap polish messages -//==
 
 AK.15 **The demo.**
 The trainer without Anki moves to `/demo`, unchanged: its own queue, nothing saved.
