@@ -8,10 +8,13 @@ import LichessMoveList from "./LichessMoveList";
 import EvalGauge from "./EvalGauge";
 import SettingsMenu from "./SettingsMenu";
 import { logFlightBox } from "../lib/logger";
+import { ankiGrade, ankiUndo, type AnkiCounts, type AnkiSession } from "../app/anki";
 
 interface SrsTrainerProps {
   dueStats: any[];
   demoMode?: boolean;
+  // AK.07: Anki runs the session; set on / only.
+  anki?: AnkiSession;
 }
 
 type TestStatus = "idle" | "wrong" | "correct" | "revealed";
@@ -23,13 +26,22 @@ interface UndoStep {
   graduatedCount: number;
 }
 
-export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerProps) {
+export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrainerProps) {
   const [stats, setStats] = useState(dueStats);
   const [graduatedCount, setGraduatedCount] = useState(0);
   const [goodHitsByCard, setGoodHitsByCard] = useState<Record<string, number>>({});
 
   // One step per grade, empty at page load; Ctrl + Z takes the last one back (UN.01, UN.02).
   const undoStepsRef = useRef<UndoStep[]>([]);
+  // Anki mode (AK.07): Anki's counts (AK.12), or why there is no card (AK.14).
+  const ankiMode = anki !== undefined;
+  const [ankiCounts, setAnkiCounts] = useState<AnkiCounts | null>(anki?.status === "card" ? anki.counts : null);
+  const [ankiError, setAnkiError] = useState(anki?.status === "error" ? anki.message : null);
+  // The cards of the grades sent to Anki from this page, the only ones undo takes back (AK.13).
+  const ankiGradedCardsRef = useRef<number[]>([]);
+  // A request to Anki is on its way: further grades and undos wait for it.
+  const ankiBusyRef = useRef(false);
+
   // Counts the cards shown, so a card starts afresh even when the same card
   // comes round again (graded Again as the only card left, or undone to itself).
   const [showing, setShowing] = useState(0);
@@ -215,6 +227,14 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
       // early return, so it works from there too. By position, on any layout (UN.05).
       if (e.code === "KeyZ" && e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
         e.preventDefault();
+        if (ankiMode) {
+          logFlightBox("ACTION_ANKI_UNDO", { gradesLeft: ankiGradedCardsRef.current.length });
+          if (ankiBusyRef.current) return;
+          const gradedCardId = ankiGradedCardsRef.current.pop();
+          if (gradedCardId === undefined) return; // Nothing graded on this page (AK.13).
+          sendToAnki(ankiUndo(gradedCardId));
+          return;
+        }
         const step = undoStepsRef.current.pop();
         logFlightBox("ACTION_UNDO", { undone: !!step, stepsLeft: undoStepsRef.current.length });
         if (!step) return; // The first card: nothing to go back to.
@@ -311,6 +331,18 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [currentStat, testStatus, chess, isBrowsing, targetPlyIndex]);
 
+  if (!currentStat && ankiMode) {
+    // AK.14
+    return (
+      <div style={{ color: "white", textAlign: "center", marginTop: "50px" }}>
+        <h2 style={{ fontSize: "2rem", color: ankiError ? "#c62828" : "var(--lichess-green)" }}>{ankiError ? "No connection to Anki" : "You're all caught up!"}</h2>
+        <p style={{ fontSize: "1.1rem", marginTop: "10px", color: "var(--lichess-text-muted)" }}>
+          {ankiError ?? "No more cards due in Anki."}
+        </p>
+      </div>
+    );
+  }
+
   if (!currentStat) {
     return (
       <div style={{ color: "white", textAlign: "center", marginTop: "50px" }}>
@@ -405,7 +437,29 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
     }
   };
 
+  // Shows what Anki sends back: its current card, the end, or an error.
+  function sendToAnki(request: Promise<AnkiSession>) {
+    if (ankiBusyRef.current) return;
+    ankiBusyRef.current = true;
+    request.then((session) => {
+      logFlightBox("ANKI_SESSION", { status: session.status });
+      setStats(session.status === "card" ? [session.card] : []);
+      setAnkiCounts(session.status === "card" ? session.counts : null);
+      setAnkiError(session.status === "error" ? session.message : null);
+      setShowing((previous) => previous + 1);
+    }).finally(() => {
+      ankiBusyRef.current = false;
+    });
+  }
+
   const handleRate = (quality: number) => {
+    if (ankiMode) {
+      if (ankiBusyRef.current) return;
+      logFlightBox("ACTION_ANKI_RATE", { quality, ankiCardId: currentStat.ankiCardId });
+      ankiGradedCardsRef.current.push(currentStat.ankiCardId);
+      sendToAnki(ankiGrade(currentStat.ankiCardId, quality + 1));
+      return;
+    }
     const cardKey = currentStat.demoId ?? currentStat.id;
     const goodHits = goodHitsByCard[cardKey] ?? 0;
     const isGood = quality === 2;
@@ -465,7 +519,9 @@ export default function SrsTrainer({ dueStats, demoMode = false }: SrsTrainerPro
           position: "absolute", right: "calc(100% + 40px)", top: 0, width: "280px",
           textAlign: "right", color: "var(--lichess-text-muted)",
         }}>
-          {demoMode
+          {ankiMode && ankiCounts
+            ? `${baseOrientation === "black" ? "Black" : "White"} to move · ${ankiCounts.newCount} new · ${ankiCounts.learnCount} learning · ${ankiCounts.reviewCount} due`
+            : demoMode
             ? `Black to move · ${stats.length} cards remaining · ${graduatedCount} graduated · Good ${goodHitsByCard[currentStat.demoId ?? currentStat.id] ?? 0}/2`
             : `Position 1 of ${stats.length}`}
         </p>
