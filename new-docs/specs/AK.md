@@ -13,8 +13,13 @@ Anki keeps each card's state: the queue, intervals, due dates and grades. The we
 
 AK.02 **The deck.**
 20 cards: the 20 Black replies with the highest `cumProb`, from 1. e4 c6 (64%) down to about 1%. One card per reply (`RepertoirePositionStat`).
-- Deck: `Chess Repertoire`. Profile: `User test New` while we test.
+- Deck: `Chess Repertoire`. Profile: `User test New` while we test. 
+
+==`AK.02.03` //- Can we make a 10 cards deck, as an exception? (bypassing the block of when the generation is running) -//==
+==`AK.02.04` //- How to open Anki log to see key pressed or notes updates -- due times, or whatever it shows? -//== 
+
 - Made by `scripts/anki_export.ts`. It reads the database and writes nothing to it.
+- It refuses to run unless every repertoire's `generationStatus` is `IDLE`. A tree being built is wiped and only half there; on 2026-10-14 a run during generation made a deck of 15 cards.
 
 AK.03 **The note type.**
 `Chess Repertoire`, with four fields:
@@ -26,7 +31,7 @@ AK.03 **The note type.**
 The front shows the line and the opening; the back adds the answer. So a card can still be reviewed in Anki itself.
 
 AK.04 **The key.**
-SHA-1 of the line's UCI history and the answer's UCI, joined by a space: `e2e4 c7c6 d2d4 d7d5`. It says "this card is ours" and which reply it is.
+SHA-1 of the line's UCI history and the answer's UCI, joined by a space: `e2e4 c7c6 d2d4 d7d5`. One key per reply. The script works out the key for each reply and skips any reply whose key is already in Anki. The script looks for the key among all our notes (`note:"Chess Repertoire"`), in any deck, not only in this deck. So a card you moved to another deck still counts as "already there".
 - The script skips a reply whose key is already in Anki. Run twice, it adds nothing the second time.
 - It is built from the moves alone, not from database ids, so a rebuilt tree gives the same keys.
 
@@ -41,16 +46,16 @@ Anki's own reviewer runs the session; the web app is its screen. `/` trains from
 - The app starts Anki's reviewer on the deck (`guiDeckReview`) and reads the card it shows (`guiCurrentCard`). Anki picks the card, with its learning steps and daily limits.
 - A grade goes back with `guiShowAnswer` then `guiAnswerCard`, as if pressed in Anki. 1–4 are Again, Hard, Good, Easy; Enter is Good.
 - The deck is found by note type (AK.06): the deck of the first `Chess Repertoire` card. The app does not switch profiles.
-- The app asks afresh on each page load and after each grade, so it never holds a stale card. No polling.
+- The app asks Anki only when it needs a card, on page load and after each grade, so it always gets Anki's current card. No polling.
 - Why not `answerCards`: then the app would pick the order, not Anki, and Anki would log each answer as taking 0s.
-- Downside: Anki's window sits on the review screen while you train.
+- Downside: while you train, Anki's main window stays on its study screen for our deck, out of sight behind the browser. Anki is not frozen: Browse works as usual, and the main window can go elsewhere, but the app switches it back at the next card.
 - In the app since 2026-10-14.
 
 AK.09 **The card's timer.**
-Anki times each answer from when it showed the card. The app restarts that timer (`guiStartCardTimer`) when it shows the card, so a card left open in Anki overnight is not logged as a long answer.
+Anki times each answer from when its own window showed the card. The web page may show it much later, say the next morning. So the app restarts Anki's timer (`guiStartCardTimer`) when the page shows the card; otherwise the log would read Anki's cap ('Maximum answer seconds', 70s here), not the real time.
 
 AK.10 **A card changed in Anki.**
-Before a grade, the app checks that Anki's current card is still the one on screen. If not (graded in Anki meanwhile, say), the grade is dropped and the app shows Anki's current card.
+The page and Anki's window can get out of step: a card graded in Anki itself, or in a second tab, moves Anki on while the page still shows the old card. A grade from the page would then grade a card you never saw. So before a grade, the app checks that Anki's current card is the one on the page. If not, it drops the grade and shows Anki's card.
 
 AK.11 **Line details.**
 The card has the line, the opening and the answer. The evals (UI.26) and the opening at each ply (UI.04) come from the database: the app finds the node whose SAN line matches, read-only.
@@ -67,8 +72,8 @@ AK.13 **Undo.**
 - In the app since 2026-10-14.
 
 AK.16 **Waiting for Anki.**
-Anki's GUI calls return before the reviewer has moved on. After a grade, the app waits for another card, or the end, for up to 3s. If the same card rightly comes back (Again, nothing else due), it waits until the grade is saved, plus 300ms.
-- A grade or undo takes about 0.5s. The old card stays on screen meanwhile; keys wait for it.
+After a grade, Anki says 'done' before it has saved the grade and shown the next card. So the app keeps asking for Anki's current card, every 0.1s for up to 3s, until it is a different card or the deck is finished. If the same card rightly comes back (Again on the last card left), the app takes it once the grade is saved, plus 0.3s.
+- Every grade or undo takes about 0.5s. The old card stays on screen meanwhile. A grade or `Ctrl + Z` pressed during that time is ignored.
 
 AK.14 **Errors.**
 - Anki not running: "Anki is not running. Start Anki, then reload."
