@@ -1,5 +1,6 @@
 // AK.02: makes the Anki deck from the repertoire, through AnkiConnect.
 // Reads the database only. Run: npx tsx scripts/anki_export.ts
+// Options: --limit 10 (cards; default 20), --while-generating (AK.02.05).
 import { createHash } from "crypto";
 import { PrismaClient } from "@prisma/client";
 
@@ -10,6 +11,13 @@ const config = {
   modelName: "Chess Repertoire",
   cardLimit: 20,
 };
+
+// AK.02.05: one-off options for testing.
+const args = process.argv.slice(2);
+const limitIndex = args.indexOf("--limit");
+const cardLimit = limitIndex === -1 ? config.cardLimit : Number(args[limitIndex + 1]);
+if (!Number.isInteger(cardLimit) || cardLimit < 1) throw new Error("--limit needs a whole number of cards");
+const whileGenerating = args.includes("--while-generating");
 
 const prisma = new PrismaClient();
 
@@ -82,7 +90,7 @@ async function loadProfile() {
 async function main() {
   // AK.02: a tree being built is wiped and half there.
   const building = await prisma.repertoire.findFirst({ where: { generationStatus: { not: "IDLE" } } });
-  if (building) throw new Error(`${building.title} is ${building.generationStatus}; run again once the tree is built`);
+  if (building && !whileGenerating) throw new Error(`${building.title} is ${building.generationStatus}; run again once the tree is built`);
 
   await loadProfile();
   await anki("createDeck", { deck: config.deckName });
@@ -98,7 +106,7 @@ async function main() {
     where: { nodeId: { not: null }, targetMoveId: { not: null } },
     include: { node: true, targetMove: true },
     orderBy: { node: { cumProb: "desc" } },
-    take: config.cardLimit,
+    take: cardLimit,
   });
 
   const newNotes = [];
