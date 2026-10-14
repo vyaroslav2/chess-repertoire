@@ -8,7 +8,12 @@ import LichessMoveList from "./LichessMoveList";
 import EvalGauge from "./EvalGauge";
 import SettingsMenu from "./SettingsMenu";
 import { logFlightBox } from "../lib/logger";
-import { ankiGrade, ankiUndo, type AnkiCounts, type AnkiSession } from "../app/anki";
+import {
+  ankiGrade,
+  ankiUndo,
+  type AnkiCounts,
+  type AnkiSession,
+} from "../app/anki";
 
 interface SrsTrainerProps {
   dueStats: any[];
@@ -19,6 +24,9 @@ interface SrsTrainerProps {
 
 type TestStatus = "idle" | "wrong" | "correct" | "revealed";
 
+// A moving piece slides over 250ms, Lichess's default (UI.35).
+const slideMs = 250;
+
 // The session as it was just before a grade: all a grade changes (UN.01).
 interface UndoStep {
   stats: any[];
@@ -26,17 +34,27 @@ interface UndoStep {
   graduatedCount: number;
 }
 
-export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrainerProps) {
+export default function SrsTrainer({
+  dueStats,
+  demoMode = false,
+  anki,
+}: SrsTrainerProps) {
   const [stats, setStats] = useState(dueStats);
   const [graduatedCount, setGraduatedCount] = useState(0);
-  const [goodHitsByCard, setGoodHitsByCard] = useState<Record<string, number>>({});
+  const [goodHitsByCard, setGoodHitsByCard] = useState<Record<string, number>>(
+    {},
+  );
 
   // One step per grade, empty at page load; Ctrl + Z takes the last one back (UN.01, UN.02).
   const undoStepsRef = useRef<UndoStep[]>([]);
   // Anki mode (AK.07): Anki's counts (AK.12), or why there is no card (AK.14).
   const ankiMode = anki !== undefined;
-  const [ankiCounts, setAnkiCounts] = useState<AnkiCounts | null>(anki?.status === "card" ? anki.counts : null);
-  const [ankiError, setAnkiError] = useState(anki?.status === "error" ? anki.message : null);
+  const [ankiCounts, setAnkiCounts] = useState<AnkiCounts | null>(
+    anki?.status === "card" ? anki.counts : null,
+  );
+  const [ankiError, setAnkiError] = useState(
+    anki?.status === "error" ? anki.message : null,
+  );
   // The cards of the grades sent to Anki from this page, the only ones undo takes back (AK.13).
   const ankiGradedCardsRef = useRef<number[]>([]);
   // A request to Anki is on its way: further grades and undos wait for it.
@@ -56,6 +74,8 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
   const [currentPlyIndex, setCurrentPlyIndex] = useState(-1);
   const [isInitializing, setIsInitializing] = useState(true);
   const isInitializingRef = useRef(true);
+  // The opponent's move has started to slide in (the wait before it is over).
+  const slideStartedRef = useRef(false);
   const animTimerRef = useRef<NodeJS.Timeout | null>(null);
   const snapBackTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -75,24 +95,33 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
   const currentStat = stats[0];
   const lineMoves: string[] = currentStat?.lineMoves || [];
   const targetPlyIndex = lineMoves.length; // The ply they are supposed to guess from (after opponent's move)
-  const currentOpening = currentStat?.openingByPly?.[Math.max(0, currentPlyIndex)] ?? null;
-  const positionOpening = currentPlyIndex <= 0
-    ? "" // Starting position has no opening — nothing to show, not even "missing metadata".
-    : currentOpening?.openingMetadataStatus === "PRESENT"
-      ? [currentOpening.eco, currentOpening.openingName].filter(Boolean).join(" ")
-      : currentOpening?.openingMetadataStatus === "VALID_ABSENCE"
-        ? "No opening classification (Lichess Masters)"
-        : "";
+  const currentOpening =
+    currentStat?.openingByPly?.[Math.max(0, currentPlyIndex)] ?? null;
+  const positionOpening =
+    currentPlyIndex <= 0
+      ? "" // Starting position has no opening — nothing to show, not even "missing metadata".
+      : currentOpening?.openingMetadataStatus === "PRESENT"
+        ? [currentOpening.eco, currentOpening.openingName]
+            .filter(Boolean)
+            .join(" ")
+        : currentOpening?.openingMetadataStatus === "VALID_ABSENCE"
+          ? "No opening classification (Lichess Masters)"
+          : "";
   const hasPositionOpening = positionOpening !== "";
 
   // Derived lock state
-  const expectedPlyIndex = (testStatus === 'idle' || testStatus === 'wrong') ? targetPlyIndex : targetPlyIndex + 1;
+  const expectedPlyIndex =
+    testStatus === "idle" || testStatus === "wrong"
+      ? targetPlyIndex
+      : targetPlyIndex + 1;
   const isBrowsing = currentPlyIndex !== expectedPlyIndex;
-  const isLocked = testStatus !== 'idle' || isBrowsing || isInitializing;
+  const isLocked = testStatus !== "idle" || isBrowsing || isInitializing;
 
   useEffect(() => {
     // Initialize audio
-    moveSoundRef.current = new Audio("https://lichess1.org/assets/sound/standard/Move.mp3");
+    moveSoundRef.current = new Audio(
+      "https://lichess1.org/assets/sound/standard/Move.mp3",
+    );
   }, []);
 
   const playSound = () => {
@@ -100,7 +129,7 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
       moveSoundRef.current.currentTime = 0;
       // Browsers block audio autoplay before any user gesture (e.g. the very first
       // card's reveal on page load) — that's expected, not a bug, so stay quiet about it.
-      moveSoundRef.current.play().catch(e => {
+      moveSoundRef.current.play().catch((e) => {
         if (e instanceof DOMException && e.name === "NotAllowedError") return;
         console.error("Audio play failed:", e);
       });
@@ -125,6 +154,7 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
 
     setIsInitializing(true);
     isInitializingRef.current = true;
+    slideStartedRef.current = false;
 
     // Snap instantly to the position just before the opponent's last move —
     // no per-ply animation, matching a Lichess puzzle's instant setup.
@@ -147,7 +177,10 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
       // First move of the game: no opponent move to animate.
       setIsInitializing(false);
       isInitializingRef.current = false;
-      logFlightBox("LOAD_CARD_END_IMMEDIATE", { fen: tempChess.fen(), currentPlyIndex: priorMoves.length });
+      logFlightBox("LOAD_CARD_END_IMMEDIATE", {
+        fen: tempChess.fen(),
+        currentPlyIndex: priorMoves.length,
+      });
       return;
     }
 
@@ -157,6 +190,7 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
       const m = tempChess.move(finalMove);
       if (m) {
         setAnimationEnabled(true);
+        slideStartedRef.current = true;
         setFen(tempChess.fen());
         chess.load(tempChess.fen()); // Sync main instance
         setLastMove([m.from, m.to]);
@@ -164,11 +198,23 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
         playSound();
         logFlightBox("ANIMATE_MOVE", { san: finalMove, fen: tempChess.fen() });
       } else {
-        logFlightBox("ANIMATE_MOVE_FAIL", { san: finalMove, fen: tempChess.fen() });
+        logFlightBox("ANIMATE_MOVE_FAIL", {
+          san: finalMove,
+          fen: tempChess.fen(),
+        });
       }
-      setIsInitializing(false);
-      isInitializingRef.current = false;
-      logFlightBox("LOAD_CARD_ANIMATION_COMPLETE", { finalFen: tempChess.fen() });
+      // The intro ends once the move has slid in (UI.35); until then only Enter acts (GR.01).
+      animTimerRef.current = setTimeout(
+        () => {
+          animTimerRef.current = null;
+          setIsInitializing(false);
+          isInitializingRef.current = false;
+          logFlightBox("LOAD_CARD_ANIMATION_COMPLETE", {
+            finalFen: tempChess.fen(),
+          });
+        },
+        m ? slideMs : 0,
+      );
     }, 500);
 
     return () => {
@@ -188,7 +234,7 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
     const startTime = performance.now();
     const tempChess = new Chess();
     let lm: [string, string] | undefined = undefined;
-    
+
     // The total available moves include the lineMoves + the user's correct/wrong move if they made one
     const allMoves = [...lineMoves];
     if (testStatus === "correct" || testStatus === "revealed") {
@@ -204,7 +250,7 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
         if (m) lm = [m.from, m.to];
       }
     }
-    
+
     // Play sound if we browsed (visual check)
     if (fen !== tempChess.fen()) {
       playSound();
@@ -214,21 +260,37 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
     chess.load(tempChess.fen()); // Important: sync main chess instance so handleMove works correctly!
     setLastMove(lm);
 
-    logFlightBox("BROWSING_EFFECT", { currentPlyIndex, newFen: tempChess.fen(), timeToExecute: performance.now() - startTime });
+    logFlightBox("BROWSING_EFFECT", {
+      currentPlyIndex,
+      newFen: tempChess.fen(),
+      timeToExecute: performance.now() - startTime,
+    });
   }, [currentPlyIndex, currentStat, testStatus, targetPlyIndex, lineMoves]);
 
   // Keyboard Controller
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      )
+        return;
 
       // Ctrl + Z: back to the previous card (UN.02). Checked first, so the
       // animation skip below can't swallow it, and before the end screen's
       // early return, so it works from there too. By position, on any layout (UN.05).
-      if (e.code === "KeyZ" && e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
+      if (
+        e.code === "KeyZ" &&
+        e.ctrlKey &&
+        !e.altKey &&
+        !e.shiftKey &&
+        !e.metaKey
+      ) {
         e.preventDefault();
         if (ankiMode) {
-          logFlightBox("ACTION_ANKI_UNDO", { gradesLeft: ankiGradedCardsRef.current.length });
+          logFlightBox("ACTION_ANKI_UNDO", {
+            gradesLeft: ankiGradedCardsRef.current.length,
+          });
           if (ankiBusyRef.current) return;
           const gradedCardId = ankiGradedCardsRef.current.pop();
           if (gradedCardId === undefined) return; // Nothing graded on this page (AK.13).
@@ -236,7 +298,10 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
           return;
         }
         const step = undoStepsRef.current.pop();
-        logFlightBox("ACTION_UNDO", { undone: !!step, stepsLeft: undoStepsRef.current.length });
+        logFlightBox("ACTION_UNDO", {
+          undone: !!step,
+          stepsLeft: undoStepsRef.current.length,
+        });
         if (!step) return; // The first card: nothing to go back to.
         setStats(step.stats);
         setGoodHitsByCard(step.goodHitsByCard);
@@ -247,7 +312,12 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
 
       if (!currentStat) return;
 
-      logFlightBox("KEY_PRESS", { key: e.key, isInitializing: isInitializingRef.current, isBrowsing, testStatus });
+      logFlightBox("KEY_PRESS", {
+        key: e.key,
+        isInitializing: isInitializingRef.current,
+        isBrowsing,
+        testStatus,
+      });
 
       // Flip board (doesn't consume/affect any other state)
       if (e.key === "f" || e.key === "F") {
@@ -262,30 +332,24 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
         return;
       }
 
-      // Skip animation on any key press
+      // During the intro (the wait, then the opponent's slide), only Enter acts:
+      // it ends the intro and reveals the answer below. Other keys leave the slide alone (GR.01).
       if (isInitializingRef.current) {
+        if (e.key !== "Enter") return;
         if (animTimerRef.current) {
           clearTimeout(animTimerRef.current);
           animTimerRef.current = null;
         }
         setIsInitializing(false);
         isInitializingRef.current = false;
-        
-        logFlightBox("ANIMATION_SKIPPED", { keyTrigger: e.key });
-        
-        // Fast forward to the target position
-        const tempChess = new Chess();
-        let lm: [string, string] | undefined = undefined;
-        for (let i = 0; i < lineMoves.length; i++) {
-          const m = tempChess.move(lineMoves[i]);
-          if (m) lm = [m.from, m.to];
-        }
-        setAnimationEnabled(false);
-        setFen(tempChess.fen());
-        chess.load(tempChess.fen());
-        setLastMove(lm);
-        setCurrentPlyIndex(lineMoves.length);
-        return; // Consume the keypress so it doesn't trigger rating/reveal accidentally
+        // Mid-slide, animating to the answer replaces the slide: the opponent's piece
+        // lands at once and the answer slides in. In the wait, nothing moves yet,
+        // so the answer just appears. (Turning animation off doesn't stop a slide.)
+        if (!slideStartedRef.current) setAnimationEnabled(false);
+        logFlightBox("ANIMATION_SKIPPED", {
+          keyTrigger: e.key,
+          midSlide: slideStartedRef.current,
+        });
       }
 
       // Enter (Reveal or Good)
@@ -305,11 +369,17 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
               setTestStatus("revealed");
               setCurrentPlyIndex(targetPlyIndex + 1);
               playSound();
-              logFlightBox("ACTION_REVEAL", { success: true, san: currentStat.targetMove.san });
+              logFlightBox("ACTION_REVEAL", {
+                success: true,
+                san: currentStat.targetMove.san,
+              });
             }
           } catch (err) {
             console.error("Reveal error:", err);
-            logFlightBox("ACTION_REVEAL_ERROR", { san: currentStat.targetMove.san, error: String(err) });
+            logFlightBox("ACTION_REVEAL_ERROR", {
+              san: currentStat.targetMove.san,
+              error: String(err),
+            });
           }
         } else if (testStatus === "correct" || testStatus === "revealed") {
           // Default Enter to "Good" (rating 2)
@@ -335,8 +405,21 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
     // AK.14
     return (
       <div style={{ color: "white", textAlign: "center", marginTop: "50px" }}>
-        <h2 style={{ fontSize: "2rem", color: ankiError ? "#c62828" : "var(--lichess-green)" }}>{ankiError ? "No connection to Anki" : "You're all caught up!"}</h2>
-        <p style={{ fontSize: "1.1rem", marginTop: "10px", color: "var(--lichess-text-muted)" }}>
+        <h2
+          style={{
+            fontSize: "2rem",
+            color: ankiError ? "#c62828" : "var(--lichess-green)",
+          }}
+        >
+          {ankiError ? "No connection to Anki" : "You're all caught up!"}
+        </h2>
+        <p
+          style={{
+            fontSize: "1.1rem",
+            marginTop: "10px",
+            color: "var(--lichess-text-muted)",
+          }}
+        >
           {ankiError ?? "No more cards due in Anki."}
         </p>
       </div>
@@ -346,34 +429,65 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
   if (!currentStat) {
     return (
       <div style={{ color: "white", textAlign: "center", marginTop: "50px" }}>
-        <h2 style={{ fontSize: "2rem", color: "var(--lichess-green)" }}>{demoMode ? "Demo complete" : "You're all caught up!"}</h2>
-        <p style={{ fontSize: "1.1rem", marginTop: "10px", color: "var(--lichess-text-muted)" }}>
-          {demoMode ? `${graduatedCount} cards graduated locally. No database changes were made.` : "No more positions due for review."}
+        <h2 style={{ fontSize: "2rem", color: "var(--lichess-green)" }}>
+          {demoMode ? "Demo complete" : "You're all caught up!"}
+        </h2>
+        <p
+          style={{
+            fontSize: "1.1rem",
+            marginTop: "10px",
+            color: "var(--lichess-text-muted)",
+          }}
+        >
+          {demoMode
+            ? `${graduatedCount} cards graduated locally. No database changes were made.`
+            : "No more positions due for review."}
         </p>
       </div>
     );
   }
 
   const calcTurnColor = () => (chess.turn() === "w" ? "white" : "black");
-  const baseOrientation = currentStat.repertoire.color.toLowerCase() === "black" ? "black" : "white";
-  const orientation = flipped ? (baseOrientation === "black" ? "white" : "black") : baseOrientation;
+  const baseOrientation =
+    currentStat.repertoire.color.toLowerCase() === "black" ? "black" : "white";
+  const orientation = flipped
+    ? baseOrientation === "black"
+      ? "white"
+      : "black"
+    : baseOrientation;
 
   // By ply, as the moves. The answer's eval shows with the answer; a wrong move has none.
-  const moveEvals = (currentStat.evalByPly || []).concat(testStatus === 'correct' || testStatus === 'revealed' ? [currentStat.targetMove] : []);
+  const moveEvals = (currentStat.evalByPly || []).concat(
+    testStatus === "correct" || testStatus === "revealed"
+      ? [currentStat.targetMove]
+      : [],
+  );
 
   // The line for the settings menu: the move list without a wrong move (SM.02, SM.03).
-  const line = lineMoves.concat(testStatus === 'correct' || testStatus === 'revealed' ? [currentStat.targetMove.san] : []);
+  const line = lineMoves.concat(
+    testStatus === "correct" || testStatus === "revealed"
+      ? [currentStat.targetMove.san]
+      : [],
+  );
 
   const calcMovable = () => {
     // Only allow moves if we are idle or wrong (let them try again)
     // Completely lock the board during browsing or initialization
-    if (testStatus === "correct" || testStatus === "revealed" || isBrowsing || isInitializing) {
+    if (
+      testStatus === "correct" ||
+      testStatus === "revealed" ||
+      isBrowsing ||
+      isInitializing
+    ) {
       return { free: false, color: undefined, dests: new Map() };
     }
 
     const dests = new Map();
     chess.moves({ verbose: true }).forEach((m) => {
-      dests.set(m.from, dests.get(m.from) ? dests.get(m.from).concat(m.to) : [m.to]);
+      dests.set(
+        m.from,
+        dests.get(m.from) ? dests.get(m.from).concat(m.to) : [m.to],
+      );
     });
     return {
       free: false,
@@ -390,8 +504,13 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
       const move = chess.move({ from, to, promotion: "q" });
       if (move) {
         playSound();
-        logFlightBox("ACTION_USER_MOVE", { from, to, san: move.san, isCorrect: move.san === currentStat.targetMove.san });
-        
+        logFlightBox("ACTION_USER_MOVE", {
+          from,
+          to,
+          san: move.san,
+          isCorrect: move.san === currentStat.targetMove.san,
+        });
+
         if (move.san === currentStat.targetMove.san) {
           setFen(chess.fen());
           setLastMove([from, to]);
@@ -403,13 +522,13 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
           setLastMove([from, to]);
           setTestStatus("wrong");
           setCurrentPlyIndex(targetPlyIndex + 1);
-          
+
           // Snap back after a very short delay
           snapBackTimerRef.current = setTimeout(() => {
             snapBackTimerRef.current = null;
             chess.undo();
             setFen(chess.fen());
-            
+
             // Restore opponent's last move highlight
             const lineMoves = currentStat.lineMoves || [];
             if (lineMoves.length > 0) {
@@ -441,21 +560,26 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
   function sendToAnki(request: Promise<AnkiSession>) {
     if (ankiBusyRef.current) return;
     ankiBusyRef.current = true;
-    request.then((session) => {
-      logFlightBox("ANKI_SESSION", { status: session.status });
-      setStats(session.status === "card" ? [session.card] : []);
-      setAnkiCounts(session.status === "card" ? session.counts : null);
-      setAnkiError(session.status === "error" ? session.message : null);
-      setShowing((previous) => previous + 1);
-    }).finally(() => {
-      ankiBusyRef.current = false;
-    });
+    request
+      .then((session) => {
+        logFlightBox("ANKI_SESSION", { status: session.status });
+        setStats(session.status === "card" ? [session.card] : []);
+        setAnkiCounts(session.status === "card" ? session.counts : null);
+        setAnkiError(session.status === "error" ? session.message : null);
+        setShowing((previous) => previous + 1);
+      })
+      .finally(() => {
+        ankiBusyRef.current = false;
+      });
   }
 
   const handleRate = (quality: number) => {
     if (ankiMode) {
       if (ankiBusyRef.current) return;
-      logFlightBox("ACTION_ANKI_RATE", { quality, ankiCardId: currentStat.ankiCardId });
+      logFlightBox("ACTION_ANKI_RATE", {
+        quality,
+        ankiCardId: currentStat.ankiCardId,
+      });
       ankiGradedCardsRef.current.push(currentStat.ankiCardId);
       sendToAnki(ankiGrade(currentStat.ankiCardId, quality + 1));
       return;
@@ -466,13 +590,21 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
     const isEasy = quality === 3;
     const graduates = isEasy || (isGood && goodHits >= 1);
 
-    logFlightBox("ACTION_DEMO_RATE", { quality, cardId: cardKey, goodHits, graduates });
+    logFlightBox("ACTION_DEMO_RATE", {
+      quality,
+      cardId: cardKey,
+      goodHits,
+      graduates,
+    });
 
     undoStepsRef.current.push({ stats, goodHitsByCard, graduatedCount });
     setShowing((previous) => previous + 1);
 
     if (isGood && !graduates) {
-      setGoodHitsByCard((previous) => ({ ...previous, [cardKey]: goodHits + 1 }));
+      setGoodHitsByCard((previous) => ({
+        ...previous,
+        [cardKey]: goodHits + 1,
+      }));
     } else if (quality === 0) {
       setGoodHitsByCard((previous) => ({ ...previous, [cardKey]: 0 }));
     }
@@ -486,16 +618,37 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px", position: "relative" }}>
-      
-      <SettingsMenu line={line} ply={Math.min(Math.max(currentPlyIndex, 0), line.length)} fen={fen} orientation={orientation} />
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: "8px",
+        position: "relative",
+      }}
+    >
+      <SettingsMenu
+        line={line}
+        ply={Math.min(Math.max(currentPlyIndex, 0), line.length)}
+        fen={fen}
+        orientation={orientation}
+      />
 
       {testStatus !== "idle" && (
         <div
           style={{
-            position: "fixed", bottom: "16px", left: "16px",
-            width: "clamp(12px, 0.9vw, 18px)", height: "clamp(12px, 0.9vw, 18px)", borderRadius: "50%",
-            background: testStatus === "wrong" ? "#c62828" : testStatus === "correct" ? "var(--lichess-green)" : "#f9a825",
+            position: "fixed",
+            bottom: "16px",
+            left: "16px",
+            width: "clamp(12px, 0.9vw, 18px)",
+            height: "clamp(12px, 0.9vw, 18px)",
+            borderRadius: "50%",
+            background:
+              testStatus === "wrong"
+                ? "#c62828"
+                : testStatus === "correct"
+                  ? "var(--lichess-green)"
+                  : "#f9a825",
             border: `1px solid ${testStatus === "wrong" ? "#8e1b1b" : testStatus === "correct" ? "#456b19" : "#b87a14"}`,
             zIndex: 100,
           }}
@@ -505,36 +658,52 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
 
       {/* Board row: only the board is in the flow, so only the board is centred,
           across and down (UI.01). Everything else hangs off it. */}
-      <div style={{ 
-        display: "flex", 
-        alignItems: "flex-start", 
-        justifyContent: "center", 
-        width: "max-content",
-        height: "var(--board-size)",
-        margin: "0 auto",
-        position: "relative",
-      }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "center",
+          width: "max-content",
+          height: "var(--board-size)",
+          margin: "0 auto",
+          position: "relative",
+        }}
+      >
         {/* Status line, in the free space left of the board (temporary) */}
-        <p className="demo-status-hover" style={{
-          position: "absolute", right: "calc(100% + 40px)", top: 0, width: "280px",
-          textAlign: "right", color: "var(--lichess-text-muted)",
-        }}>
+        <p
+          className="demo-status-hover"
+          style={{
+            position: "absolute",
+            right: "calc(100% + 40px)",
+            top: 0,
+            width: "280px",
+            textAlign: "right",
+            color: "var(--lichess-text-muted)",
+          }}
+        >
           {ankiMode && ankiCounts
             ? `${baseOrientation === "black" ? "Black" : "White"} to move · ${ankiCounts.newCount} new · ${ankiCounts.learnCount} learning · ${ankiCounts.reviewCount} due`
             : demoMode
-            ? `Black to move · ${stats.length} cards remaining · ${graduatedCount} graduated · Good ${goodHitsByCard[currentStat.demoId ?? currentStat.id] ?? 0}/2`
-            : `Position 1 of ${stats.length}`}
+              ? `Black to move · ${stats.length} cards remaining · ${graduatedCount} graduated · Good ${goodHitsByCard[currentStat.demoId ?? currentStat.id] ?? 0}/2`
+              : `Position 1 of ${stats.length}`}
         </p>
 
         {/* Opening name, 4px above the board (UI.04) */}
         <div
           style={{
-            position: "absolute", left: 0, bottom: "calc(100% + 4px)",
-            width: "var(--board-size)", maxWidth: "100%",
-            color: "var(--opening-text)", fontSize: "14px", lineHeight: "20px",
+            position: "absolute",
+            left: 0,
+            bottom: "calc(100% + 4px)",
+            width: "var(--board-size)",
+            maxWidth: "100%",
+            color: "var(--opening-text)",
+            fontSize: "14px",
+            lineHeight: "20px",
             // Inter's recommended tracking at 14px (rsms.me/inter "dynamic metrics"): -0.087px
             letterSpacing: "-0.0062em",
-            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
             visibility: hasPositionOpening ? "visible" : "hidden",
           }}
           title={hasPositionOpening ? positionOpening : undefined}
@@ -542,7 +711,16 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
           {hasPositionOpening ? positionOpening : "ECO Opening Name"}
         </div>
 
-        <div className={`board-themed ${testStatus !== 'idle' ? 'board-locked' : ''}`} style={{ width: "var(--board-size)", height: "var(--board-size)", boxShadow: "var(--glass-shadow)", position: "relative", zIndex: 1 }}>
+        <div
+          className={`board-themed ${testStatus !== "idle" ? "board-locked" : ""}`}
+          style={{
+            width: "var(--board-size)",
+            height: "var(--board-size)",
+            boxShadow: "var(--glass-shadow)",
+            position: "relative",
+            zIndex: 1,
+          }}
+        >
           <Chessground
             width="100%"
             height="100%"
@@ -554,7 +732,7 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
               highlight: { lastMove: true, check: true },
               drawable: { enabled: true, visible: true },
               coordinates: true,
-              animation: { enabled: animationEnabled, duration: 250 },
+              animation: { enabled: animationEnabled, duration: slideMs },
               movable: {
                 ...calcMovable(),
                 events: {
@@ -566,29 +744,48 @@ export default function SrsTrainer({ dueStats, demoMode = false, anki }: SrsTrai
         </div>
 
         {/* Eval gauge between the board and the move list, 4px from each (UI.31); hidden until 'e' (UI.34) */}
-        <div className="trainer-gauge" style={{ visibility: evalsShown ? "visible" : "hidden" }}>
-          <EvalGauge evaluation={moveEvals[currentPlyIndex - 1] ?? null} orientation={orientation} />
+        <div
+          className="trainer-gauge"
+          style={{ visibility: evalsShown ? "visible" : "hidden" }}
+        >
+          <EvalGauge
+            evaluation={moveEvals[currentPlyIndex - 1] ?? null}
+            orientation={orientation}
+          />
         </div>
 
         {/* Move List Side Panel — out of the flow so only the board is centred (UI.01, UI.02) */}
-        <div className="trainer-move-list" style={{
-          position: "absolute",
-          top: 0,
-          width: "318.4px", // UI.26: 220px plus room for the evals (398 screen px)
-          height: "var(--board-size)", 
-          overflow: "hidden",
-          backgroundColor: "var(--lichess-panel-bg)",
-        }}>
-          <LichessMoveList 
-            moves={(currentStat?.lineMoves || []).concat(testStatus === 'correct' || testStatus === 'revealed' || testStatus === 'wrong' ? [
-              testStatus === 'wrong' && lastMove ? chess.history()[chess.history().length-1] : currentStat.targetMove.san
-            ] : [])}
+        <div
+          className="trainer-move-list"
+          style={{
+            position: "absolute",
+            top: 0,
+            width: "318.4px", // UI.26: 220px plus room for the evals (398 screen px)
+            height: "var(--board-size)",
+            overflow: "hidden",
+            backgroundColor: "var(--lichess-panel-bg)",
+          }}
+        >
+          <LichessMoveList
+            moves={(currentStat?.lineMoves || []).concat(
+              testStatus === "correct" ||
+                testStatus === "revealed" ||
+                testStatus === "wrong"
+                ? [
+                    testStatus === "wrong" && lastMove
+                      ? chess.history()[chess.history().length - 1]
+                      : currentStat.targetMove.san,
+                  ]
+                : [],
+            )}
             evals={evalsShown ? moveEvals : undefined}
             currentPlyIndex={currentPlyIndex - 1}
             onMoveClick={(index) => {
-              logFlightBox("ACTION_CLICK_MOVE_LIST", { targetIndex: index + 1 });
+              logFlightBox("ACTION_CLICK_MOVE_LIST", {
+                targetIndex: index + 1,
+              });
               setCurrentPlyIndex(index + 1);
-            }} 
+            }}
           />
         </div>
       </div>
