@@ -36,10 +36,49 @@ After the deck is made, cards and database rows are not linked. Deleting a card 
 AK.06 **A new computer.**
 AnkiWeb sync carries the note type and its fields. On any device, the app finds our cards with `note:"Chess Repertoire"`, whatever the deck is called.
 
-AK.07 **Reviews from the web app.** #roadmap
-The app asks AnkiConnect for the next due card in the deck, shows it, and sends the grade back with `answerCards`. It asks afresh on each page load and each next card. ==🟠If that proves awkward, it syncs every 30s instead.==
+AK.07 **Reviews from the web app.**
+Anki's own reviewer runs the session; the web app is its screen. `/` trains from Anki.
+- The app starts Anki's reviewer on the deck (`guiDeckReview`) and reads the card it shows (`guiCurrentCard`). Anki picks the card, with its learning steps and daily limits.
+- A grade goes back with `guiShowAnswer` then `guiAnswerCard`, as if pressed in Anki. 1–4 are Again, Hard, Good, Easy; Enter is Good.
+- The deck is found by note type (AK.06): the deck of the first `Chess Repertoire` card. The app does not switch profiles.
+- The app asks afresh on each page load and after each grade, so it never holds a stale card. No polling.
+- Why not `answerCards`: then the app would pick the order, not Anki, and Anki would log each answer as taking 0s.
+- Downside: Anki's window sits on the review screen while you train.
+- In the app since 2026-10-14.
 
-AK.08 **The test.** #roadmap
+AK.09 **The card's timer.**
+Anki times each answer from when it showed the card. The app restarts that timer (`guiStartCardTimer`) when it shows the card, so a card left open in Anki overnight is not logged as a long answer.
+
+AK.10 **A card changed in Anki.**
+Before a grade, the app checks that Anki's current card is still the one on screen. If not (graded in Anki meanwhile, say), the grade is dropped and the app shows Anki's current card.
+
+AK.11 **Line details.**
+The card has the line, the opening and the answer. The evals (UI.26) and the opening at each ply (UI.04) come from the database: the app finds the node whose SAN line matches, read-only.
+- Not found (the tree was rebuilt without that line): the card still works. The opening shows at the end of the line only, and there are no evals.
+- This reads the database; it does not link to it (AK.05). Card state stays in Anki.
+
+AK.12 **Status line.**
+Left of the board, Anki's counts for the deck: `Black to move · 12 new · 3 learning · 5 due`.
+
+AK.13 **Undo.**
+`Ctrl + Z` is Anki's undo (`guiUndo`): the last grade is taken back in Anki and its card comes back. Replaces the local history of [[UN]] on `/`.
+- Only grades made on this page are undone. Anki's undo would take back anything, so on the page's first card nothing happens (UN.02).
+- Anki's reviewer does not show the undone card until its window has focus. So once the undo is saved, the app restarts the reviewer (`guiDeckReview`); the undone card heads Anki's queue.
+- In the app since 2026-10-14.
+
+AK.16 **Waiting for Anki.**
+Anki's GUI calls return before the reviewer has moved on. After a grade, the app waits for another card, or the end, for up to 3s. If the same card rightly comes back (Again, nothing else due), it waits until the grade is saved, plus 300ms.
+- A grade or undo takes about 0.5s. The old card stays on screen meanwhile; keys wait for it.
+
+AK.14 **Errors.**
+- Anki not running: "Anki is not running. Start Anki, then reload."
+- No `Chess Repertoire` cards in the open profile: "No Chess Repertoire cards in profile [X]. Open profile User test New in Anki, then reload."
+- Nothing due: "You're all caught up!", "No more cards due in Anki."
+
+AK.15 **The demo.**
+The trainer without Anki moves to `/demo`, unchanged: its own queue, nothing saved.
+
+AK.08 **The test.**
 The integration works when:
 1. The app gets the next card from Anki.
 2. It shows the card's fields correctly.
@@ -47,3 +86,5 @@ The integration works when:
 4. The grade reaches Anki.
 5. The card's state in Anki changes exactly as if it had been graded in Anki.
 6. Deleting a card in Anki leaves the database unchanged.
+
+Checked 2026-10-14: 1–5. The review log for a grade from the app reads ease 3, a 10-minute step, and 15.1s, as from Anki's own buttons. 6 holds by design: nothing on `/` writes to the database. Not yet tried by deleting a card.
