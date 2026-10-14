@@ -29,7 +29,8 @@ def chessUndo(self, cardId):
         # AD.05: block. Undo nothing, and say what the next step is.
         return {"undone": False, "step": step, "isGrade": is_grade}
 
-    # As Anki's own undo (aqt/operations/collection.py), but with our tooltip (AD.06).
+    # As Anki's own undo (aqt/operations/collection.py), but with no tooltip:
+    # the page shows its own message (AD.06, MS.01).
     out = col.undo()
     mw.update_undo_actions()
     gui_hooks.state_did_undo(out)
@@ -38,18 +39,7 @@ def chessUndo(self, cardId):
     # browser has it. Redraw now, so the undone card is back on screen (AD.04).
     if mw.state == "review":
         mw.reviewer.refresh_if_needed()
-    show_our_tooltip("Grade undone from the web page")
     return {"undone": True}
-
-
-def show_our_tooltip(message):
-    # AD.06, AD.12: always shown, at the bottom left of the screen. Anki places
-    # its tooltips by its main window, which goes wrong when that is minimised.
-    anki_tooltip(message)
-    label = aqt.utils._tooltipLabel
-    if label is not None:
-        screen = mw.app.primaryScreen().availableGeometry()
-        label.move(screen.left(), screen.bottom() - 100)
 
 
 def tooltip_unless_browser_in_front(*args, **kwargs):
