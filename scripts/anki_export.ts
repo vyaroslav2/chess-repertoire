@@ -80,6 +80,10 @@ async function loadProfile() {
 }
 
 async function main() {
+  // AK.02: a tree being built is wiped and half there.
+  const building = await prisma.repertoire.findFirst({ where: { generationStatus: { not: "IDLE" } } });
+  if (building) throw new Error(`${building.title} is ${building.generationStatus}; run again once the tree is built`);
+
   await loadProfile();
   await anki("createDeck", { deck: config.deckName });
   await ensureModel();
@@ -113,7 +117,6 @@ async function main() {
         Answer: numberMove(stat.targetMove.san, sans.length),
         Key: key,
       },
-      tags: ["chess-repertoire"],
     });
   }
 
