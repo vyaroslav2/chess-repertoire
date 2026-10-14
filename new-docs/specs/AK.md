@@ -66,7 +66,7 @@ Left of the board, Anki's counts for the deck: `Black to move · 12 new · 3 lea
 ==AK.12.01 //- #roadmap  polish the status line -//==
 
 AK.13 **Undo.**
-`Ctrl + Z` is Anki's undo (`guiUndo`): the last grade is taken back in Anki and its card comes back. Replaces the local history of [[UN]] on `/`.
+`Ctrl + Z` takes back the last grade made on the page, through our Anki add-on ([[AD]]), and only if that grade is Anki's next undo step. Its card comes back. Replaces the local history of [[UN]] on `/`.
 - Only grades made on this page are undone. On the page's first card nothing happens (UN.02).
 
 
@@ -146,13 +146,14 @@ Which one you mean decides how deep the add-on goes. Either way, the decision we
 
 
 
-
+%%
 "Send `Ctrl + Z` only once before Anki replies" is already the case: further presses are ignored while Anki works (AK.16).
 Suggested text for AK.13:
 "- If an undo doesn't take back the expected grade (the card's review count doesn't go down), Anki has undone some other change, e.g. an edit made in Browse. The page then shows: 'Anki's last change was not a grade, so Anki undid that instead. To get it back, use Edit → Redo in Anki. Undo here is off until you reload the page.' From then on, `Ctrl + Z` does nothing until the page is reloaded.
-- Why not an add-on that checks first: this is an edge case, and Anki's own `Ctrl + Z` behaves the same way. The block keeps it to one wrong undo, and Anki's redo puts it right."%%
+- Why not an add-on that checks first: this is an edge case, and Anki's own `Ctrl + Z` behaves the same way. The block keeps it to one wrong undo, and Anki's redo puts it right."
+%%
 
-- After an undo, Anki's study screen doesn't redraw until you click on Anki's window, so it would still show the old card. The app therefore reopens the study screen (`guiDeckReview`); the undone card comes first.
+- After an undo, Anki's study screen doesn't redraw until you click on Anki's window. The add-on redraws it at once, so the undone card is back on screen ([[AD|AD.04]]).
 - In the app since 2026-10-14.
 
 ==`AK.13.01` //- #roadmap polish undo tooltip -//==
