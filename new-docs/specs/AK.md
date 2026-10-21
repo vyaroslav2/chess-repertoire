@@ -12,12 +12,13 @@ Anki keeps each card's state: the queue, intervals, due dates and grades. The we
 - The app never opens or writes Anki's collection file itself.
 
 AK.02 **The deck.**
-20 cards: the 20 Black replies with the highest `cumProb`, from 1. e4 c6 (64%) down to about 1%. One card per reply (`RepertoirePositionStat`).
+One card per whole line: 59 cards. A line runs from move 1 to a Black reply no other reply goes on from (`RepertoirePositionStat`). Cards are added line by line, in the same order as on `/demo` (AK.15), so Anki shows new cards in that order.
 - Deck: `Chess Repertoire`. Profile: `User test New` while we test. 
+- Since 2026-10-22. Before that, 20 cards, one per reply: the 20 replies with the highest `cumProb`. That deck was deleted; a backup with its review history was kept outside the repo (`chess-repertoire-old-deck.apkg`).
 
 - Made by `scripts/anki_export.ts`. It reads the database and writes nothing to it.
 - It refuses to run unless every repertoire's `generationStatus` is `IDLE`. A tree being built is wiped and only half there; on 2026-10-14 a run during generation made a deck of 15 cards.
-- A one-off for testing during a run: `npx tsx scripts/anki_export.ts --limit 10 --while-generating`. `--limit` sets the number of cards (20 if left out); `--while-generating` skips the check above. The cards are correct, but they are the top 10 of the tree built so far, not the real top 10. 
+- A one-off for testing during a run: `npx tsx scripts/anki_export.ts --limit 10 --while-generating`. `--limit` sets the number of cards (every line if left out); `--while-generating` skips the check above. The cards are correct, but they are the lines of the tree built so far. The 59 cards of 2026-10-22 were made this way: the repertoire still read `GENERATING`, but nothing had run since 2026-10-15. 
 
 AK.03 **The note type.**
 `Chess Repertoire`, with four fields:
@@ -27,6 +28,7 @@ AK.03 **The note type.**
 - `Key`: see AK.04. Not shown on the card.
 
 The front shows the line and the opening; the back adds the answer. So a card can still be reviewed in Anki itself.
+- For a whole line (AK.02), `Line` is the line up to its last reply and `Answer` is that reply. The page joins them and asks each of your moves in turn (AK.15).
 
 AK.04 **The key.**
 SHA-1 of the line's UCI history and the answer's UCI, joined by a space: `e2e4 c7c6 d2d4 d7d5`. One key per reply. The script works out the key for each reply and skips any reply whose key is already in Anki. The script looks for the key among all our notes (`note:"Chess Repertoire"`), in any deck, not only in this deck. So a card you moved to another deck still counts as "already there".
@@ -173,6 +175,7 @@ AK.14 **Errors.**
 AK.15 **The demo.**
 The trainer without Anki moves to `/demo`, unchanged: its own queue, nothing saved.
 - #note Temporary, since 2026-10-21: on `/demo` a card is a whole line, from move 1 to its end. You play each of your moves in turn ([[GR|GR.01]]–[[GR|GR.03]] for each). A move played or revealed goes straight on to the opponent's reply. The line ends at your last move, with no opponent move after it; only then do `1`–`4` and `Enter` grade ([[GR|GR.04]]). There is no cue for the end. Source: `fetchDemoLines` in `app/actions.ts`, `lineStepCard` in `components/SrsTrainer.tsx`.
+- Since 2026-10-22, `/` trains whole lines the same way, from Anki's cards (AK.02). `trainerCard` in `app/anki.ts` gives the line (`fullLine`). A grade or `Ctrl + Z` brings Anki's next card from move 1.
 
 AK.08 **The test.**
 The integration works when:

@@ -27,8 +27,8 @@ type TestStatus = "idle" | "wrong" | "correct" | "revealed";
 // A moving piece slides over 250ms, Lichess's default (UI.35).
 const slideMs = 250;
 
-// Temporary (/demo): a card that is a whole line is played one of your moves
-// at a time. Your first move's ply in the line, and the step of your last move.
+// A card that is a whole line (AK.02, AK.15) is played one of your moves at a
+// time. Your first move's ply in the line, and the step of your last move.
 const firstOwnPly = (card: any) => (card.repertoire.color.toLowerCase() === "black" ? 1 : 0);
 const lastLineStep = (card: any) => (card.fullLine.length - 1 - firstOwnPly(card)) / 2;
 
@@ -615,6 +615,7 @@ export default function SrsTrainer({
         setStats(session.status === "card" ? [session.card] : []);
         setAnkiCounts(session.status === "card" ? session.counts : null);
         setAnkiError(session.status === "error" ? session.message : null);
+        setLineStep(0);
         setShowing((previous) => previous + 1);
       })
       .finally(() => {

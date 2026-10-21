@@ -67,7 +67,9 @@ function sansOf(numbered: string) {
   return plainText(numbered).split(" ").filter(token => token !== "" && !/^\d+\.(\.\.)?$/.test(token));
 }
 
-// The card in the trainer's shape, with the line's evals and openings from the database (AK.11).
+// The card in the trainer's shape, with the line's evals and openings from the
+// database (AK.11). A card is a whole line (AK.02): the trainer asks each of
+// your moves in turn (AK.15), so it gets the line and its evals by ply.
 async function trainerCard(card: ReviewerCard) {
   const lineMoves = sansOf(card.fields.Line.value);
   const [answerSan] = sansOf(card.fields.Answer.value);
@@ -92,14 +94,17 @@ async function trainerCard(card: ReviewerCard) {
     evalByPly = Array(lineMoves.length).fill(null);
   }
 
+  const answerEval = { cp: targetMove?.cp ?? null, mate: targetMove?.mate ?? null };
   return {
     id: `anki-${card.cardId}`,
     ankiCardId: card.cardId,
     lineMoves,
-    targetMove: { san: answerSan, cp: targetMove?.cp ?? null, mate: targetMove?.mate ?? null },
+    targetMove: { san: answerSan, ...answerEval },
     repertoire: { color },
     openingByPly,
     evalByPly,
+    fullLine: [...lineMoves, answerSan],
+    lineEvalByPly: [...evalByPly, answerEval],
   };
 }
 

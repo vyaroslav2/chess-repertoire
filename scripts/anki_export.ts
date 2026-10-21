@@ -1,6 +1,6 @@
-// AK.02: makes the Anki deck from the repertoire, through AnkiConnect.
-// Reads the database only. Run: npx tsx scripts/anki_export.ts
-// Options: --limit 10 (cards; default 20), --while-generating (AK.02.05).
+// AK.02: makes the Anki deck from the repertoire, through AnkiConnect: one card
+// per whole line. Reads the database only. Run: npx tsx scripts/anki_export.ts
+// Options: --limit 10 (cards; default every line), --while-generating (AK.02.05).
 import { createHash } from "crypto";
 import { PrismaClient } from "@prisma/client";
 
@@ -9,14 +9,13 @@ const config = {
   profile: "User test New",
   deckName: "Chess Repertoire",
   modelName: "Chess Repertoire",
-  cardLimit: 20,
 };
 
 // AK.02.05: one-off options for testing.
 const args = process.argv.slice(2);
 const limitIndex = args.indexOf("--limit");
-const cardLimit = limitIndex === -1 ? config.cardLimit : Number(args[limitIndex + 1]);
-if (!Number.isInteger(cardLimit) || cardLimit < 1) throw new Error("--limit needs a whole number of cards");
+const cardLimit = limitIndex === -1 ? Infinity : Number(args[limitIndex + 1]);
+if (limitIndex !== -1 && (!Number.isInteger(cardLimit) || cardLimit < 1)) throw new Error("--limit needs a whole number of cards");
 const whileGenerating = args.includes("--while-generating");
 
 const prisma = new PrismaClient();
@@ -101,35 +100,51 @@ async function main() {
   const notes = await anki<{ fields: Record<string, { value: string }> }[]>("notesInfo", { notes: noteIds });
   const existingKeys = new Set(notes.map(note => note.fields.Key?.value));
 
-  // AK.02: the replies most likely to be met.
-  const stats = await prisma.repertoirePositionStat.findMany({
+  // AK.02: every reply, as its line before it plus the reply.
+  const replies = (await prisma.repertoirePositionStat.findMany({
     where: { nodeId: { not: null }, targetMoveId: { not: null } },
     include: { node: true, targetMove: true },
-    orderBy: { node: { cumProb: "desc" } },
-    take: cardLimit,
-  });
-
-  const newNotes = [];
-  for (const stat of stats) {
+  })).map(stat => {
     if (!stat.node || !stat.targetMove?.uci) throw new Error(`Incomplete repertoire card ${stat.id}`);
     const sans = stat.node.displayPgn === "" ? [] : stat.node.displayPgn.split(/\s+/);
-    const historyUcis = stat.node.history === "" ? [] : stat.node.history.split(/\s+/);
-    const key = cardKey(historyUcis, stat.targetMove.uci);
+    return { node: stat.node, answerSan: stat.targetMove.san, answerUci: stat.targetMove.uci, sans, fullLine: [...sans, stat.targetMove.san] };
+  });
+
+  // AK.02: a line ends at a reply no other reply goes on from. One card per
+  // line, the line's last reply as the answer.
+  const routes = replies.map(reply => reply.sans.join(" "));
+  const lines = replies.filter(reply => !routes.some(route => route.startsWith(`${reply.fullLine.join(" ")} `)));
+
+  // Line by line, as on /demo (AK.15): Anki shows new cards in the order added.
+  lines.sort((a, b) => {
+    const sharedLength = Math.min(a.fullLine.length, b.fullLine.length);
+    for (let index = 0; index < sharedLength; index++) {
+      const comparison = a.fullLine[index].localeCompare(b.fullLine[index]);
+      if (comparison !== 0) return comparison;
+    }
+    return a.fullLine.length - b.fullLine.length;
+  });
+  const chosen = lines.slice(0, cardLimit);
+
+  const newNotes = [];
+  for (const line of chosen) {
+    const historyUcis = line.node.history === "" ? [] : line.node.history.split(/\s+/);
+    const key = cardKey(historyUcis, line.answerUci);
     if (existingKeys.has(key)) continue;
     newNotes.push({
       deckName: config.deckName,
       modelName: config.modelName,
       fields: {
-        Line: numberMoves(sans),
-        Opening: stat.node.openingName ?? "",
-        Answer: numberMove(stat.targetMove.san, sans.length),
+        Line: numberMoves(line.sans),
+        Opening: line.node.openingName ?? "",
+        Answer: numberMove(line.answerSan, line.sans.length),
         Key: key,
       },
     });
   }
 
   if (newNotes.length > 0) await anki("addNotes", { notes: newNotes });
-  console.log(`"[FINISHED] ${newNotes.length} cards added to ${config.deckName} (profile ${config.profile}); ${stats.length - newNotes.length} already there."`);
+  console.log(`"[FINISHED] ${newNotes.length} cards added to ${config.deckName} (profile ${config.profile}); ${chosen.length - newNotes.length} already there."`);
 }
 
 main().catch(error => {
