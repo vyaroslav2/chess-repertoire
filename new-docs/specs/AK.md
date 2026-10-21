@@ -44,7 +44,7 @@ AnkiWeb sync carries the note type and its fields. On any device, the app finds 
 AK.07 **Reviews from the web app.**
 Anki's own reviewer runs the session; the web app is its screen. `/` trains from Anki.
 - The app opens Anki's study screen on the deck (`guiDeckReview`) and shows the card Anki shows there (`guiCurrentCard`). Anki picks the card, with its learning steps and daily limits.
-- Cards are answered and graded as in [[GR]]. ==🔵Each grade goes to Anki with `guiShowAnswer` then `guiAnswerCard`, as if pressed in Anki.==
+- Cards are answered and graded as in [[GR]]. Each grade goes to Anki with `guiShowAnswer` then `guiAnswerCard`, as if pressed in Anki.
 - The deck is found by note type (AK.06): the deck of the first `Chess Repertoire` card. The app does not switch profiles.
 ==`AK.07.02` //- #roadmap multi decks support. -//==
 - The app asks Anki only when it needs a card: on page load and after each grade. No polling.
@@ -75,23 +75,10 @@ AK.13 **Undo.**
 
 
 
-==`AK.13.12`== 
-==//- the problem is that I don't want to alter native Anki tooltip, I only want to alter it when our web app is up and running. perhaps we can switch it on/off depending whether we use our app or not. hopefully -//==
-%%Yes, and it can be even narrower than on/off. The page wouldn't use AnkiConnect's `guiUndo` any more, but our own action, say `chessUndo`. That action runs Anki's undo itself, without Anki's tooltip, and shows our own instead. So only undos asked for by the page get our tooltip. `Ctrl + Z` in Anki's own window still goes through Anki's code, with its native tooltip, whether the page is open or not.
-That's better than a switch: there's no state to forget. A switch left on after you close the page would keep changing Anki's tooltips. Per call, nothing needs turning off.
-Our tooltip is a small window of our own, so we can style it as we like. Like Anki's, it floats on top of the browser.%%
 
 
-==`AK.13.13`== 
-==//- I wanted to polish Anki's tooltips anyway, I wouldn't leave them as it is. it seems the addon is unavoidable. if so, we are close to make the decision on this -- we will write our our addon. and we'll decide the logic later, either stick to anki's native behaviour or to block ctrl+z if it is not answer undo. we'll figure out what's better/simpler later. am I right in my deduction? we need to figure out no addon or addon before we can proceed -//== 
-%%Yes, your deduction is right, with one note.
-- Right: nothing outside Anki can change Anki's tooltips. If you want to polish them, an add-on is unavoidable.
-- Right: add-on or not comes first. The undo logic depends on it. With the add-on, "check before undoing" becomes possible. Without it, the page can only notice a wrong undo after it has happened, and block.
-- Right: the undo logic can wait. Once the add-on exists, either logic is a few lines.
-The note: "polish Anki's tooltips" can mean two things.
-1. Only the tooltips the page causes: a grade or an undo from the page (AK.13.12). Easy, and Anki stays native otherwise.
-2. All Anki's tooltips, also when you use Anki on its own. Also possible, but that's changing Anki itself, not just our link to it. It works by replacing Anki's tooltip code at start-up, and an Anki update could break it.
-Which one you mean decides how deep the add-on goes. Either way, the decision we need now is "add-on: yes". The rest can follow.%%
+
+
 
 
 
