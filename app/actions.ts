@@ -103,6 +103,7 @@ export async function fetchDemoPositions(repertoireId: string) {
 
     return {
       ...stat,
+      targetMove: stat.targetMove,
       demoId: branch.id,
       node: branch.toNode,
       lineMoves,
@@ -125,6 +126,25 @@ export async function fetchDemoPositions(repertoireId: string) {
     return a.lineMoves.length - b.lineMoves.length;
   });
   return cards;
+}
+
+// Temporary: on /demo a card is a whole line, from move 1 to its end. A line
+// ends at a Black move no card goes on from. Kept in the preorder above.
+export async function fetchDemoLines(repertoireId: string) {
+  const positions = await fetchDemoPositions(repertoireId);
+  const fullLine = (card: (typeof positions)[number]) => [...card.lineMoves, card.targetMove.san];
+  const routes = positions.map(card => card.lineMoves.join(" "));
+  return positions
+    .filter(card => {
+      const route = fullLine(card).join(" ");
+      return !routes.some(other => other.startsWith(`${route} `));
+    })
+    .map(card => ({
+      ...card,
+      fullLine: fullLine(card),
+      // By ply, the answer's eval last.
+      lineEvalByPly: [...card.evalByPly, { cp: card.targetMove.cp, mate: card.targetMove.mate }],
+    }));
 }
 
 export async function updateSrsStats(statId: string, quality: number) {

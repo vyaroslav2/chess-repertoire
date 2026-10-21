@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import Chessground from "@react-chess/chessground";
 import "chessground/assets/chessground.base.css";
 import { Chess } from "chess.js";
@@ -26,6 +26,25 @@ type TestStatus = "idle" | "wrong" | "correct" | "revealed";
 
 // A moving piece slides over 250ms, Lichess's default (UI.35).
 const slideMs = 250;
+
+// Temporary (/demo): a card that is a whole line is played one of your moves
+// at a time. Your first move's ply in the line, and the step of your last move.
+const firstOwnPly = (card: any) => (card.repertoire.color.toLowerCase() === "black" ? 1 : 0);
+const lastLineStep = (card: any) => (card.fullLine.length - 1 - firstOwnPly(card)) / 2;
+
+// The card for your move number `step` in the line: the moves before it as the
+// line, that move as the answer. Any other card as it is.
+function lineStepCard(card: any, step: number) {
+  if (!card?.fullLine) return card;
+  const ply = firstOwnPly(card) + 2 * step;
+  const answerEval = card.lineEvalByPly[ply];
+  return {
+    ...card,
+    lineMoves: card.fullLine.slice(0, ply),
+    targetMove: { ...card.targetMove, san: card.fullLine[ply], cp: answerEval?.cp ?? null, mate: answerEval?.mate ?? null },
+    evalByPly: card.lineEvalByPly.slice(0, ply),
+  };
+}
 
 // The session as it was just before a grade: all a grade changes (UN.01).
 interface UndoStep {
@@ -104,7 +123,15 @@ export default function SrsTrainer({
   // Sound ref
   const moveSoundRef = useRef<HTMLAudioElement | null>(null);
 
-  const currentStat = stats[0];
+  // Which of your moves in a whole-line card is asked; 0 at each new card.
+  const [lineStep, setLineStep] = useState(0);
+  const currentStat = useMemo(() => lineStepCard(stats[0], lineStep), [stats[0], lineStep]);
+  // Grades wait for the line's end: your last move, with no White move after it.
+  const isLastStep = !currentStat?.fullLine || lineStep >= lastLineStep(currentStat);
+  // Mid-line, a move played or revealed goes straight on to White's reply.
+  const goOnInLine = () => {
+    if (!isLastStep) setLineStep((previous) => previous + 1);
+  };
   const lineMoves: string[] = currentStat?.lineMoves || [];
   const targetPlyIndex = lineMoves.length; // The ply they are supposed to guess from (after opponent's move)
   const currentOpening =
@@ -180,9 +207,11 @@ export default function SrsTrainer({
     setAnimationEnabled(false);
     setFen(tempChess.fen());
     chess.load(tempChess.fen());
-    setLastMove(undefined);
+    // Mid-line, your move just played stays marked until White's reply.
+    const playedMove = lineStep > 0 ? tempChess.history({ verbose: true }).at(-1) : undefined;
+    setLastMove(playedMove ? [playedMove.from, playedMove.to] : undefined);
     setTestStatus("idle");
-    setEvalsShown(false);
+    if (lineStep === 0) setEvalsShown(false);
     setCurrentPlyIndex(priorMoves.length);
 
     if (!finalMove) {
@@ -333,6 +362,7 @@ export default function SrsTrainer({
         setStats(step.stats);
         setGoodHitsByCard(step.goodHitsByCard);
         setGraduatedCount(step.graduatedCount);
+        setLineStep(0);
         setShowing((previous) => previous + 1);
         return;
       }
@@ -395,6 +425,7 @@ export default function SrsTrainer({
               setLastMove([move.from, move.to]);
               setTestStatus("revealed");
               setCurrentPlyIndex(targetPlyIndex + 1);
+              goOnInLine();
               playSound();
               logFlightBox("ACTION_REVEAL", {
                 success: true,
@@ -408,7 +439,7 @@ export default function SrsTrainer({
               error: String(err),
             });
           }
-        } else if (testStatus === "correct" || testStatus === "revealed") {
+        } else if ((testStatus === "correct" || testStatus === "revealed") && isLastStep) {
           // Default Enter to "Good" (rating 2)
           logFlightBox("ACTION_RATE_DEFAULT_ENTER", { quality: 2 });
           handleRate(2);
@@ -416,7 +447,7 @@ export default function SrsTrainer({
       }
 
       // 1, 2, 3, 4 (Grade)
-      if (["1", "2", "3", "4"].includes(e.key) && testStatus !== "idle") {
+      if (["1", "2", "3", "4"].includes(e.key) && testStatus !== "idle" && isLastStep) {
         // Map 1-4 to 0-3 quality
         const quality = parseInt(e.key) - 1;
         logFlightBox("ACTION_RATE_KEY", { key: e.key, quality });
@@ -543,6 +574,7 @@ export default function SrsTrainer({
           setLastMove([from, to]);
           setTestStatus("correct");
           setCurrentPlyIndex(targetPlyIndex + 1);
+          goOnInLine();
         } else {
           // Wrong move
           setFen(chess.fen());
@@ -629,6 +661,7 @@ export default function SrsTrainer({
     });
 
     undoStepsRef.current.push({ stats, goodHitsByCard, graduatedCount });
+    setLineStep(0);
     setShowing((previous) => previous + 1);
 
     if (isGood && !graduates) {

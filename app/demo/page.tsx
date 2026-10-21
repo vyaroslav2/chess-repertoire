@@ -1,7 +1,7 @@
 import React from "react";
 export const dynamic = "force-dynamic";
 import SrsTrainer from "../../components/SrsTrainer";
-import { fetchDemoPositions } from "../actions";
+import { fetchDemoLines } from "../actions";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
@@ -21,7 +21,7 @@ export default async function Demo() {
     );
   }
 
-  const demoStats = await fetchDemoPositions(rep.id);
+  const demoStats = await fetchDemoLines(rep.id);
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "flex-start", alignItems: "center", 
