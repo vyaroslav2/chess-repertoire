@@ -595,13 +595,6 @@ html.coords-large .cg-wrap coords coord {
   100% { opacity: 0; }
 }
 
-/* "Nothing undone" (MS.03): stays, and wraps at the status line's width. */
-.undo-notice.undo-notice-stays {
-  animation: none;
-  max-width: 280px;
-  white-space: normal;
-}
-
 /* The two share one look (MS.02). */
 .settings-notice,
 .undo-notice {

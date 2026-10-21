@@ -66,8 +66,9 @@ Left of the board, Anki's counts for the deck: `Black to move · 12 new · 3 lea
 ==AK.12.01 //- #roadmap  polish the status line -//==
 
 AK.13 **Undo.**
-`Ctrl + Z` takes back the last grade made on the page, through our Anki add-on ([[AD]]), and only if that grade is Anki's next undo step. Its card comes back. Replaces the local history of [[UN]] on `/`.
-- Only grades made on this page are undone. On the page's first card nothing happens (UN.02).
+`Ctrl + Z` on the page is Anki's own undo, through AnkiConnect's `guiUndo`: it undoes Anki's next step, whatever it is ([[AD|AD.13]]). Anki's message about it shows on the page ([[AD|AD.14]], [[MS|MS.04]]). Replaces the local history of [[UN]] on `/`.
+- The page keeps no list of its own grades. `Ctrl + Z` works before anything is graded on the page, as in Anki.
+- From 2026-10-14 to 2026-10-22, the add-on undid only the page's last grade, and refused anything else.
 
 
 
@@ -153,8 +154,8 @@ Suggested text for AK.13:
 - Why not an add-on that checks first: this is an edge case, and Anki's own `Ctrl + Z` behaves the same way. The block keeps it to one wrong undo, and Anki's redo puts it right."
 %%
 
-- After an undo, Anki's study screen doesn't redraw until you click on Anki's window. The add-on redraws it at once, so the undone card is back on screen ([[AD|AD.04]]).
-- In the app since 2026-10-14.
+- After an undo, Anki's study screen doesn't redraw until you click on Anki's window. So the page restarts it, and shows Anki's current card ([[AD|AD.16]]).
+- In the app since 2026-10-14; native since 2026-10-22.
 
 ==`AK.13.01` //- #roadmap polish undo tooltip -//==
 

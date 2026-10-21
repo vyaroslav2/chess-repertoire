@@ -175,38 +175,37 @@ export async function ankiGrade(cardId: number, ease: number) {
   });
 }
 
-// Undone: Anki's current card. Not undone: why, and the page keeps its card.
-// Undone: Anki's current card. Not undone: why (MS.03), and the page keeps its card;
-// forget: Anki has nothing to undo, so the page's grades can never come back (AD.05).
-export type AnkiUndo =
-  | { undone: true; session: AnkiSession }
-  | { undone: false; notice?: string; forget?: boolean; session?: AnkiSession };
-
-// AK.13, AD.04: gradedCardId is the card of the grade to take back. Our add-on's
-// chessUndo undoes it only if it is Anki's next undo step, and puts it back on screen.
-export async function ankiUndo(gradedCardId: number): Promise<AnkiUndo> {
-  let undo: { undone: boolean; step?: string; isGrade?: boolean };
+// AD.14: Anki's latest tooltip, as the add-on keeps it, and empty it. Null if
+// none, or without the add-on (AD.17).
+async function takeMessage() {
   try {
-    undo = await anki("chessUndo", { cardId: gradedCardId });
+    return await anki<{ text: string; answerUndone: boolean } | null>("chessMessages");
   } catch (error) {
-    const message = (error as Error).message;
-    // AD.07: the add-on is missing.
-    if (message.endsWith("unsupported action")) return { undone: false, notice: "Undo needs the Chess Repertoire add-on in Anki." }; // MS.03
-    return { undone: false, session: await session(async () => { throw error; }) };
+    if (error instanceof AnkiError) throw error;
+    return null; // "unsupported action"
   }
-  if (!undo.undone) {
-    // AD.05: blocked. Nothing changed in Anki.
-    if (!undo.step) return { undone: false, forget: true };
-    const notice = undo.isGrade // MS.03
-      ? "Nothing undone. Anki's last answer wasn't made on this page: undo it in Anki first."
-      : `Nothing undone. Anki's last change was '${undo.step}': undo it in Anki first.`;
-    return { undone: false, notice };
-  }
-  return {
-    undone: true,
-    session: await session(async deckName => {
-      await waitForReviewer(deckName, shown => shown?.cardId === gradedCardId);
-      return nextCard(deckName);
-    }),
-  };
+}
+
+// AK.13, AD.13: Anki's own undo of its next step, whatever it is. Returns what
+// Anki said about it (AD.14, AD.15), or null, and Anki's current card.
+export async function ankiUndo(): Promise<{ message: string | null; session: AnkiSession }> {
+  let message: string | null = null;
+  const undone = await session(async deckName => {
+    await takeMessage(); // Anything older isn't about this undo.
+    await anki("guiUndo"); // Returns before the undo has run.
+    for (let tick = 0; tick < 30; tick++) {
+      const taken = await takeMessage();
+      if (taken) {
+        // Anki marks the step's name off as a unit (U+2068, U+2069): unseen, so dropped.
+        message = taken.answerUndone ? "Answer undone" : plainText(taken.text).replace(/[⁨⁩]/g, "");
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    // AD.16: Anki's study screen redraws only once its window has focus.
+    await anki("guiDeckReview", { name: deckName });
+    await waitForReviewer(deckName, (shown, tick) => shown !== null || tick >= 10);
+    return nextCard(deckName);
+  });
+  return { message, session: undone };
 }

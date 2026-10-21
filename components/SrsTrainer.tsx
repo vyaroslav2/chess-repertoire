@@ -74,19 +74,16 @@ export default function SrsTrainer({
   const [ankiError, setAnkiError] = useState(
     anki?.status === "error" ? anki.message : null,
   );
-  // The cards of the grades sent to Anki from this page, the only ones undo takes back (AK.13).
-  const ankiGradedCardsRef = useRef<number[]>([]);
   // A request to Anki is on its way: further grades and undos wait for it.
   const ankiBusyRef = useRef(false);
-  // The undo message, bottom left: "Answer undone" (MS.01) goes after its 3s
-  // and fade; "Nothing undone" (MS.03) stays until the next grade or Ctrl + Z.
-  // A new id restarts it.
-  const [undoMessage, setUndoMessage] = useState<{ text: string; id: number; stays: boolean } | null>(null);
+  // Anki's message after an undo, bottom left: "Answer undone" (MS.01) or
+  // Anki's own text (MS.04). It goes after its 3s and fade; a new id restarts it.
+  const [undoMessage, setUndoMessage] = useState<{ text: string; id: number } | null>(null);
   const undoMessageTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const showUndoMessage = (message: { text: string; stays: boolean } | null) => {
+  const showUndoMessage = (text: string | null) => {
     if (undoMessageTimerRef.current) clearTimeout(undoMessageTimerRef.current);
-    setUndoMessage(message && { ...message, id: Date.now() });
-    if (message && !message.stays) {
+    setUndoMessage(text === null ? null : { text, id: Date.now() });
+    if (text !== null) {
       undoMessageTimerRef.current = setTimeout(() => setUndoMessage(null), 3450);
     }
   };
@@ -329,26 +326,16 @@ export default function SrsTrainer({
       ) {
         e.preventDefault();
         if (ankiMode) {
-          logFlightBox("ACTION_ANKI_UNDO", {
-            gradesLeft: ankiGradedCardsRef.current.length,
-          });
+          logFlightBox("ACTION_ANKI_UNDO", {});
           if (ankiBusyRef.current) return;
           showUndoMessage(null);
-          const gradedCardId = ankiGradedCardsRef.current.pop();
-          if (gradedCardId === undefined) return; // Nothing graded on this page (AK.13).
+          // AD.13: Anki's own undo, whatever its next step is. No message if
+          // Anki gave none: nothing to undo, or no add-on (AD.14, AD.17).
           sendToAnki(
-            ankiUndo(gradedCardId).then((result) => {
-              if (result.undone) {
-                showUndoMessage({ text: "Answer undone", stays: false });
-                return result.session;
-              }
-              // AD.05, AD.07: nothing changed in Anki, and the card on screen
-              // stays as it is. The grade is still there to undo, unless Anki
-              // has nothing to undo at all: then none of the page's can come back.
-              if (result.forget) ankiGradedCardsRef.current = [];
-              else ankiGradedCardsRef.current.push(gradedCardId);
-              if (result.notice) showUndoMessage({ text: result.notice, stays: true });
-              return result.session ?? null;
+            ankiUndo().then((result) => {
+              logFlightBox("ANKI_UNDO_MESSAGE", { message: result.message });
+              if (result.message) showUndoMessage(result.message);
+              return result.session;
             }),
           );
           return;
@@ -643,7 +630,6 @@ export default function SrsTrainer({
         ankiCardId: currentStat.ankiCardId,
       });
       showUndoMessage(null);
-      ankiGradedCardsRef.current.push(currentStat.ankiCardId);
       sendToAnki(ankiGrade(currentStat.ankiCardId, quality + 1));
       return;
     }
@@ -701,7 +687,7 @@ export default function SrsTrainer({
       {undoMessage && (
         <div
           key={undoMessage.id}
-          className={undoMessage.stays ? "undo-notice undo-notice-stays" : "undo-notice"}
+          className="undo-notice"
           role="status"
         >
           {undoMessage.text}

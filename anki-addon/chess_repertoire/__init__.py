@@ -1,8 +1,8 @@
-# AD: the Ctrl + Z layer for the Chess Repertoire web page.
+# AD: Anki's messages for the Chess Repertoire web page.
 #
-# Gives AnkiConnect one more action, chessUndo(cardId): undo the latest grade,
-# but only if it is Anki's next undo step and of the card the page expects.
-# Also keeps Anki's tooltips off the page while the browser is in front (AD.12).
+# Decides nothing: Ctrl + Z from the page is Anki's own undo (AD.13). The add-on
+# only keeps Anki's tooltips off the page (AD.12) and hands their text to the
+# page through one more AnkiConnect action, chessMessages (AD.14).
 # Install: copy this folder into Anki's addons21 folder and restart Anki.
 
 import sys
@@ -11,43 +11,47 @@ import aqt.utils
 from aqt import gui_hooks, mw
 from aqt.qt import Qt
 
-anki_tooltip = aqt.utils.tooltip
+# AD.14: the latest tooltip's text, until the page asks for it.
+latest_message = None
 
 
-def chessUndo(self, cardId):
-    # AD.04: check and undo in one step, on Anki's main thread (AnkiConnect
-    # answers requests there).
-    col = mw.col
-    if col is None:
-        raise Exception("collection is not available")
-
-    # AD.03: the next undo step, in Anki's language, and the latest grade's card.
-    step = col.undo_status().undo
-    last_graded = col.db.scalar("select cid from revlog order by id desc limit 1")
-    is_grade = step == col.tr.actions_answer_card()
-    if not is_grade or last_graded != cardId:
-        # AD.05: block. Undo nothing, and say what the next step is.
-        return {"undone": False, "step": step, "isGrade": is_grade}
-
-    # As Anki's own undo (aqt/operations/collection.py), but with no tooltip:
-    # the page shows its own message (AD.06, MS.01).
-    out = col.undo()
-    mw.update_undo_actions()
-    gui_hooks.state_did_undo(out)
-    gui_hooks.operation_did_execute(out.changes, None)
-    # Anki redraws its study screen only once its window has focus, and the
-    # browser has it. Redraw now, so the undone card is back on screen (AD.04).
-    if mw.state == "review":
-        mw.reviewer.refresh_if_needed()
-    return {"undone": True}
+def chessMessages(self):
+    # AD.14: the latest tooltip's text, or None, and empty it. On Anki's main
+    # thread, as AnkiConnect answers requests there, like the tooltips.
+    global latest_message
+    text, latest_message = latest_message, None
+    if text is None:
+        return None
+    # AD.15: Anki's "Answer Card undone", in Anki's language.
+    answer_undone = mw.col is not None and text == mw.col.tr.undo_action_undone(
+        action=mw.col.tr.actions_answer_card()
+    )
+    return {"text": text, "answerUndone": answer_undone}
 
 
-def tooltip_unless_browser_in_front(*args, **kwargs):
-    # AD.12: an Anki tooltip floats over every program. Show it only while one
-    # of Anki's windows has focus; drop it while another program (the browser) has.
-    if mw.app.activeWindow() is None:
-        return
-    anki_tooltip(*args, **kwargs)
+def tooltip_unless_browser_in_front(tooltip):
+    # Wraps a tooltip function: Anki's own, or another add-on's wrapper of it.
+    def wrapped(msg, *args, **kwargs):
+        # AD.14: keep every tooltip's text for the page.
+        global latest_message
+        latest_message = str(msg)
+        # AD.12: an Anki tooltip floats over every program. Show it only while one
+        # of Anki's windows has focus; drop it while another program (the browser) has.
+        if mw.app.activeWindow() is None:
+            return
+        tooltip(msg, *args, **kwargs)
+
+    wrapped.chess_repertoire = True
+    return wrapped
+
+
+def is_tooltip(function):
+    # Anki's own tooltip, or the one now in aqt.utils (another add-on may have
+    # wrapped Anki's, e.g. anki-power-suite, which loads before us), not yet ours.
+    if getattr(function, "chess_repertoire", False):
+        return False
+    anki_own = getattr(function, "__module__", None) == "aqt.utils" and getattr(function, "__name__", None) == "tooltip"
+    return anki_own or function is aqt.utils.tooltip
 
 
 def close_tooltip_when_anki_loses_focus(state):
@@ -59,27 +63,33 @@ def close_tooltip_when_anki_loses_focus(state):
 
 def hide_tooltips_over_page():
     # Every Anki tooltip goes through aqt.utils.tooltip. Modules imported from
-    # now on get ours from there; modules already in hold their own copy.
-    aqt.utils.tooltip = tooltip_unless_browser_in_front
+    # now on get ours from there; modules already in hold their own copy, which
+    # may not be the one in aqt.utils now (aqt.operations.collection, for undo).
+    # Each copy is wrapped and still called, so other add-ons' wrappers work on.
     for module in list(sys.modules.values()):
+        if module is aqt.utils:
+            continue
         try:
-            if getattr(module, "tooltip", None) is anki_tooltip:
-                module.tooltip = tooltip_unless_browser_in_front
+            tooltip = getattr(module, "tooltip", None)
+            if is_tooltip(tooltip):
+                module.tooltip = tooltip_unless_browser_in_front(tooltip)
         except Exception:
             pass  # a module that won't be looked into
+    if is_tooltip(aqt.utils.tooltip):
+        aqt.utils.tooltip = tooltip_unless_browser_in_front(aqt.utils.tooltip)
 
 
 # AnkiConnect finds an action by method name, among its own methods, for each
 # request (AD.02). So a method added to its class is an action like any other.
-chessUndo.api = True
-chessUndo.versions = ()
+chessMessages.api = True
+chessMessages.versions = ()
 
 
 def attach():
     for module in list(sys.modules.values()):
         anki_connect = getattr(module, "AnkiConnect", None)
         if isinstance(anki_connect, type) and hasattr(anki_connect, "handler"):
-            anki_connect.chessUndo = chessUndo
+            anki_connect.chessMessages = chessMessages
             return True
     return False
 
