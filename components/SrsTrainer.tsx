@@ -7,6 +7,7 @@ import { Chess } from "chess.js";
 import LichessMoveList from "./LichessMoveList";
 import EvalGauge from "./EvalGauge";
 import SettingsMenu from "./SettingsMenu";
+import { toggleStatusLine } from "./status-line";
 import { logFlightBox } from "../lib/logger";
 import {
   ankiGrade,
@@ -360,6 +361,13 @@ export default function SrsTrainer({
         setGraduatedCount(step.graduatedCount);
         setLineStep(0);
         setShowing((previous) => previous + 1);
+        return;
+      }
+
+      // S: the status line on or off, kept across reloads (UI.22). Not with
+      // Ctrl, Alt or Meta, so Ctrl + S stays the browser's.
+      if ((e.key === "s" || e.key === "S") && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        if (!e.repeat) toggleStatusLine();
         return;
       }
 

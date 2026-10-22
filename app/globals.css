@@ -292,7 +292,8 @@ html[data-board="newspaper"] .board-themed::after {
   transition: opacity 0.15s ease;
 }
 
-.demo-status-hover:hover {
+.demo-status-hover:hover,
+:root[data-status-line="on"] .demo-status-hover {
   opacity: 1;
 }
 
