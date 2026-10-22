@@ -380,15 +380,18 @@ export default function SrsTrainer({
         testStatus,
       });
 
+      // Not with Ctrl, Alt or Meta, so Ctrl + F and Ctrl + E stay the browser's.
+      const plainKey = !e.ctrlKey && !e.altKey && !e.metaKey;
+
       // Flip board (doesn't consume/affect any other state)
-      if (e.key === "f" || e.key === "F") {
+      if ((e.key === "f" || e.key === "F") && plainKey) {
         setFlipped((prev) => !prev);
         logFlightBox("ACTION_FLIP_BOARD", {});
         return;
       }
 
       // Show or hide the evals and gauge (UI.34)
-      if (e.key === "e" || e.key === "E") {
+      if ((e.key === "e" || e.key === "E") && plainKey) {
         setEvalsShown((prev) => !prev);
         return;
       }
@@ -762,6 +765,9 @@ export default function SrsTrainer({
               display: "grid",
               gridTemplateColumns: "auto auto",
               columnGap: "16px",
+              // Set, not inherited: a browser's default size may be larger than 16px.
+              fontSize: "16px",
+              lineHeight: "24px",
               fontVariantNumeric: "tabular-nums",
               whiteSpace: "nowrap",
               // Inter's recommended tracking at 16px (UI.20's formula): -0.175px
@@ -782,6 +788,8 @@ export default function SrsTrainer({
               top: 0,
               width: "280px",
               textAlign: "right",
+              fontSize: "16px",
+              lineHeight: "24px",
               letterSpacing: "-0.011em",
               color: "var(--lichess-text-muted)",
             }}

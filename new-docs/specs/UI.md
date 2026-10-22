@@ -38,6 +38,7 @@ Inter, 16px (20), weight 400, line height 24px, letter spacing -0.011em (-0.175p
   - Kept in localStorage (`status-line`). A script in `<head>` reads it before the first paint and marks `<html>` (`data-status-line="on"`), as for the board and pieces (SM.08, SM.09), so a saved "on" never shows late.
   - One setting for `/` and `/demo`. Since 2026-10-22.
 - Letter spacing is Inter's own for 16px, by the formula in UI.20.
+- Size and line height are set on the status line itself, not inherited. Until 2026-10-22 they came from the browser's default font size, so a browser set to "Large" (20px) drew it 1.25× too big.
 - On `/`: Anki's counts ([[AK|AK.12]]), three rows, no colons. Labels in one column, left-aligned; numbers in another, right-aligned, so the units line up. 16px between the columns. Digits all one width (`tabular-nums`). The block is as wide as its text. Since 2026-10-22.
   - Labels: weight 400, `#787674`.
   - Numbers: weight 350, in Anki's night-mode colours: New `#93c5fd`, Learning `#f87171`, To Review `#22c55e` (`--anki-new`, `--anki-learn`, `--anki-review`). From Anki's `deckbrowser.css`, and checked against a screenshot of Anki. Lighter than the labels, as the colours are much brighter. A zero keeps its colour, as on Anki's overview screen.
@@ -138,6 +139,7 @@ The evals (UI.26) and the eval gauge (UI.31) are hidden at the start of each car
 - Hidden, the move list's cells keep their width with no eval in them, and the gauge's slot stays empty, so nothing moves when they show.
 - Not clipped when hidden: a narrower panel would make every move jump sideways on each press, and the space saved is no use, since only the board is centred (UI.27).
 - A plain key, read as `e.key`, like `F` for flipping.
+- `E` and `F` do nothing with Ctrl, Alt or Meta held, so `Ctrl + E` and `Ctrl + F` (Find) stay the browser's. Since 2026-10-22; before, `Ctrl + F` also flipped the board and `Ctrl + E` also toggled the evals.
 - Not built: showing evals only once the answer is in. The answer's own eval already waits for it (UI.26); build the rest only if needed.
 - In the app since 2026-10-13.
 
