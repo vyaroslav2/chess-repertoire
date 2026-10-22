@@ -8,6 +8,7 @@ import { selectObservation, readGames, gameRecord } from "../pgn";
 import { importFiles, groupObservations } from "../import";
 import { parseEvaluation } from "../engine";
 import { writeJobs } from "../jobs";
+import { importResults } from "../results";
 import { DATA_ROOT, assertDataDirectory, runPath } from "../paths";
 import type { Observation } from "../types";
 
@@ -203,5 +204,55 @@ test("jobs split one period's groups by id and keep each group's first FEN", asy
     assert.deepEqual(await read("jobs-a.jsonl"), [{ id: 1, positionKey: group("fit", "").positionKey, fen, uci: "d7d5" }]);
     assert.deepEqual((await read("jobs-b.jsonl")).map(job => [job.id, job.uci]), [[2, "g8f6"]]);
     await assert.rejects(writeJobs(name, "fit", 1));
+  } finally { await rm(run, { recursive: true }); }
+});
+test("results join both files to their groups, flip to White's view and refuse bad input", async () => {
+  const name = "test-results-" + process.pid, run = runPath(name);
+  await assertDataDirectory(run);
+  const fen = "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1";
+  const group = (period: string, uci: string) => ({ period, positionKey: fen.split(" ").slice(0, 4).join(" "), uci,
+    fens: [fen], games: 2, wins: 1, draws: 0, losses: 1, moveNumbers: { "1": 2 } });
+  const session = (part: string, overrides = {}) => JSON.stringify({ type: "session", startedAt: "2026-10-12T00:00:00Z",
+    engine: "Stockfish 19", archiveSha256: "9defc0d4e55d49c65a6d042f3e571a39fcea499ade6dbe741b53b8c65e03611f",
+    binarySha256: "x", bench: 2497913, nodes: 2000000, hashMb: 64, threads: 1, multiPv: 1, engines: 2,
+    jobs: "jobs-" + part + ".jsonl", ...overrides });
+  const result = (id: number, uci: string, reply: string, score: string, overrides = {}) => {
+    const [kind, value] = score.split(" ");
+    return JSON.stringify({ type: "result", id, uci, cp: kind === "cp" ? Number(value) : null,
+      mate: kind === "mate" ? Number(value) : null, depth: 24, nodes: 2000100,
+      info: "info depth 24 seldepth 30 multipv 1 score " + score + " nodes 2000100 nps 9 hashfull 1 tbhits 0 time 9 pv " + uci + " " + reply,
+      bestmove: "bestmove " + uci + " ponder " + reply, ...overrides });
+  };
+  const write = (file: string, rows: string[]) => writeFile(path.join(run, file), rows.join("\n") + "\n");
+  const goodA = [session("a"), result(1, "d7d5", "c2c4", "cp -15")];
+  // Id 2 again after a dropped session: the same search, at another speed, is allowed.
+  const goodB = [session("b"), result(2, "g8f6", "c2c4", "cp 20"), session("b"),
+    result(2, "g8f6", "c2c4", "cp 20", { info: "info depth 24 seldepth 30 multipv 1 score cp 20 nodes 2000100 nps 5 hashfull 1 tbhits 0 time 50 pv g8f6 c2c4" })];
+  try {
+    await writeFile(path.join(run, "groups.jsonl"),
+      [group("fit", "d7d5"), group("tune", "e7e6"), group("fit", "g8f6")].map(g => JSON.stringify(g)).join("\n") + "\n");
+    await writeJobs(name, "fit", 1);
+    for (const [rowsA, rowsB, message] of [
+      [goodA, [session("b")], /lacks 1 of 1/],
+      [[session("a", { nodes: 1000000 }), ...goodA.slice(1)], goodB, /nodes 1000000, expected 2000000/],
+      [[session("a", { jobs: "jobs-b.jsonl" }), ...goodA.slice(1)], goodB, /jobs jobs-b.jsonl/],
+      [goodA, [session("b", { binarySha256: "y" }), ...goodB.slice(1)], /2 different Stockfish binaries/],
+      [[session("a"), result(1, "e7e5", "c2c4", "cp -15")], goodB, /illegal|job is d7d5/],
+      [[session("a"), result(1, "d7d5", "c2c4", "cp -15", { cp: 15 })], goodB, /disagree/],
+      [[...goodA, result(1, "d7d5", "c2c4", "cp -16")], goodB, /twice with different results/],
+      [goodA, [session("b"), result(1, "d7d5", "c2c4", "cp -15")], /id 1 is not in jobs-b/],
+      [[result(1, "d7d5", "c2c4", "cp -15")], goodB, /must start with a session/],
+    ] as [string[], string[], RegExp][]) {
+      await write("results-a.jsonl", rowsA); await write("results-b.jsonl", rowsB);
+      await assert.rejects(importResults(name, "fit"), message);
+    }
+    await write("results-a.jsonl", goodA);
+    await write("results-b.jsonl", [goodB[0], result(2, "g8f6", "c2c4", "mate 3")]);
+    const report = await importResults(name, "fit");
+    assert.deepEqual([report.groups, report.games, report.mates], [2, 4, { groups: 1, games: 2 }]);
+    const rows = (await readFile(path.join(run, "evals.jsonl"), "utf8")).trim().split("\n").map(l => JSON.parse(l));
+    assert.deepEqual(rows.map(row => [row.id, row.uci, row.part, row.cpWhite, row.mateWhite, row.wins]),
+      [[1, "d7d5", "a", 15, null, 1], [2, "g8f6", "b", null, -3, 1]]);
+    await assert.rejects(importResults(name, "fit"));
   } finally { await rm(run, { recursive: true }); }
 });

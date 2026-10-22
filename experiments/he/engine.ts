@@ -97,6 +97,10 @@ export class HeEngine {
     } catch (error) { uci.close(); throw error; }
   }
   async evaluate(fen: string, candidate?: string): Promise<Evaluation> {
+    return (await this.search(fen, candidate)).evaluation;
+  }
+  // The evaluation with Stockfish's raw lines, cached or new.
+  async search(fen: string, candidate?: string): Promise<{ evaluation: Evaluation; rawLines: string[] }> {
     const chess = new Chess(fen);
     if (chess.turn() !== "b") throw new Error("HE evaluates Black decisions only.");
     if (candidate && !chess.moves({ verbose: true }).some(move => move.lan === candidate)) throw new Error("Illegal HE candidate.");
@@ -109,7 +113,7 @@ export class HeEngine {
       const cached = JSON.parse(await readFile(cachePath, "utf8"));
       if (JSON.stringify(cached.request) !== JSON.stringify(request) ||
           !Array.isArray(cached.rawLines)) throw new Error("Invalid HE evaluation cache: " + cachePath);
-      return parseEvaluation(cached.rawLines, fen, candidate);
+      return { evaluation: parseEvaluation(cached.rawLines, fen, candidate), rawLines: cached.rawLines };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
@@ -121,7 +125,7 @@ export class HeEngine {
     const temporary = cachePath + "." + process.pid + "." + Date.now() + ".tmp";
     await writeFile(temporary, JSON.stringify({ request, profile: this.profile, rawLines, evaluation }), { flag: "wx" });
     await rename(temporary, cachePath);
-    return evaluation;
+    return { evaluation, rawLines };
   }
   close() { this.uci.close(); }
 }

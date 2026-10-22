@@ -138,8 +138,21 @@ searches 2,497,913 nodes (the same as the Windows build), then runs one single-t
 per core with the settings above. Each finished search is one line in `RESULTS`, written at
 once, so stopping or a dropped session loses only the searches in progress; running the cell
 again carries on. The score is kept as Stockfish gives it, from Black's view; the import
-(still to be written) flips it to `cpWhite`. Locally, the script gave the same score and depth as `engine.ts` on the same
+flips it to `cpWhite`. Locally, the script gave the same score and depth as `engine.ts` on the same
 jobs.
+
+Put both people's `results-a.jsonl` and `results-b.jsonl` in the run's folder, then:
+
+```powershell
+npm --prefix experiments/he run results -- --run 2024-02-3000mb
+npm --prefix experiments/he run recheck -- --run 2024-02-3000mb --engine stockfish-windows-x86-64-universal/stockfish/stockfish-windows-x86-64-universal.exe
+```
+
+`results` checks every line against its job and its session (release SHA-256, bench, settings,
+one binary for both files, legal move, exact score, no missing or conflicting ids), joins each
+job to its group and writes `evals.jsonl` (each group with `cpWhite` or `mateWhite`) and
+`evals-manifest.json`. It writes nothing if any check fails, and never overwrites. `recheck`
+searches 20 fixed random jobs from each file again here; each must give the same line, only faster or slower.
 
 ## Checks
 

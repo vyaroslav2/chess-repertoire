@@ -8,6 +8,8 @@
     "import": "tsx cli.ts import",
     "evaluate": "tsx cli.ts evaluate",
     "jobs": "tsx cli.ts jobs",
+    "results": "tsx cli.ts results",
+    "recheck": "tsx cli.ts recheck",
     "db-check": "tsx cli.ts db-check",
     "load": "tsx cli.ts load",
     "test": "tsx --test tests/*.test.ts",
