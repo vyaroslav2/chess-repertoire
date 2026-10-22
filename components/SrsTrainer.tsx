@@ -30,10 +30,21 @@ const slideMs = 250;
 
 // Lichess's mate sign, as it is in Lichess's chessground (glyph.ts: endgameGlyphs.mate,
 // composeGlyph), GPL-3.0-or-later. Its origin is the square's top-left; 100 is a square.
+// Drawn over the board by us, not as a chessground shape: chessground 8 draws
+// shapes only once a piece has slid in, so the sign came after the red king.
 const mateSign =
   '<defs><filter id="a"><feDropShadow dx="4" dy="7" flood-opacity=".5" stdDeviation="5"/></filter></defs>' +
   '<g transform="matrix(.4 0 0 .4 71 -12)"><circle cx="50" cy="50" r="50" fill="#df5353" filter="url(#a)"/>' +
   '<path fill="none" stroke="#fff" stroke-width="8" d="M38 18 33 82M62 18l-5 64M20 40h60M18 62h60"/></g>';
+
+// A square's place on the board, from its top-left, in eighths.
+function squareOffset(square: string, orientation: "white" | "black") {
+  const file = square.charCodeAt(0) - 97;
+  const rank = Number(square[1]) - 1;
+  const column = orientation === "white" ? file : 7 - file;
+  const row = orientation === "white" ? 7 - rank : rank;
+  return { left: `${column * 12.5}%`, top: `${row * 12.5}%` };
+}
 
 // Anki's counts (AK.12, UI.22): lighter than their labels, units lined up.
 const ankiCountStyle = { fontWeight: 350, textAlign: "right" } as const;
@@ -111,11 +122,8 @@ export default function SrsTrainer({
   // Lichess's red # at its square's top-right corner.
   const position = useMemo(() => new Chess(fen), [fen]);
   const inCheck = position.inCheck();
-  const mateShapes = useMemo(
-    () =>
-      position.isCheckmate()
-        ? position.findPiece({ type: "k", color: position.turn() }).map((square) => ({ orig: square, customSvg: mateSign }))
-        : [],
+  const mateSquare = useMemo(
+    () => (position.isCheckmate() ? position.findPiece({ type: "k", color: position.turn() })[0] : undefined),
     [position],
   );
   const [lastMove, setLastMove] = useState<[string, string] | undefined>();
@@ -870,7 +878,7 @@ export default function SrsTrainer({
               lastMove: lastMove,
               check: inCheck,
               highlight: { lastMove: true, check: true },
-              drawable: { enabled: true, visible: true, autoShapes: mateShapes },
+              drawable: { enabled: true, visible: true },
               coordinates: true,
               animation: { enabled: animationEnabled, duration: slideMs },
               movable: {
@@ -881,6 +889,21 @@ export default function SrsTrainer({
               },
             }}
           />
+          {mateSquare && (
+            <svg
+              viewBox="0 0 100 100"
+              style={{
+                position: "absolute",
+                ...squareOffset(mateSquare, orientation),
+                width: "12.5%",
+                height: "12.5%",
+                overflow: "visible",
+                pointerEvents: "none",
+                zIndex: 10,
+              }}
+              dangerouslySetInnerHTML={{ __html: mateSign }}
+            />
+          )}
         </div>
 
         {/* Eval gauge between the board and the move list, 4px from each (UI.31); hidden until 'e' (UI.34) */}
