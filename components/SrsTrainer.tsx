@@ -126,6 +126,8 @@ export default function SrsTrainer({
   const isInitializingRef = useRef(true);
   // The opponent's move has started to slide in (the wait before it is over).
   const slideStartedRef = useRef(false);
+  // A wrong move has played its own sound; the redraw it sets off stays silent, as on Lichess.
+  const silentRedrawRef = useRef(false);
   const animTimerRef = useRef<NodeJS.Timeout | null>(null);
   const snapBackTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -320,7 +322,9 @@ export default function SrsTrainer({
     }
 
     // Play sound if we browsed (visual check)
-    if (fen !== tempChess.fen()) {
+    const silent = silentRedrawRef.current;
+    silentRedrawRef.current = false;
+    if (fen !== tempChess.fen() && !silent) {
       playSound(tempChess.history().at(-1));
     }
 
@@ -606,6 +610,7 @@ export default function SrsTrainer({
           goOnInLine();
         } else {
           // Wrong move
+          silentRedrawRef.current = true;
           setFen(chess.fen());
           setLastMove([from, to]);
           setTestStatus("wrong");
