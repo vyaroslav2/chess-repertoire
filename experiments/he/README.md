@@ -154,6 +154,15 @@ job to its group and writes `evals.jsonl` (each group with `cpWhite` or `mateWhi
 `evals-manifest.json`. It writes nothing if any check fails, and never overwrites. `recheck`
 searches 20 fixed random jobs from each file again here; each must give the same line, only faster or slower.
 
+```powershell
+npm --prefix experiments/he run curve -- --run 2024-02-3000mb
+```
+
+`curve` fits eval → Black's win/draw/loss on `evals.jsonl` (mates left out): an ordered logistic
+model on cpWhite clipped to ±10 pawns, with a straight line, a 5-knot or a 7-knot natural spline.
+It keeps the one with the lowest surprise on held-out groups (5 folds), refits it on 200 seeded
+bootstrap resamples of groups for a 95% range, and writes `curve.json` and `curve.svg`.
+
 ## Checks
 
 ```powershell

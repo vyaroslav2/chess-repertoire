@@ -83,7 +83,7 @@ The random pick is fixed, so running it again checks the same 40 jobs. It took a
 
 ## A first look at the curve
 
-HEV.30 **Not the curve yet.** This is a plain count: the games put into eval bands, and Black's results in each band. The real curve is a smooth line fitted through the games, not through bands. But the count already shows its shape.
+HEV.30 **Not the curve yet** (that is HEV.60–68). This is a plain count: the games put into eval bands, and Black's results in each band. The real curve is a smooth line fitted through the games, not through bands. But the count already shows its shape.
 
 | Eval (White's view) | Games | Black wins | Draws | Black loses | Black's score |
 | --- | --- | --- | --- | --- | --- |
@@ -104,6 +104,78 @@ HEV.31 **What it shows.**
 * It falls slowly. At these ratings, being a pawn worse costs Black only about 6–8 points of score. Even 3 pawns down, Black still scores about 29%.
 * Draws are rare: about 6%.
 * An even position (−25 to +25) gives 50.2%: no lean to either side.
+
+## The fitted curve
+
+HEV.60 **What the curve is.** For any eval, it gives Black's chance to win, draw and lose. It is the prior centre in [[HE]]: a contender's fake games are spread by the curve's win/draw/loss at its own eval. It is fitted on all 49,909 games with a cp eval, one-game groups included. Mates stay out.
+
+`npm --prefix experiments/he run curve -- --run 2024-02-3000mb`
+
+HEV.61 **How it is fitted, in plain words.**
+* The model gives three chances that always add up to 100%. As White's eval rises, Black's loss chance rises and win chance falls. Draws are likeliest where the two meet.
+* The line is not forced to be a simple S. It may bend at 7 points: −6, −3, −1, 0, +1, +3 and +6 pawns. Beyond ±6 pawns it runs straight. An eval beyond ±10 pawns counts as ±10.
+* The computer picks the line under which the real results are the least surprising.
+
+HEV.62 **Choosing the shape.** Three versions were tried: a straight line (3 numbers), a line bending at 5 points (6 numbers) and at 7 points (8 numbers). More bends always fit the games they learn from better, so the test must use games they have not seen. Each version learned from four fifths of the groups and was scored on the fifth held back, five times over.
+
+| Version | Numbers | Surprise per unseen game |
+| --- | --- | --- |
+| No eval at all (same chances for every move) | 2 | 1.2549 |
+| Straight | 3 | 1.2257 |
+| 5 bends | 6 | 1.2255 |
+| 7 bends | 8 | **1.2248** |
+
+Surprise is in bits; lower is better. The 7-bend line wins, so it is the curve. The gains look small because one move's eval explains only a little of how a game ends: the eval cuts the surprise by about 2.4%. Most of what decides a game at this level happens later.
+
+HEV.63 **The curve.** Eval in White's view. Range = the 95% range of Black's score (HEV.66).
+
+| Eval | Black wins | Draws | Black loses | Black's score | Range |
+| --- | --- | --- | --- | --- | --- |
+| −1000 | 90.7% | 1.8% | 7.5% | 91.6% | 89.4–93.8 |
+| −600 | 75.0% | 4.1% | 20.9% | 77.0% | 75.3–79.1 |
+| −500 | 69.2% | 4.8% | 26.0% | 71.6% | 69.3–73.7 |
+| −400 | 63.9% | 5.2% | 30.9% | 66.5% | 63.5–68.9 |
+| −300 | 60.4% | 5.5% | 34.1% | 63.2% | 60.6–65.2 |
+| −200 | 59.2% | 5.5% | 35.3% | 61.9% | 60.4–63.6 |
+| −100 | 55.8% | 5.7% | 38.5% | 58.7% | 57.1–60.2 |
+| 0 | 47.4% | 5.9% | 46.8% | 50.3% | 49.7–50.9 |
+| +100 | 40.7% | 5.8% | 53.5% | 43.6% | 42.6–44.6 |
+| +200 | 38.6% | 5.7% | 55.7% | 41.4% | 40.2–42.6 |
+| +300 | 37.7% | 5.6% | 56.7% | 40.5% | 39.0–42.0 |
+| +400 | 34.6% | 5.5% | 60.0% | 37.3% | 35.5–38.9 |
+| +500 | 29.7% | 5.1% | 65.2% | 32.3% | 30.9–33.6 |
+| +600 | 24.5% | 4.6% | 70.9% | 26.8% | 25.6–27.9 |
+| +1000 | 9.8% | 2.3% | 87.9% | 10.9% | 9.7–12.8 |
+
+`curve.json` has every 25 cp from −1000 to +1000.
+
+![[hev-curve-feb.svg]]
+
+HEV.64 **What it shows.** The curve has three parts:
+* **Near 0, steep.** From −100 to +100 Black's score falls from 58.7% to 43.6%: about 7–8 points per pawn.
+* **From 1 to 3 pawns, almost flat.** From +100 to +300 it falls only 3 points (43.6% → 40.5%); from −100 to −300, 4.5 points. Here a bigger eval barely changes the result.
+* **Beyond 4 pawns, steep again.** From +400 to +600 it falls 10 points. A big eval usually means real material, which club players do convert.
+
+Level (0) gives 50.3%: no lean to either side. Being better helps Black slightly more than being worse hurts: −100 gives +8.4 points, +100 gives −6.7.
+
+The flat middle part is in the raw counts too (HEV.30), so it is not made by the line. Why it is flat, we can only guess: a 1–3 pawn eval after an early move is often a tactic or a long-term edge that club players do not see or cannot use. March will show whether it holds.
+
+HEV.65 **How well it fits.** Each band of HEV.30, compared with the curve:
+* **Score: good.** In every band, the curve is within the noise you expect from the number of games (never more than 1.5 standard errors off).
+* **Draws: rough.** The curve keeps draws between about 2% and 6%, with a gentle peak at 0. The real draws are 6.4–6.6% near 0, and lower than the curve in some bands: 2.2% at −400 to −300 (curve 5.4%), 3.3% at +400 to +600 (curve 5.1%). The model ties draws to the same line as wins and losses, so it cannot follow them closely. For the score this hardly matters (a draw counts half). For the win/draw/loss split of a prior it matters a little. A model with its own line for draws can be tried later.
+
+HEV.66 **How sure we are.** The groups were drawn again at random, with replacement, 200 times, and the curve refitted each time. The range in HEV.63 holds 95% of those curves. It is narrow where games are many: ±0.6 points at 0, about ±1 at ±100, ±1.5–2.5 from ±300 to ±500, ±2 at ±1000.
+
+HEV.67 **What it means for HE.** Two examples of a prior centre:
+* A move at −200 (Black 2 pawns better): 59.2% win, 5.5% draw, 35.3% loss; score 61.9%. The made-up illustration in [[HE]] said 68%.
+* A move at +100: score 43.6%.
+
+In the flat part, moves 1–3 pawns apart get almost the same prior. So there, the move's own games decide more, and the engine's cp limits keep the choice sound.
+
+HEV.68 **Limits.**
+* Two days of games: 1–2 February 2024 only. March is the check.
+* The curve belongs to 2M-node evals. A deeper eval must not be read off it ([[HE]] item 4).
+* It is the main run: every game counts. The sensitivity check (without time losses and early endings) is still to do.
 
 ## Group sizes
 
@@ -127,10 +199,14 @@ HEV.50 In `experiments/he/data/runs/2024-02-3000mb/`:
 * `results-a.jsonl`, `results-b.jsonl` — the Colab results, as received. Never changed.
 * `evals.jsonl` — one line per group: position, move, win/draw/loss counts (Black's view), move numbers, `cpWhite` or `mateWhite`, depth, nodes, and which file it came from.
 * `evals-manifest.json` — the counts above, and the fingerprints (SHA-256) of both results files, so we can tell if a file changes later.
+* `curve.json` — the three versions and their scores, the chosen curve's numbers, the curve every 25 cp with its range, and the band check.
+* `curve.svg` — the picture, copied to `new-docs/images/hev-curve-feb.svg`.
 
 ## Next
 
-- Fit the curve: a smooth line from eval to Black's win/draw/loss.
+- Try a curve with its own line for draws (HEV.65), and keep it only if it wins on unseen games.
 - Fit k on the groups with 2+ games, and check it by group size.
 - The sensitivity check: fit again without time losses and without games that ended soon after the sampled move.
 - March 2024: download, jobs, search, import; compare with February.
+
+

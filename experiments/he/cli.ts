@@ -4,6 +4,7 @@ import { downloadRun, filterDownloaded } from "./download";
 import { evaluateRun } from "./evaluate";
 import { writeJobs } from "./jobs";
 import { importResults, recheckResults } from "./results";
+import { writeCurve } from "./curve";
 import type { Period } from "./types";
 import { resolveInputPath } from "./paths";
 import { checkConnection, loadGames } from "./db";
@@ -18,6 +19,7 @@ const HELP = String.raw`Human evidence pilot
   npm --prefix experiments/he run jobs -- --run 2024-02-3000mb [--period fit] [--split 20000]
   npm --prefix experiments/he run results -- --run 2024-02-3000mb [--period fit]
   npm --prefix experiments/he run recheck -- --run 2024-02-3000mb --engine <stockfish-19-binary> [--count 20]
+  npm --prefix experiments/he run curve -- --run 2024-02-3000mb
   npm --prefix experiments/he run db-check
   npm --prefix experiments/he run load -- --run 2024-01-2500mb [--limit 100]
 
@@ -29,6 +31,7 @@ Load copies a download's sample.pgn into the MySQL games table; repeating it is 
 Jobs writes the groups as Colab search jobs: ids 1 to --split in jobs-a.jsonl, the rest in jobs-b.jsonl.
 Results checks results-a.jsonl and results-b.jsonl against their jobs and writes evals.jsonl: each group with its eval.
 Recheck searches --count random jobs from each results file again here; they must match exactly.
+Curve fits eval → Black's win/draw/loss on evals.jsonl and writes curve.json and curve.svg.
 Input supports .pgn and .pgn.gz. Decompress Lichess .pgn.zst exports first.
 `;
 async function main() {
@@ -78,6 +81,10 @@ async function main() {
     const period = values.period ?? "fit";
     if (!["fit", "tune", "test"].includes(period)) throw new Error("--period must be fit, tune or test.");
     console.log(JSON.stringify(await importResults(values.run, period as Period), null, 2));
+  } else if (command === "curve") {
+    if (positionals.length || values.seed || values["max-gap"] || values.engine || values.limit || values.split || values.count || values.period)
+      throw new Error("Curve takes only --run.");
+    console.log(JSON.stringify(await writeCurve(values.run), null, 2));
   } else if (command === "recheck") {
     if (!values.engine) throw new Error("--engine is required; point to a Stockfish 19 binary.");
     if (positionals.length || values.seed || values["max-gap"] || values.limit || values.split || values.period)

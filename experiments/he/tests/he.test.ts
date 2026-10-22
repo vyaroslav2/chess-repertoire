@@ -9,6 +9,7 @@ import { importFiles, groupObservations } from "../import";
 import { parseEvaluation } from "../engine";
 import { writeJobs } from "../jobs";
 import { importResults } from "../results";
+import { basis, chances, fit } from "../curve";
 import { DATA_ROOT, assertDataDirectory, runPath } from "../paths";
 import type { Observation } from "../types";
 
@@ -255,4 +256,19 @@ test("results join both files to their groups, flip to White's view and refuse b
       [[1, "d7d5", "a", 15, null, 1], [2, "g8f6", "b", null, -3, 1]]);
     await assert.rejects(importResults(name, "fit"));
   } finally { await rm(run, { recursive: true }); }
+});
+test("the curve fit finds the chances it was given, and the spline is straight beyond its outer knots", () => {
+  const knots = [-6, -2, 0, 2, 6];
+  const truth = [-0.1, 0.15, 0.3, 0.02, -0.05, 0.01];
+  // Counts exactly in proportion to the true chances: the best fit is the truth itself.
+  const groups = Array.from({ length: 81 }, (_, i) => -1000 + 25 * i).map(cp => {
+    const c = chances(truth, knots, cp);
+    return { basis: basis(Math.max(-10, Math.min(10, cp / 100)), knots), losses: 1000 * c.loss, draws: 1000 * c.draw, wins: 1000 * c.win };
+  });
+  const fitted = fit(groups, knots);
+  fitted.params.forEach((value, j) => assert.ok(Math.abs(value - truth[j]) < 1e-4, "param " + j + ": " + value));
+  const c = chances(truth, knots, 150);
+  assert.ok(Math.abs(c.win + c.draw + c.loss - 1) < 1e-12 && c.loss > chances(truth, knots, 0).loss);
+  const at = (x: number) => basis(x, knots).slice(1);
+  for (const x of [7, -7]) at(x).forEach((value, j) => assert.ok(Math.abs(at(x + 1)[j] - 2 * value + at(x - 1)[j]) < 1e-9));
 });
