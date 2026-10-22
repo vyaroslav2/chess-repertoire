@@ -122,6 +122,9 @@ export default function SrsTrainer({
 
   // Which of your moves in a whole-line card is asked; 0 at each new card.
   const [lineStep, setLineStep] = useState(0);
+  // The status light (GR.06): how the line has gone so far. Red or amber is
+  // never turned back to green; null until your first move, and at each new card.
+  const [lineStatus, setLineStatus] = useState<Exclude<TestStatus, "idle"> | null>(null);
   const currentStat = useMemo(() => lineStepCard(stats[0], lineStep), [stats[0], lineStep]);
   // Grades wait for the line's end: your last move, with no White move after it.
   const isLastStep = !currentStat?.fullLine || lineStep >= lastLineStep(currentStat);
@@ -208,7 +211,10 @@ export default function SrsTrainer({
     const playedMove = lineStep > 0 ? tempChess.history({ verbose: true }).at(-1) : undefined;
     setLastMove(playedMove ? [playedMove.from, playedMove.to] : undefined);
     setTestStatus("idle");
-    if (lineStep === 0) setEvalsShown(false);
+    if (lineStep === 0) {
+      setEvalsShown(false);
+      setLineStatus(null);
+    }
     setCurrentPlyIndex(priorMoves.length);
 
     if (!finalMove) {
@@ -411,6 +417,7 @@ export default function SrsTrainer({
               chess.load(tempChess.fen());
               setLastMove([move.from, move.to]);
               setTestStatus("revealed");
+              setLineStatus("revealed");
               setCurrentPlyIndex(targetPlyIndex + 1);
               goOnInLine();
               playSound();
@@ -560,6 +567,7 @@ export default function SrsTrainer({
           setFen(chess.fen());
           setLastMove([from, to]);
           setTestStatus("correct");
+          setLineStatus((previous) => previous ?? "correct");
           setCurrentPlyIndex(targetPlyIndex + 1);
           goOnInLine();
         } else {
@@ -567,6 +575,7 @@ export default function SrsTrainer({
           setFen(chess.fen());
           setLastMove([from, to]);
           setTestStatus("wrong");
+          setLineStatus("wrong");
           setCurrentPlyIndex(targetPlyIndex + 1);
 
           // Snap back after a very short delay
@@ -695,7 +704,7 @@ export default function SrsTrainer({
         </div>
       )}
 
-      {testStatus !== "idle" && (
+      {lineStatus && (
         <div
           style={{
             position: "fixed",
@@ -705,15 +714,15 @@ export default function SrsTrainer({
             height: "clamp(12px, 0.9vw, 18px)",
             borderRadius: "50%",
             background:
-              testStatus === "wrong"
+              lineStatus === "wrong"
                 ? "#c62828"
-                : testStatus === "correct"
+                : lineStatus === "correct"
                   ? "var(--lichess-green)"
                   : "#f9a825",
-            border: `1px solid ${testStatus === "wrong" ? "#8e1b1b" : testStatus === "correct" ? "#456b19" : "#b87a14"}`,
+            border: `1px solid ${lineStatus === "wrong" ? "#8e1b1b" : lineStatus === "correct" ? "#456b19" : "#b87a14"}`,
             zIndex: 100,
           }}
-          aria-label={`Status: ${testStatus}`}
+          aria-label={`Status: ${lineStatus}`}
         />
       )}
 

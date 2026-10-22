@@ -19,7 +19,7 @@ The board shows the position before the opponent's last move. After a 500ms wait
 
 GR.02 **Playing the answer.**
 Play a move on the board.
-- The right move stays on the board. The card is answered; the light turns green.
+- The right move stays on the board. The card is answered; the light turns green, unless it's already red or amber (GR.06).
 - A wrong move shows for 250ms, then goes back; the light turns red. You can try again, as often as you like.
 - A pawn reaching the last rank becomes a queen.
 
@@ -37,3 +37,16 @@ GR.05 **What a grade does.**
 - On `/demo`: Easy, or a second Good, takes the card out of the session. Any other grade sends it to the back of the queue; Again also clears its Good count. Nothing is saved.
 
 Checked in the app 2026-10-14, on `/demo`: GR.01 (`1` mid-slide does nothing; `Enter` mid-slide and in the wait reveals; the opponent's piece landing at once, watched by you with a 2s slide), GR.02 (wrong move red and back, right move green), GR.03 (also after a wrong move), GR.04 (`1` before a move does nothing; `Enter`, `Enter`; `3`; `2` straight after a wrong move), GR.05 (Easy out of the session, Hard to the back). Not checked: promotion, a second Good, Again clearing the Good count.
+
+
+GR.06 **Whole lines.**
+A card is a whole line: you play each of your moves in turn. The status light ([[UI|UI.30]]) shows how the line has gone so far, not only the last move.
+- No light until your first move in the line.
+- A right move turns it green.
+- A wrong move turns it red; a reveal turns it amber. The latest of these wins.
+- Once red or amber, it can't go back to green.
+- It stays through the opponent's replies, and goes off at the next card: after a grade or `Ctrl + Z`.
+- `1`–`4` and `Enter` grade at the line's end whatever the light shows. A misclick turns it red, but you can still grade Good.
+- In the app since 2026-10-22: `lineStatus` in `components/SrsTrainer.tsx`. Before, the light showed only the move being asked, so mid-line green and amber went off at once.
+
+Checked in the app 2026-10-22, on `/demo`: no light before the first move; right move green, kept through the reply; wrong move red; right move after it still red; reveal amber; right last move still amber; off after a grade and after `Ctrl + Z`; a wrong move then `Enter` on the same move gives amber. Not checked on `/`, but it's the same code.

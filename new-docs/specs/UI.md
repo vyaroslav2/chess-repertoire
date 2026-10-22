@@ -79,7 +79,7 @@ UI.29 **Test pages.** Temporary: `/fonts`, `/coords`, `/moves`, `/grid`, `/gauge
 - `/grid` can switch its evals' zero between plain (the app's), slashed and dotted (JetBrains Mono's own). The slashed font is built by the same script and lives only in `app/grid/`.
 
 UI.30 **Status light.**
-A circle in the bottom-left corner, 16px in from each edge, shown once a move is made or revealed. Diameter `clamp(12px, 0.9vw, 18px)`: 13.8px (17.3) in a 1536px window; 12px up to 1333px, 17.3px at 1920px, 18px from 2000px up. Fill by state, with a 1px border about 30% darker in the same hue:
+A circle in the bottom-left corner, 16px in from each edge, shown once a move is made or revealed. What it shows over a whole line: [[GR|GR.06]]. Diameter `clamp(12px, 0.9vw, 18px)`: 13.8px (17.3) in a 1536px window; 12px up to 1333px, 17.3px at 1920px, 18px from 2000px up. Fill by state, with a 1px border about 30% darker in the same hue:
 
 | State | Fill | Border |
 |---|---|---|
