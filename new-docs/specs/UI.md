@@ -39,9 +39,10 @@ Inter, 16px (20), weight 400, line height 24px, letter spacing -0.011em (-0.175p
   - One setting for `/` and `/demo`. Since 2026-10-22.
 - Letter spacing is Inter's own for 16px, by the formula in UI.20.
 - Size and line height are set on the status line itself, not inherited. Until 2026-10-22 they came from the browser's default font size, so a browser set to "Large" (20px) drew it 1.25× too big.
-- On `/`: Anki's counts ([[AK|AK.12]]), three rows, no colons. Labels in one column, left-aligned; numbers in another, right-aligned, so the units line up. 16px between the columns. Digits all one width (`tabular-nums`). The block is as wide as its text. Since 2026-10-22.
+- On `/`: Anki's counts ([[AK|AK.12]]), four rows (New, Learning, To Review, Done), no colons. Labels in one column, left-aligned; numbers in another, right-aligned, so the units line up. 16px between the columns. Digits all one width (`tabular-nums`). The block is as wide as its text. Since 2026-10-22.
   - Labels: weight 400, `#787674`.
   - Numbers: weight 350, in Anki's night-mode colours: New `#93c5fd`, Learning `#f87171`, To Review `#22c55e` (`--anki-new`, `--anki-learn`, `--anki-review`). From Anki's `deckbrowser.css`, and checked against a screenshot of Anki. Lighter than the labels, as the colours are much brighter. A zero keeps its colour, as on Anki's overview screen.
+  - Done ([[AK|AK.12]].01): violet `#a78bfa` (`--anki-done`), 6.71 : 1. Ours, not Anki's, but from the same palette (Tailwind): New is blue 300, Learning red 400, To Review green 500; Done is violet 400, at a similar brightness. A hue the other three don't use. Not amber or yellow, which mean "buried" and "suspended" in Anki, nor Anki's purple `#a855f7`, which means "marked".
   - Chosen on `/status` (UI.29).
 - On `/demo`: one line, 280px wide, right-aligned.
 

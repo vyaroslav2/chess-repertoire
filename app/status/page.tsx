@@ -13,10 +13,11 @@ const mono = { fontFamily: "var(--font-jetbrains-mono), monospace", fontSize: "1
 // Anki's own colours, from its deckbrowser.css: --state-new,
 // --state-learn, --state-review, and --fg-faint for a zero count. Only the
 // deck list fades a zero; the deck's overview keeps its colour, in bold.
+// Done is ours, not Anki's: violet from the same palette (Tailwind 400 / 600).
 const palettes = {
-  muted: { label: "Muted", new: "#787674", learn: "#787674", review: "#787674", zero: "#787674" },
-  night: { label: "Anki, night", new: "#93c5fd", learn: "#f87171", review: "#22c55e", zero: "#545454" },
-  day: { label: "Anki, day", new: "#3b82f6", learn: "#dc2626", review: "#16a34a", zero: "#545454" },
+  muted: { label: "Muted", new: "#787674", learn: "#787674", review: "#787674", done: "#787674", zero: "#787674" },
+  night: { label: "Anki, night", new: "#93c5fd", learn: "#f87171", review: "#22c55e", done: "#a78bfa", zero: "#545454" },
+  day: { label: "Anki, day", new: "#3b82f6", learn: "#dc2626", review: "#16a34a", done: "#7c3aed", zero: "#545454" },
 };
 type PaletteName = keyof typeof palettes;
 
@@ -98,7 +99,7 @@ export default function StatusPage() {
   const [labelsColoured, setLabelsColoured] = useState(false);
   const [fadeZeros, setFadeZeros] = useState(false);
   const [numberWeight, setNumberWeight] = useState(350);
-  const [counts, setCounts] = useState([9999, 9999, 9999]);
+  const [counts, setCounts] = useState([9999, 9999, 9999, 9999]);
   const [openingSize, setOpeningSize] = useState(14);
   const [openingWeight, setOpeningWeight] = useState(375);
   const [openingGap, setOpeningGap] = useState(4);
@@ -118,6 +119,7 @@ export default function StatusPage() {
     { label: "New", count: counts[0], colour: colours.new },
     { label: "Learning", count: counts[1], colour: colours.learn },
     { label: "To Review", count: counts[2], colour: colours.review },
+    { label: "Done", count: counts[3], colour: colours.done },
   ];
   const countColour = (count: number, colour: string) => (fadeZeros && count === 0 ? colours.zero : colour);
 
@@ -218,9 +220,9 @@ export default function StatusPage() {
             ))}
           </div>
           <div style={{ display: "flex", gap: "4px" }}>
-            <button style={buttonStyle} onClick={() => setCounts([9999, 9999, 9999])}>9999 each</button>
-            <button style={buttonStyle} onClick={() => setCounts([54, 5, 0])}>54 · 5 · 0</button>
-            <button style={buttonStyle} onClick={() => setCounts([0, 0, 0])}>0 · 0 · 0</button>
+            <button style={buttonStyle} onClick={() => setCounts([9999, 9999, 9999, 9999])}>9999 each</button>
+            <button style={buttonStyle} onClick={() => setCounts([54, 5, 0, 6])}>54 · 5 · 0 · 6</button>
+            <button style={buttonStyle} onClick={() => setCounts([0, 0, 0, 0])}>0 · 0 · 0 · 0</button>
           </div>
         </div>
       </div>

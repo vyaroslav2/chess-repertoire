@@ -69,10 +69,24 @@ Left of the board, Anki's counts for the deck, as on its overview screen: New, L
 ```
 New        54 
 Learning    5 
+Done        6 
 To Review   0 
 ```
 
-- Numbers right-aligned, in Anki's own colours: blue, red, green. The look: [[UI|UI.22]].
+- Numbers right-aligned, in Anki's own colours: blue, red, green; Done in violet, ours. The look: [[UI|UI.22]].
+
+AK.12.01 **Done.**
+The cards finished today: answered today, and not coming back today. Each card counts once, however many times it was answered. Anki shows no such count; its "Studied N cards today" counts answers, so a card answered Again twice, then Good, counts 3 there and 1 here.
+- From two Anki searches on the deck, both counted by Anki: `rated:1 -is:learn` (reviewed, or graduated from learning) and `rated:1 is:learn prop:due>0` (still in learning, but next due tomorrow or later). The app adds the two. A card in learning that is due again later today is not done.
+- "Today" is Anki's day: `rated:1` follows Anki's "Next day starts at" hour (Preferences → Review, default 4 am), one setting for the whole profile. So the count starts again from 0 when Anki's day changes, with no counter of ours to reset. The app needn't know the hour.
+- Asked with the other three counts: on load, after each grade, after each undo. A page left open across the day change shows yesterday's count until the next grade or reload, as the other three do. Accepted.
+- Includes cards graded in Anki itself, as the other counts do.
+- Checked 2026-10-22, by grading in the test profile:
+  - Again on a card already in learning: answered today, still 1 card (each card counts once); not done, as it is due again in minutes.
+  - Easy on a card in learning: it graduated, and Done went from 1 to 2.
+  - Cards in today's learning steps match `prop:due=0`, so `prop:due>0` leaves them out, as meant.
+  - The page then showed New 50, Learning 1, To Review 0, Done 2; Anki's own counts were 50, 1, 0.
+  - Not tried: a card in learning due tomorrow or later (`prop:due>0`). The deck's steps (1m 10m; 10m after a lapse) are all within the day, so no card can be in that state yet.
 
 
 AK.13 **Undo.**

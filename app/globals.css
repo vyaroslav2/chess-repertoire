@@ -19,6 +19,8 @@
   --anki-new: #93c5fd;
   --anki-learn: #f87171;
   --anki-review: #22c55e;
+  /* Ours, not Anki's: violet 400 of the same palette (Tailwind), 6.71 : 1 */
+  --anki-done: #a78bfa;
   --lichess-green: #629924;
   --lichess-green-hover: #75b32c;
   --lichess-accent: #3692e7;

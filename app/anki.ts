@@ -9,7 +9,7 @@ const prisma = new PrismaClient();
 const ankiConnectUrl = "http://localhost:8765";
 const modelName = "Chess Repertoire";
 
-export type AnkiCounts = { newCount: number; learnCount: number; reviewCount: number };
+export type AnkiCounts = { newCount: number; learnCount: number; reviewCount: number; doneCount: number };
 export type AnkiSession =
   | { status: "card"; card: any; counts: AnkiCounts }
   | { status: "done" }
@@ -108,10 +108,25 @@ async function trainerCard(card: ReviewerCard) {
   };
 }
 
+// AK.12: cards answered today, by Anki's own day (`rated:1`), that won't come
+// back today: reviewed or graduated, or in learning but due tomorrow or later.
+// Anki does the matching; the app only adds the two counts.
+async function doneToday(deckName: string) {
+  const deck = `deck:"${deckName}" rated:1`;
+  const [left, laterLearning] = await Promise.all([
+    anki<number[]>("findCards", { query: `${deck} -is:learn` }),
+    anki<number[]>("findCards", { query: `${deck} is:learn prop:due>0` }),
+  ]);
+  return left.length + laterLearning.length;
+}
+
 async function deckCounts(deckName: string): Promise<AnkiCounts> {
-  const stats = await anki<Record<string, { name: string; new_count: number; learn_count: number; review_count: number }>>("getDeckStats", { decks: [deckName] });
+  const [stats, doneCount] = await Promise.all([
+    anki<Record<string, { name: string; new_count: number; learn_count: number; review_count: number }>>("getDeckStats", { decks: [deckName] }),
+    doneToday(deckName),
+  ]);
   const deck = Object.values(stats).find(stat => stat.name === deckName);
-  return { newCount: deck?.new_count ?? 0, learnCount: deck?.learn_count ?? 0, reviewCount: deck?.review_count ?? 0 };
+  return { newCount: deck?.new_count ?? 0, learnCount: deck?.learn_count ?? 0, reviewCount: deck?.review_count ?? 0, doneCount };
 }
 
 // Anki's GUI calls return before the reviewer has moved on. Polls the

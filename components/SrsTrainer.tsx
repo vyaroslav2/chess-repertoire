@@ -778,6 +778,7 @@ export default function SrsTrainer({
             <span>New</span><span style={{ ...ankiCountStyle, color: "var(--anki-new)" }}>{ankiCounts.newCount}</span>
             <span>Learning</span><span style={{ ...ankiCountStyle, color: "var(--anki-learn)" }}>{ankiCounts.learnCount}</span>
             <span>To Review</span><span style={{ ...ankiCountStyle, color: "var(--anki-review)" }}>{ankiCounts.reviewCount}</span>
+            <span>Done</span><span style={{ ...ankiCountStyle, color: "var(--anki-done)" }}>{ankiCounts.doneCount}</span>
           </div>
         ) : (
           <p
