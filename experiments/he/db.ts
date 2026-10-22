@@ -2,7 +2,7 @@ import mysql from "mysql2/promise";
 import { readGames, gameRecord, type GameRecord } from "./pgn";
 import { sampledMoves } from "./dots";
 
-// Connection details come from HE_MYSQL_URL (mysql://he:<password>@127.0.0.1:3306/he),
+// Connection details come from HE_MYSQL_URL (mysql://he:<password>@127.0.0.1:13306/he),
 // so no password lives in the code. Error messages never repeat the URL.
 export function mysqlUrl(env: NodeJS.ProcessEnv = process.env): string {
   const url = env.HE_MYSQL_URL;

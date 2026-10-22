@@ -196,11 +196,19 @@ Scripts log in as the `he` user. Set the connection once as a Windows user envir
 then restart terminals and editors so they see it:
 
 ```powershell
-[Environment]::SetEnvironmentVariable("HE_MYSQL_URL", "mysql://he:<password>@127.0.0.1:3306/he", "User")
+[Environment]::SetEnvironmentVariable("HE_MYSQL_URL", "mysql://he:<password>@127.0.0.1:13306/he", "User")
 npm --prefix experiments/he run db-check
 ```
 
 db-check prints the server version, user and database. The password is never stored in the code.
+
+The container publishes MySQL on host port 13306, not 3306: Windows can reserve port ranges for
+itself (`netsh interface ipv4 show excludedportrange protocol=tcp`), and on 2026-10-22 one of them
+held 3306, so Docker could not open it. The container was made with:
+
+```powershell
+docker run -d --name he-mysql --restart unless-stopped -p 127.0.0.1:13306:3306 --env-file <MYSQL_* variables> -v "C:/chess-repertoire/experiments/he/data/mysql:/var/lib/mysql" mysql:8.0
+```
 The mysql2 driver is installed in experiments/he/node_modules, not in the application.
 
 ### Games table

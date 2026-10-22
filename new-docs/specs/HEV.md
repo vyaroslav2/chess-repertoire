@@ -285,7 +285,9 @@ HEV.83 **The games in MySQL.** A new table, `sampled_moves`, holds one row per g
 
 `npm --prefix experiments/he run load-moves -- --run 2024-02-3000mb`
 
-Example query, Black's score by move number:
+Loaded on 2026-10-22: 50,000 rows, every one with its game in `games`; 49,909 with a cp eval, 91 with a mate. MySQL now listens on port 13306, not 3306: Windows had reserved the ports 3270–3369 for itself, so Docker could not open 3306.
+
+Example query, Black's score by move number (it gives 46–50% at every move, 2 to 15):
 
 ```sql
 SELECT move_number, COUNT(*) AS games,
