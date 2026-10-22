@@ -136,6 +136,8 @@ export default function SrsTrainer({
   const slideStartedRef = useRef(false);
   // A wrong move has played its own sound; the redraw it sets off stays silent, as on Lichess.
   const silentRedrawRef = useRef(false);
+  // The ply last shown: stepping back through the moves is silent, as on Lichess.
+  const shownPlyRef = useRef(-1);
   const animTimerRef = useRef<NodeJS.Timeout | null>(null);
   const snapBackTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -304,6 +306,8 @@ export default function SrsTrainer({
 
   // Browsing Effect
   useEffect(() => {
+    const forward = currentPlyIndex > shownPlyRef.current;
+    shownPlyRef.current = currentPlyIndex;
     if (!currentStat) return;
     if (currentPlyIndex < 0) return;
     if (isInitializingRef.current) return; // Prevent interference during the opening animation
@@ -332,7 +336,7 @@ export default function SrsTrainer({
     // Play sound if we browsed (visual check)
     const silent = silentRedrawRef.current;
     silentRedrawRef.current = false;
-    if (fen !== tempChess.fen() && !silent) {
+    if (fen !== tempChess.fen() && !silent && forward) {
       playSound(tempChess.history().at(-1));
     }
 
