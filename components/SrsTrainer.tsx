@@ -632,7 +632,7 @@ export default function SrsTrainer({
           setLineStatus("wrong");
           setCurrentPlyIndex(targetPlyIndex + 1);
 
-          // Snap back after a very short delay
+          // Back after 300ms, as on Lichess (GR.02)
           snapBackTimerRef.current = setTimeout(() => {
             snapBackTimerRef.current = null;
             chess.undo();
@@ -653,7 +653,7 @@ export default function SrsTrainer({
             }
             setCurrentPlyIndex(targetPlyIndex);
             logFlightBox("ACTION_USER_MOVE_SNAPBACK", {});
-          }, 250);
+          }, 300);
         }
       }
     } catch (e) {

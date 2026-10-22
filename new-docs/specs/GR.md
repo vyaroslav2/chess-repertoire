@@ -20,8 +20,10 @@ The board shows the position before the opponent's last move. After a 500ms wait
 GR.02 **Playing the answer.**
 Play a move on the board.
 - The right move stays on the board. The card is answered; the light turns green, unless it's already red or amber (GR.06).
-- A wrong move shows for 250ms, then goes back; the light turns red. You can try again, as often as you like.
+- A wrong move shows for 300ms, as on Lichess (`revertUserMove` in lila's puzzle `ctrl.ts`), then goes back; the light turns red. You can try again, as often as you like.
 - A pawn reaching the last rank becomes a queen.
+
+**Was:** a wrong move showed for 250ms, until 2026-10-22.
 
 GR.03 **Revealing the answer.**
 `Enter`, before the right move is played, plays the answer on the board for you. The light turns amber. It works after a wrong move too.
