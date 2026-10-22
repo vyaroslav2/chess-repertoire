@@ -28,7 +28,7 @@
   .layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; }
   @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
   .chart { position: relative; }
-  canvas { width: 100%; height: 520px; display: block; cursor: crosshair; }
+  canvas { width: 100%; height: 520px; display: block; cursor: crosshair; user-select: none; }
   .status { color: var(--muted); margin-top: 6px; }
   aside { background: var(--panel); border-radius: 8px; padding: 12px 14px; align-self: start; }
   aside h2 { font-size: 15px; margin: 0 0 8px; }
@@ -55,7 +55,8 @@
     <span><label for="group">Group</label>
       <select id="group"><option value="all">any size</option><option value="1">1 game</option><option value="2">2+ games</option><option value="10">10+ games</option></select></span>
     <span><label for="range">Eval range</label>
-      <select id="range"><option value="300">±300</option><option value="600" selected>±600</option><option value="1000">±1000</option></select></span>
+      <select id="range"><option value="300">±300</option><option value="600" selected>±600</option><option value="1000">±1000</option></select>
+      <button id="reset" title="Back to the whole range (or double-click the chart)">Zoom out</button></span>
   </div>
   <div class="layout">
     <div class="chart">
@@ -75,7 +76,7 @@ const OPENING = ["1. d4 d5", "1. e4 c6"], SPEED = ["Rapid", "Classical"];
 const RESULT = ["1-0, Black lost", "1/2-1/2, a draw", "0-1, Black won"];
 const fmt = n => n.toLocaleString("en-GB");
 const pawns = cp => (cp > 0 ? "+" : "") + (cp / 100).toFixed(2);
-let seed = 1, selected = -1, shown = [], hits = [];
+let seed = 1, selected = -1, shown = [], hits = [], view = null, plot = null;
 
 $("lead").textContent = "Run " + D.run + ". " + fmt(N) + " games with a cp eval (" + D.mates +
   " with a mate score are left out). Across: the eval after Black's sampled move, in White's view. Up: Black's result. Line: the fitted curve (" + D.curveName + "), with its 95% range.";
@@ -87,6 +88,9 @@ function random(s) {
 }
 // A fixed small shift up or down per game, so dots with the same result don't sit on top of each other.
 const jitter = i => (random(i * 2654435761)() - 0.5) * 0.22;
+// Evals are whole centipawns, so many games share one. Across, each dot moves at most 0.45 cp,
+// inside its own centipawn, so a zoomed-in column of games opens out without changing any eval.
+const spread = i => { const next = random(i * 2654435761); next(); return (next() - 0.5) * 0.9; };
 
 function choose() {
   const from = +$("from").value, to = +$("to").value, opening = $("opening").value, group = $("group").value;
@@ -114,22 +118,29 @@ function draw() {
   g.setTransform(ratio, 0, 0, ratio, 0, 0);
   g.clearRect(0, 0, width, height);
   const range = +$("range").value, left = 84, right = width - 16, top = 16, bottom = height - 44;
-  const x = cp => left + (Math.max(-range, Math.min(range, cp)) + range) / (2 * range) * (right - left);
-  const y = score => bottom - (score + 0.15) / 1.3 * (bottom - top);
+  // Unzoomed, evals beyond the range sit at its edge; zoomed, whatever is outside the view is hidden.
+  const v = view ?? home();
+  const x = cp => left + ((view ? cp : Math.max(-range, Math.min(range, cp))) - v.x0) / (v.x1 - v.x0) * (right - left);
+  const y = score => bottom - (score - v.y0) / (v.y1 - v.y0) * (bottom - top);
+  plot = { left, right, top, bottom, v };
   g.font = "12px Segoe UI, Helvetica, Arial, sans-serif"; g.lineWidth = 1;
   // Grid and labels.
   g.strokeStyle = color("--grid"); g.fillStyle = color("--muted");
   for (const [score, label] of [[0, "loss 0"], [0.25, "25%"], [0.5, "draw ½"], [0.75, "75%"], [1, "win 1"]]) {
+    if (score < v.y0 || score > v.y1) continue;
     g.beginPath(); g.moveTo(left, y(score)); g.lineTo(right, y(score)); g.stroke();
     g.textAlign = "right"; g.fillText(label, left - 8, y(score) + 4);
   }
-  const step = range === 300 ? 100 : range === 600 ? 200 : 250;
-  for (let cp = -range; cp <= range; cp += step) {
+  // About 8 grid lines across, at round numbers: 1, 2 or 5 times a power of ten.
+  const rough = (v.x1 - v.x0) / 8, power = 10 ** Math.floor(Math.log10(rough));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * power).find(s => s >= rough);
+  for (let cp = Math.ceil(v.x0 / step) * step; cp <= v.x1; cp += step) {
     g.beginPath(); g.moveTo(x(cp), top); g.lineTo(x(cp), bottom); g.stroke();
-    g.textAlign = "center"; g.fillText((cp > 0 ? "+" : "") + cp, x(cp), bottom + 16);
+    g.textAlign = "center"; g.fillText((cp > 0 ? "+" : "") + Math.round(cp), x(cp), bottom + 16);
   }
-  g.fillText("Eval after Black's move, cp, White's view (+ = good for White). Evals beyond the range sit at its edge.", (left + right) / 2, bottom + 34);
+  g.fillText("Eval after Black's move, cp, White's view (+ = good for White). " + (view ? "Zoomed in." : "Evals beyond the range sit at its edge."), (left + right) / 2, bottom + 34);
   g.save(); g.translate(14, (top + bottom) / 2); g.rotate(-Math.PI / 2); g.fillText("Black's result", 0, 0); g.restore();
+  g.save(); g.beginPath(); g.rect(left, top, right - left, bottom - top); g.clip();
   // The curve's 95% range and line.
   const curve = D.curve.filter(row => row[0] >= -range && row[0] <= range);
   g.fillStyle = color("--curve"); g.globalAlpha = 0.16; g.beginPath();
@@ -139,15 +150,17 @@ function draw() {
   g.strokeStyle = color("--curve"); g.lineWidth = 2.5; g.beginPath();
   curve.forEach((row, i) => i ? g.lineTo(x(row[0]), y(row[1])) : g.moveTo(x(row[0]), y(row[1])));
   g.stroke();
-  // The dots: fainter when there are many.
-  const alpha = shown.length > 20000 ? 0.12 : shown.length > 3000 ? 0.25 : shown.length > 300 ? 0.45 : 0.7;
-  g.fillStyle = "rgba(" + color("--dot") + "," + alpha + ")";
+  // The dots: fainter when many are in view, bigger when zoomed in.
   hits = [];
   for (const i of shown) {
-    const px = x(D.cp[i]), py = y(D.outcome[i] / 2 + jitter(i));
-    g.fillRect(px - 2, py - 2, 4, 4);
-    hits.push([i, px, py]);
+    const px = x(D.cp[i] + spread(i)), py = y(D.outcome[i] / 2 + jitter(i));
+    if (px >= left - 4 && px <= right + 4 && py >= top - 4 && py <= bottom + 4) hits.push([i, px, py]);
   }
+  const alpha = hits.length > 20000 ? 0.12 : hits.length > 3000 ? 0.25 : hits.length > 300 ? 0.45 : 0.7;
+  const zoom = Math.sqrt((2 * range) / (v.x1 - v.x0) * 1.3 / (v.y1 - v.y0));
+  const size = Math.min(8, 4 * Math.sqrt(zoom));
+  g.fillStyle = "rgba(" + color("--dot") + "," + alpha + ")";
+  for (const [, px, py] of hits) g.fillRect(px - size / 2, py - size / 2, size, size);
   // Black's real score per eval band, over the games shown.
   const edges = [-Infinity, -600, -400, -300, -200, -150, -100, -50, -25, 0, 25, 50, 100, 150, 200, 300, 400, 600, Infinity];
   g.fillStyle = color("--band"); g.strokeStyle = color("--bg"); g.lineWidth = 1;
@@ -162,11 +175,15 @@ function draw() {
   }
   if (selected >= 0) {
     g.strokeStyle = color("--pick"); g.lineWidth = 2.5; g.beginPath();
-    g.arc(x(D.cp[selected]), y(D.outcome[selected] / 2 + jitter(selected)), 7, 0, 2 * Math.PI); g.stroke();
+    g.arc(x(D.cp[selected] + spread(selected)), y(D.outcome[selected] / 2 + jitter(selected)), size / 2 + 5, 0, 2 * Math.PI); g.stroke();
   }
+  g.restore();
   const score = shown.reduce((s, i) => s + D.outcome[i] / 2, 0) / (shown.length || 1);
-  $("status").textContent = "Showing " + fmt(shown.length) + " games. Black's score in them: " + (100 * score).toFixed(1) +
-    "%. Squares: Black's real score in each eval band of the games shown (bands with 10+ games).";
+  $("status").textContent = "Showing " + fmt(shown.length) + " games" + (view ? ", " + fmt(hits.length) + " of them in view" : "") +
+    ". Black's score in them: " + (100 * score).toFixed(1) +
+    "%. Squares: Black's real score in each eval band of the games shown (bands with 10+ games). " +
+    "Scroll to zoom (Shift + scroll: across only), drag to move, double-click to zoom out.";
+  $("reset").disabled = !view;
 }
 
 function show(i) {
@@ -201,15 +218,56 @@ function show(i) {
   aside.append(button);
 }
 
-$("chart").addEventListener("click", event => {
-  const box = $("chart").getBoundingClientRect(), mx = event.clientX - box.left, my = event.clientY - box.top;
+// Zoom and move. The view never leaves the unzoomed area and never gets narrower than 4 cp across.
+function home() { const range = +$("range").value; return { x0: -range, x1: range, y0: -0.15, y1: 1.15 }; }
+function setView(next) {
+  const h = home(), fit = (a0, a1, b0, b1) => {
+    const width = Math.min(a1 - a0, b1 - b0), start = Math.max(b0, Math.min(a0, b1 - width));
+    return [start, start + width];
+  };
+  [next.x0, next.x1] = fit(next.x0, next.x1, h.x0, h.x1);
+  [next.y0, next.y1] = fit(next.y0, next.y1, h.y0, h.y1);
+  view = next.x1 - next.x0 >= h.x1 - h.x0 && next.y1 - next.y0 >= h.y1 - h.y0 ? null : next;
+  draw();
+}
+const canvas = $("chart"), point = event => {
+  const box = canvas.getBoundingClientRect(), { left, right, top, bottom, v } = plot;
+  const mx = event.clientX - box.left, my = event.clientY - box.top;
+  return { mx, my, cp: v.x0 + (mx - left) / (right - left) * (v.x1 - v.x0), score: v.y0 + (bottom - my) / (bottom - top) * (v.y1 - v.y0) };
+};
+canvas.addEventListener("wheel", event => {
+  event.preventDefault();
+  const { cp, score } = point(event), v = plot.v, factor = Math.exp((event.deltaY || event.deltaX) * 0.0015);
+  if ((v.x1 - v.x0) * factor < 4) return;
+  setView({ x0: cp - (cp - v.x0) * factor, x1: cp + (v.x1 - cp) * factor,
+    y0: event.shiftKey ? v.y0 : score - (score - v.y0) * factor, y1: event.shiftKey ? v.y1 : score + (v.y1 - score) * factor });
+}, { passive: false });
+let drag = null;
+canvas.addEventListener("mousedown", event => { drag = { ...point(event), v: { ...plot.v }, moved: false }; });
+window.addEventListener("mousemove", event => {
+  if (!drag) return;
+  const { mx, my } = point(event), dx = mx - drag.mx, dy = my - drag.my, { left, right, top, bottom } = plot;
+  if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
+  if (!drag.moved || !view) return;
+  canvas.style.cursor = "grabbing";
+  const sx = dx / (right - left) * (drag.v.x1 - drag.v.x0), sy = dy / (bottom - top) * (drag.v.y1 - drag.v.y0);
+  setView({ x0: drag.v.x0 - sx, x1: drag.v.x1 - sx, y0: drag.v.y0 + sy, y1: drag.v.y1 + sy });
+});
+window.addEventListener("mouseup", event => {
+  if (!drag) return;
+  const moved = drag.moved; drag = null; canvas.style.cursor = "";
+  if (moved) return;
+  // A click without a drag picks the nearest dot.
+  const { mx, my } = point(event);
   let best = -1, distance = 64;
   for (const [i, px, py] of hits) { const d = (px - mx) ** 2 + (py - my) ** 2; if (d < distance) { distance = d; best = i; } }
   if (best >= 0) show(best);
 });
+canvas.addEventListener("dblclick", () => { view = null; draw(); });
+$("reset").onclick = () => { view = null; draw(); };
 $("again").onclick = () => { seed++; choose(); };
 for (const id of ["size", "from", "to", "opening", "group"]) $(id).addEventListener("change", choose);
-$("range").addEventListener("change", draw);
+$("range").addEventListener("change", () => { view = null; draw(); });
 window.addEventListener("resize", draw);
 choose();
 </script>

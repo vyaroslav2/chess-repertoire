@@ -276,6 +276,8 @@ HEV.81 **What you can choose.**
 * **Opening:** both, 1. d4 d5 or 1. e4 c6.
 * **Group:** any size, one-game groups only, 2+ or 10+ games.
 * **Eval range:** ±300, ±600 or ±1000. Evals beyond the range sit at its edge.
+* **Zoom:** scroll on the chart to zoom in or out where the pointer is; Shift + scroll zooms across only. Drag to move. Double-click, or "Zoom out", goes back to the whole range. Dots grow a little as you zoom in, so single games stand apart even when all 49,909 are shown.
+* Evals are whole centipawns, so hundreds of games can share one eval. Each dot is moved across by at most 0.45 cp, so a stack of games on one eval opens out when zoomed in. No dot leaves its own centipawn.
 
 HEV.82 **Checking a game.** Click a dot. The panel shows the game: a link to it on Lichess that opens after Black's sampled move, the date, both players and ratings, the opening, the sampled move, its eval and depth, the result, how many games share its group, the results file and id of its search, the position (FEN), and a MySQL query for the same game. So each dot leads to three sources: Lichess (the real game), the results file (the real search), and MySQL.
 
