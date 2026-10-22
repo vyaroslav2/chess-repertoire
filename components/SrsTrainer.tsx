@@ -27,6 +27,9 @@ type TestStatus = "idle" | "wrong" | "correct" | "revealed";
 // A moving piece slides over 250ms, Lichess's default (UI.35).
 const slideMs = 250;
 
+// Anki's counts (AK.12, UI.22): lighter than their labels, units lined up.
+const ankiCountStyle = { fontWeight: 350, textAlign: "right" } as const;
+
 // A card that is a whole line (AK.02, AK.15) is played one of your moves at a
 // time. Your first move's ply in the line, and the step of your last move.
 const firstOwnPly = (card: any) => (card.repertoire.color.toLowerCase() === "black" ? 1 : 0);
@@ -758,9 +761,9 @@ export default function SrsTrainer({
               color: "var(--lichess-text-muted)",
             }}
           >
-            <span>New</span><span>{ankiCounts.newCount}</span>
-            <span>Learning</span><span>{ankiCounts.learnCount}</span>
-            <span>To Review</span><span>{ankiCounts.reviewCount}</span>
+            <span>New</span><span style={{ ...ankiCountStyle, color: "var(--anki-new)" }}>{ankiCounts.newCount}</span>
+            <span>Learning</span><span style={{ ...ankiCountStyle, color: "var(--anki-learn)" }}>{ankiCounts.learnCount}</span>
+            <span>To Review</span><span style={{ ...ankiCountStyle, color: "var(--anki-review)" }}>{ankiCounts.reviewCount}</span>
           </div>
         ) : (
           <p
@@ -791,6 +794,7 @@ export default function SrsTrainer({
             maxWidth: "100%",
             color: "var(--opening-text)",
             fontSize: "14px",
+            fontWeight: 375,
             lineHeight: "20px",
             // Inter's recommended tracking at 14px (rsms.me/inter "dynamic metrics"): -0.087px
             letterSpacing: "-0.0062em",

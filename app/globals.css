@@ -15,6 +15,10 @@
     224 220 214 / 0.075
   ); /* Obsidian's hover: light at 7.5% */
   --menu-text: #dad6d0; /* Obsidian's #dadada in the same warm tint */
+  /* Anki's night-mode count colours, from its deckbrowser.css (AK.12) */
+  --anki-new: #93c5fd;
+  --anki-learn: #f87171;
+  --anki-review: #22c55e;
   --lichess-green: #629924;
   --lichess-green-hover: #75b32c;
   --lichess-accent: #3692e7;

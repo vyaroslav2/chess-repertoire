@@ -68,9 +68,11 @@ Left of the board, Anki's counts for the deck, as on its overview screen: New, L
 
 ```
 New        54 
-Learning   5 
-To Review  0 
+Learning    5 
+To Review   0 
 ```
+
+- Numbers right-aligned, in Anki's own colours: blue, red, green. The look: [[UI|UI.22]].
 
 
 AK.13 **Undo.**

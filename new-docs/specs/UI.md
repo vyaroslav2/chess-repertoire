@@ -9,7 +9,8 @@ Sizes are CSS px, with screen px at 125% in brackets (1 CSS px = 1.25 screen px)
 ## Text
 
 UI.20 **ECO and opening name.**
-Inter, 14px (17.5), weight 400, line height 20px, letter spacing -0.0062em (-0.087px), `#979490` (6.05 : 1). ECO code and name share one style, e.g. "A40 Queen's Pawn Game".
+Inter, 14px (17.5), weight 375, line height 20px, letter spacing -0.0062em (-0.087px), `#979490` (6.05 : 1). ECO code and name share one style, e.g. "A40 Queen's Pawn Game".
+- Weight 375, since 2026-10-22: tried on `/status` (UI.29). 350 looked cleaner but washed out; 400, heavy across a long name. Inter is a variable font, so 375 is a true weight, not a fake.
 - Letter spacing is Inter's own recommendation for 14px, from its designer's "dynamic metrics" formula: letter-spacing (em) = -0.0223 + 0.185 × e^(-0.1745 × size in px). Set in `em`, so it scales with the size. Tighter values (-0.3px, -0.6px) were tried and dropped.
 - `#979490` is a warm version of Lichess's dim text, `#949494` (6.02 : 1).
 
@@ -33,7 +34,10 @@ Ctrl + Alt + Shift + C + U switches the coordinates to a large style and back. A
 UI.22 **Status line (temporary).**
 Inter, 16px (20), weight 400, line height 24px, letter spacing -0.011em (-0.175px), `#787674`. Hidden until the pointer is over it. It sits in the free space left of the board, level with the board's top, its right edge 40px left of the board. It will be redone.
 - Letter spacing is Inter's own for 16px, by the formula in UI.20.
-- On `/`: Anki's counts ([[AK|AK.12]]), three rows, no colons. Labels in one column, numbers in another, both left-aligned, 16px apart. Digits all one width (`tabular-nums`). The block is as wide as its text. Since 2026-10-22.
+- On `/`: Anki's counts ([[AK|AK.12]]), three rows, no colons. Labels in one column, left-aligned; numbers in another, right-aligned, so the units line up. 16px between the columns. Digits all one width (`tabular-nums`). The block is as wide as its text. Since 2026-10-22.
+  - Labels: weight 400, `#787674`.
+  - Numbers: weight 350, in Anki's night-mode colours: New `#93c5fd`, Learning `#f87171`, To Review `#22c55e` (`--anki-new`, `--anki-learn`, `--anki-review`). From Anki's `deckbrowser.css`, and checked against a screenshot of Anki. Lighter than the labels, as the colours are much brighter. A zero keeps its colour, as on Anki's overview screen.
+  - Chosen on `/status` (UI.29).
 - On `/demo`: one line, 280px wide, right-aligned.
 
 **Was:** Segoe UI, above the board.
@@ -76,7 +80,8 @@ UI.27 **Centring.** The board is centred across and down; only the board counts.
 
 UI.28 **Opening name position.** The opening name sits 4px above the board, as wide as the board and lined up with its left edge.
 
-UI.29 **Test pages.** Temporary: `/fonts`, `/coords`, `/moves`, `/grid`, `/gauge` and `/settings`. Delete them before deploying.
+UI.29 **Test pages.** Temporary: `/fonts`, `/coords`, `/moves`, `/grid`, `/gauge`, `/settings` and `/status`. Delete them before deploying.
+- `/status` shows Anki's counts (UI.22, [[AK|AK.12]]) left of a real board, always visible. Sliders set the size, the labels' weight and the numbers' weight (Anki's overview: 700), line height, column gap, the gap to the board and the offset from its top; letter spacing follows the size, by UI.20's formula. Colours: the app's muted grey, or Anki's own for New, Learning and To Review (blue, red, green; night or day). Zeros can be faint, as in Anki's deck list (its overview never fades them). The counts can be typed, or set to 9999 each, 54 · 5 · 0, or 0 · 0 · 0. Above the board, the opening name (UI.20, UI.28), with sliders for its size, weight and gap to the board, and for its grey: the lightness of `#979490`'s warm grey. Its colour can also be picked or typed as hex, with its contrast shown. Weights step by 25; letter spacing and line height follow the size. Three real names to try, from the repertoire's longest (90 characters) to "A40 Queen's Pawn Game". Lines at the bottom sum up the choice, for UI.20 and UI.22.
 - `/settings` shows the settings button (SM.01) at up to 12× and the menu (SM.06) at up to 6×, each with its hover box forced on. Sliders set the rounding of the button, the menu panel and the items' hover box, each on its own. The real button, in its corner, opens the menu.
 - `/gauge` shows the eval gauge (UI.31) at chosen evals, without the database: one gauge you set by typing (`-0.25`, `#-3`) or with buttons, which slides as in the trainer, and every preset side by side, from `#-1` to `#1`, each with White's share.
 - `/grid` can switch its evals' zero between plain (the app's), slashed and dotted (JetBrains Mono's own). The slashed font is built by the same script and lives only in `app/grid/`.
