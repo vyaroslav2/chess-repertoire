@@ -934,15 +934,11 @@ export default function SrsTrainer({
           }}
         >
           <LichessMoveList
+            // The answer once played or revealed. A wrong move goes back at once and
+            // is not listed: listing it showed the answer after browsing back to the start.
             moves={(currentStat?.lineMoves || []).concat(
-              testStatus === "correct" ||
-                testStatus === "revealed" ||
-                testStatus === "wrong"
-                ? [
-                    testStatus === "wrong" && lastMove
-                      ? chess.history()[chess.history().length - 1]
-                      : currentStat.targetMove.san,
-                  ]
+              testStatus === "correct" || testStatus === "revealed"
+                ? [currentStat.targetMove.san]
                 : [],
             )}
             evals={evalsShown ? moveEvals : undefined}
