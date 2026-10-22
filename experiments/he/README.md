@@ -220,3 +220,22 @@ never reach it: the filter drops them. 50,000 games take about 20 minutes.
 ```powershell
 npm --prefix experiments/he run load -- --run 2024-01-2500mb --limit 100
 ```
+
+### Sampled moves table
+
+load-moves joins a run's observations.jsonl to its evals.jsonl and copies each game's sampled
+move into `sampled_moves`: move number, SAN, UCI, the FEN before it, its group (job id and
+results file), the group's size and the eval (cp_white or mate_white, exactly one, and depth).
+It joins `games` by game_id and reports rows with no game. Repeating it is safe.
+
+```powershell
+npm --prefix experiments/he run load-moves -- --run 2024-02-3000mb
+```
+
+## Dot page
+
+`dots` writes data/runs/<run>/dots.html from observations.jsonl, evals.jsonl and curve.json: every
+game with a cp eval as a dot (eval against Black's result), the fitted curve and its range, and
+per-band real scores. Samples, filters and a clicked game's details (Lichess link at the sampled
+move, search id, FEN, MySQL query) run in the page; it needs no server or internet. The page
+itself is dots-template.html.

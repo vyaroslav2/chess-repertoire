@@ -11,6 +11,7 @@ import { writeJobs } from "../jobs";
 import { importResults } from "../results";
 import { basis, chances, fit, random } from "../curve";
 import { fitK, logGamma, type KGroup } from "../scatter";
+import { sampledMoves } from "../dots";
 import { DATA_ROOT, assertDataDirectory, runPath } from "../paths";
 import type { Observation } from "../types";
 
@@ -299,4 +300,19 @@ test("k fit finds the scatter it was given, and none where there is none", () =>
   assert.ok(scattered.range[0]! < 30 && 30 < scattered.range[1]!, JSON.stringify(scattered));
   const none = fitK(groups(null));
   assert.ok(none.range[1] === null && none.k > 200, JSON.stringify(none));
+});
+test("each game gets its group's eval, and a game without one is refused", async () => {
+  const name = "test-dots-" + process.pid, run = runPath(name);
+  await assertDataDirectory(run);
+  const row = observation();
+  const group = { id: 7, period: row.period, positionKey: row.positionKey, uci: row.uci, fens: [row.fen], games: 1,
+    wins: 1, draws: 0, losses: 0, moveNumbers: { [row.moveNumber]: 1 }, part: "b", cpWhite: -35, mateWhite: null, depth: 24, nodes: 2000000 };
+  try {
+    await writeFile(path.join(run, "observations.jsonl"), JSON.stringify(row) + "\n");
+    await writeFile(path.join(run, "evals.jsonl"), JSON.stringify(group) + "\n");
+    const [game] = await sampledMoves(name);
+    assert.deepEqual([game.gameId, game.groupId, game.results, game.cpWhite, game.mateWhite, game.outcome], [row.gameId, 7, "b", -35, null, "wins"]);
+    await writeFile(path.join(run, "evals.jsonl"), JSON.stringify({ ...group, uci: "a7a6" }) + "\n");
+    await assert.rejects(sampledMoves(name), /has no eval/);
+  } finally { await rm(run, { recursive: true }); }
 });

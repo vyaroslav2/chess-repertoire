@@ -8,7 +8,8 @@ import { writeCurve } from "./curve";
 import { writeK } from "./scatter";
 import type { Period } from "./types";
 import { resolveInputPath } from "./paths";
-import { checkConnection, loadGames } from "./db";
+import { checkConnection, loadGames, loadSampledMoves } from "./db";
+import { writeDots } from "./dots";
 import path from "node:path";
 import { DATA_ROOT, runPath } from "./paths";
 
@@ -22,14 +23,18 @@ const HELP = String.raw`Human evidence pilot
   npm --prefix experiments/he run recheck -- --run 2024-02-3000mb --engine <stockfish-19-binary> [--count 20]
   npm --prefix experiments/he run curve -- --run 2024-02-3000mb
   npm --prefix experiments/he run k -- --run 2024-02-3000mb
+  npm --prefix experiments/he run dots -- --run 2024-02-3000mb
   npm --prefix experiments/he run db-check
   npm --prefix experiments/he run load -- --run 2024-01-2500mb [--limit 100]
+  npm --prefix experiments/he run load-moves -- --run 2024-02-3000mb
 
 Import: --seed he-v1 (default), --max-gap 100 (default) or 200 (diagnostic).
 Periods: fit (2023-24), tune (2025), test (2026).
 Input and engine paths are relative to the terminal directory where you launch npm.
 All outputs live in experiments/he/data/. Existing run/results names are protected.
 Load copies a download's sample.pgn into the MySQL games table; repeating it is safe.
+Load-moves copies each game's sampled move and its eval into the MySQL sampled_moves table; repeating it is safe.
+Dots writes dots.html into the run's folder: every game as a dot, eval against result; open it in a browser.
 Jobs writes the groups as Colab search jobs: ids 1 to --split in jobs-a.jsonl, the rest in jobs-b.jsonl.
 Results checks results-a.jsonl and results-b.jsonl against their jobs and writes evals.jsonl: each group with its eval.
 Recheck searches --count random jobs from each results file again here; they must match exactly.
@@ -88,6 +93,11 @@ async function main() {
     if (positionals.length || values.seed || values["max-gap"] || values.engine || values.limit || values.split || values.count || values.period)
       throw new Error("Curve takes only --run.");
     console.log(JSON.stringify(await writeCurve(values.run), null, 2));
+  } else if (command === "dots" || command === "load-moves") {
+    if (positionals.length || values.seed || values["max-gap"] || values.engine || values.limit || values.split || values.count || values.period)
+      throw new Error("Dots and load-moves take only --run.");
+    runPath(values.run);
+    console.log(JSON.stringify(command === "dots" ? await writeDots(values.run) : await loadSampledMoves(values.run), null, 2));
   } else if (command === "k") {
     if (positionals.length || values.seed || values["max-gap"] || values.engine || values.limit || values.split || values.count || values.period)
       throw new Error("K takes only --run.");

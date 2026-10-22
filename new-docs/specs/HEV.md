@@ -261,6 +261,38 @@ HEV.76 **Open: which k to use.**
 * **335, the low end.** The most generous to human games that this data allows. My suggestion as a working value.
 * **The best fit (about 7,500).** Close to "ignore human games". Not useful: the data cannot pin it down.
 * **Wait for March.** A second 50,000, and then 100,000 together, may narrow the range. Later-move groups stay rare either way (HEV.74).
+#question
+## Looking at the games
+
+HEV.80 **The dot page.** One page shows every game as a dot: its eval across, Black's result up (win, draw or loss). The dots of one result form a band, spread a little up and down so they don't hide each other. Over them: the fitted curve with its 95% range, and orange squares for Black's real score in each eval band of the games shown.
+
+`npm --prefix experiments/he run dots -- --run 2024-02-3000mb`
+
+It writes `dots.html` into the run's folder (8 MB). It needs no internet. Making it again replaces it. The browser pane in the Claude app can't open a file that big, so there it is served from this PC by the `he-runs` entry in `.claude/launch.json`. Opened straight from the folder in Edge or Firefox, it works as it is.
+
+HEV.81 **What you can choose.**
+* **Show:** a random 100, 1,000 or 10,000 games, or all. "New sample" draws another; each sample has a number, so the same sample can be drawn again.
+* **Black's move:** from–to, 2 to 15.
+* **Opening:** both, 1. d4 d5 or 1. e4 c6.
+* **Group:** any size, one-game groups only, 2+ or 10+ games.
+* **Eval range:** ±300, ±600 or ±1000. Evals beyond the range sit at its edge.
+
+HEV.82 **Checking a game.** Click a dot. The panel shows the game: a link to it on Lichess that opens after Black's sampled move, the date, both players and ratings, the opening, the sampled move, its eval and depth, the result, how many games share its group, the results file and id of its search, the position (FEN), and a MySQL query for the same game. So each dot leads to three sources: Lichess (the real game), the results file (the real search), and MySQL.
+
+Example, checked by hand: game `g8gCaNm4`, Black's move 5… Nc6, eval −0.06. Its line in `results-a.jsonl` (id 3817) says Stockfish gave +6 from Black's side, which is −0.06 from White's. Its PGN in `sample.pgn` says 1-0, as the page does.
+
+HEV.83 **The games in MySQL.** A new table, `sampled_moves`, holds one row per game: the sampled move (number, SAN, UCI), the position before it, its group and search (`group_id`, `results`), the group's size, and the eval (`cp_white` or `mate_white`, and depth). It joins `games` by `game_id`. Loading it again overwrites rows, never doubles them.
+
+`npm --prefix experiments/he run load-moves -- --run 2024-02-3000mb`
+
+Example query, Black's score by move number:
+
+```sql
+SELECT move_number, COUNT(*) AS games,
+  ROUND(100 * AVG(CASE result WHEN '0-1' THEN 1 WHEN '1/2-1/2' THEN 0.5 ELSE 0 END), 1) AS black_score
+FROM games JOIN sampled_moves USING (game_id)
+GROUP BY move_number ORDER BY move_number;
+```
 
 ## Files
 
@@ -271,6 +303,7 @@ HEV.50 In `experiments/he/data/runs/2024-02-3000mb/`:
 * `curve.json` — the three versions and their scores, the chosen curve's numbers, the curve every 25 cp with its range, and the band check.
 * `curve.svg` — the picture, copied to `new-docs/images/hev-curve-feb.svg`.
 * `k.json` — k overall and by size, eval and move number, each with its range and group and game counts.
+* `dots.html` — the dot page (HEV.80).
 
 ## Next
 

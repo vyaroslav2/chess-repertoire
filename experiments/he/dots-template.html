@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HE games</title>
+<style>
+  :root {
+    --bg: #ffffff; --panel: #f6f6f4; --text: #222; --muted: #666; --grid: #e4e4e4; --axis: #999;
+    --dot: 28, 100, 180; --curve: #1c64b4; --band: #d9480f; --pick: #d9480f; --link: #1c64b4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1c1e; --panel: #26262a; --text: #e6e6e6; --muted: #a0a0a0; --grid: #333338; --axis: #666;
+      --dot: 110, 168, 240; --curve: #6ea8f0; --band: #ff8a50; --pick: #ff8a50; --link: #8cbcff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", Helvetica, Arial, sans-serif; }
+  main { max-width: 1280px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+  .lead { color: var(--muted); margin: 0 0 12px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; margin-bottom: 10px; }
+  .controls label { color: var(--muted); }
+  select, button, input { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--grid); border-radius: 6px; padding: 3px 8px; }
+  input[type=number] { width: 4em; }
+  button { cursor: pointer; }
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+  .chart { position: relative; }
+  canvas { width: 100%; height: 520px; display: block; cursor: crosshair; }
+  .status { color: var(--muted); margin-top: 6px; }
+  aside { background: var(--panel); border-radius: 8px; padding: 12px 14px; align-self: start; }
+  aside h2 { font-size: 15px; margin: 0 0 8px; }
+  aside table { width: 100%; border-collapse: collapse; }
+  aside th { text-align: left; font-weight: 500; color: var(--muted); padding: 3px 10px 3px 0; vertical-align: top; white-space: nowrap; }
+  aside td { padding: 3px 0; overflow-wrap: anywhere; }
+  aside a { color: var(--link); }
+  code { font: 12px/1.4 Consolas, "Cascadia Mono", monospace; }
+  .copy { margin-top: 8px; }
+  .help { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>HE games: eval against result</h1>
+  <p class="lead" id="lead"></p>
+  <div class="controls">
+    <span><label for="size">Show</label>
+      <select id="size"><option value="100">100</option><option value="1000" selected>1,000</option><option value="10000">10,000</option><option value="all">all</option></select>
+      games <button id="again" title="Draw a new random sample">New sample</button> <span class="help" id="seed"></span></span>
+    <span><label>Black's move</label> <input id="from" type="number" min="2" max="15" value="2"> to <input id="to" type="number" min="2" max="15" value="15"></span>
+    <span><label for="opening">Opening</label>
+      <select id="opening"><option value="all">both</option><option value="0">1. d4 d5</option><option value="1">1. e4 c6</option></select></span>
+    <span><label for="group">Group</label>
+      <select id="group"><option value="all">any size</option><option value="1">1 game</option><option value="2">2+ games</option><option value="10">10+ games</option></select></span>
+    <span><label for="range">Eval range</label>
+      <select id="range"><option value="300">±300</option><option value="600" selected>±600</option><option value="1000">±1000</option></select></span>
+  </div>
+  <div class="layout">
+    <div class="chart">
+      <canvas id="chart" aria-label="Each dot is one game: its eval across, Black's result up"></canvas>
+      <div class="status" id="status"></div>
+    </div>
+    <aside id="details"><h2>Click a dot</h2><p class="help">Each dot is one game. Click one to see the game, its move and its eval, with a link to the game on Lichess.</p></aside>
+  </div>
+</main>
+<script id="data" type="application/json">__DATA__</script>
+<script>
+"use strict";
+const D = JSON.parse(document.getElementById("data").textContent);
+const N = D.id.length;
+const $ = id => document.getElementById(id);
+const OPENING = ["1. d4 d5", "1. e4 c6"], SPEED = ["Rapid", "Classical"];
+const RESULT = ["1-0, Black lost", "1/2-1/2, a draw", "0-1, Black won"];
+const fmt = n => n.toLocaleString("en-GB");
+const pawns = cp => (cp > 0 ? "+" : "") + (cp / 100).toFixed(2);
+let seed = 1, selected = -1, shown = [], hits = [];
+
+$("lead").textContent = "Run " + D.run + ". " + fmt(N) + " games with a cp eval (" + D.mates +
+  " with a mate score are left out). Across: the eval after Black's sampled move, in White's view. Up: Black's result. Line: the fitted curve (" + D.curveName + "), with its 95% range.";
+
+// Seeded random numbers, so a sample can be drawn again exactly.
+function random(s) {
+  return () => { s = (s + 0x6d2b79f5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+// A fixed small shift up or down per game, so dots with the same result don't sit on top of each other.
+const jitter = i => (random(i * 2654435761)() - 0.5) * 0.22;
+
+function choose() {
+  const from = +$("from").value, to = +$("to").value, opening = $("opening").value, group = $("group").value;
+  const keep = [];
+  for (let i = 0; i < N; i++) {
+    if (D.move[i] < from || D.move[i] > to) continue;
+    if (opening !== "all" && D.opening[i] !== +opening) continue;
+    if (group === "1" ? D.groupGames[i] !== 1 : group !== "all" && D.groupGames[i] < +group) continue;
+    keep.push(i);
+  }
+  const size = $("size").value === "all" ? keep.length : Math.min(+$("size").value, keep.length);
+  const next = random(seed);
+  for (let i = 0; i < size; i++) { const j = i + Math.floor(next() * (keep.length - i)); [keep[i], keep[j]] = [keep[j], keep[i]]; }
+  shown = keep.slice(0, size);
+  $("seed").textContent = $("size").value === "all" ? "" : "(sample " + seed + ")";
+  if (!shown.includes(selected)) selected = -1;
+  draw();
+}
+
+function draw() {
+  const canvas = $("chart"), css = getComputedStyle(document.documentElement), color = name => css.getPropertyValue(name).trim();
+  const ratio = window.devicePixelRatio || 1, width = canvas.clientWidth, height = canvas.clientHeight;
+  canvas.width = width * ratio; canvas.height = height * ratio;
+  const g = canvas.getContext("2d");
+  g.setTransform(ratio, 0, 0, ratio, 0, 0);
+  g.clearRect(0, 0, width, height);
+  const range = +$("range").value, left = 84, right = width - 16, top = 16, bottom = height - 44;
+  const x = cp => left + (Math.max(-range, Math.min(range, cp)) + range) / (2 * range) * (right - left);
+  const y = score => bottom - (score + 0.15) / 1.3 * (bottom - top);
+  g.font = "12px Segoe UI, Helvetica, Arial, sans-serif"; g.lineWidth = 1;
+  // Grid and labels.
+  g.strokeStyle = color("--grid"); g.fillStyle = color("--muted");
+  for (const [score, label] of [[0, "loss 0"], [0.25, "25%"], [0.5, "draw ½"], [0.75, "75%"], [1, "win 1"]]) {
+    g.beginPath(); g.moveTo(left, y(score)); g.lineTo(right, y(score)); g.stroke();
+    g.textAlign = "right"; g.fillText(label, left - 8, y(score) + 4);
+  }
+  const step = range === 300 ? 100 : range === 600 ? 200 : 250;
+  for (let cp = -range; cp <= range; cp += step) {
+    g.beginPath(); g.moveTo(x(cp), top); g.lineTo(x(cp), bottom); g.stroke();
+    g.textAlign = "center"; g.fillText((cp > 0 ? "+" : "") + cp, x(cp), bottom + 16);
+  }
+  g.fillText("Eval after Black's move, cp, White's view (+ = good for White). Evals beyond the range sit at its edge.", (left + right) / 2, bottom + 34);
+  g.save(); g.translate(14, (top + bottom) / 2); g.rotate(-Math.PI / 2); g.fillText("Black's result", 0, 0); g.restore();
+  // The curve's 95% range and line.
+  const curve = D.curve.filter(row => row[0] >= -range && row[0] <= range);
+  g.fillStyle = color("--curve"); g.globalAlpha = 0.16; g.beginPath();
+  curve.forEach((row, i) => i ? g.lineTo(x(row[0]), y(row[3])) : g.moveTo(x(row[0]), y(row[3])));
+  [...curve].reverse().forEach(row => g.lineTo(x(row[0]), y(row[2])));
+  g.fill(); g.globalAlpha = 1;
+  g.strokeStyle = color("--curve"); g.lineWidth = 2.5; g.beginPath();
+  curve.forEach((row, i) => i ? g.lineTo(x(row[0]), y(row[1])) : g.moveTo(x(row[0]), y(row[1])));
+  g.stroke();
+  // The dots: fainter when there are many.
+  const alpha = shown.length > 20000 ? 0.12 : shown.length > 3000 ? 0.25 : shown.length > 300 ? 0.45 : 0.7;
+  g.fillStyle = "rgba(" + color("--dot") + "," + alpha + ")";
+  hits = [];
+  for (const i of shown) {
+    const px = x(D.cp[i]), py = y(D.outcome[i] / 2 + jitter(i));
+    g.fillRect(px - 2, py - 2, 4, 4);
+    hits.push([i, px, py]);
+  }
+  // Black's real score per eval band, over the games shown.
+  const edges = [-Infinity, -600, -400, -300, -200, -150, -100, -50, -25, 0, 25, 50, 100, 150, 200, 300, 400, 600, Infinity];
+  g.fillStyle = color("--band"); g.strokeStyle = color("--bg"); g.lineWidth = 1;
+  for (let b = 0; b < edges.length - 1; b++) {
+    const inBand = shown.filter(i => D.cp[i] >= edges[b] && D.cp[i] < edges[b + 1]);
+    if (inBand.length < 10) continue;
+    const mean = inBand.reduce((s, i) => s + D.cp[i], 0) / inBand.length;
+    if (Math.abs(mean) > range) continue;
+    const score = inBand.reduce((s, i) => s + D.outcome[i] / 2, 0) / inBand.length;
+    const r = Math.max(3, Math.min(9, Math.sqrt(inBand.length) / 4));
+    g.fillRect(x(mean) - r, y(score) - r, 2 * r, 2 * r); g.strokeRect(x(mean) - r, y(score) - r, 2 * r, 2 * r);
+  }
+  if (selected >= 0) {
+    g.strokeStyle = color("--pick"); g.lineWidth = 2.5; g.beginPath();
+    g.arc(x(D.cp[selected]), y(D.outcome[selected] / 2 + jitter(selected)), 7, 0, 2 * Math.PI); g.stroke();
+  }
+  const score = shown.reduce((s, i) => s + D.outcome[i] / 2, 0) / (shown.length || 1);
+  $("status").textContent = "Showing " + fmt(shown.length) + " games. Black's score in them: " + (100 * score).toFixed(1) +
+    "%. Squares: Black's real score in each eval band of the games shown (bands with 10+ games).";
+}
+
+function show(i) {
+  selected = i; draw();
+  const m = D.move[i], ply = 2 * m, cell = text => { const td = document.createElement("td"); td.textContent = text; return td; };
+  const sql = "SELECT * FROM games JOIN sampled_moves USING (game_id) WHERE game_id = '" + D.id[i] + "';";
+  const aside = $("details"); aside.replaceChildren();
+  const h2 = document.createElement("h2"); h2.textContent = "Game " + D.id[i]; aside.append(h2);
+  const table = document.createElement("table");
+  const row = (label, content) => { const tr = document.createElement("tr"), th = document.createElement("th");
+    th.textContent = label; tr.append(th, typeof content === "string" ? cell(content) : content); table.append(tr); };
+  const link = document.createElement("td"), a = document.createElement("a");
+  a.href = "https://lichess.org/" + D.id[i] + "/black#" + ply; a.target = "_blank"; a.rel = "noopener";
+  a.textContent = "lichess.org/" + D.id[i]; link.append(a, " (opens after Black's move " + m + ")");
+  row("Lichess", link);
+  row("Date", D.date[i]);
+  row("White", D.white[i] + " (" + D.whiteRating[i] + ")");
+  row("Black", D.black[i] + " (" + D.blackRating[i] + ")");
+  row("Opening", OPENING[D.opening[i]] + ", " + SPEED[D.speed[i]]);
+  row("Sampled move", m + "… " + D.san[i] + " (" + D.uci[i] + ")");
+  row("Eval after it", pawns(D.cp[i]) + " for White (Stockfish 19, 2M nodes, depth " + D.depth[i] + ")");
+  row("Result", RESULT[D.outcome[i]]);
+  row("Group", D.groupGames[i] === 1 ? "this game only" : fmt(D.groupGames[i]) + " games with the same position and move");
+  row("Search", "results-" + D.results[i] + ".jsonl, id " + D.group[i]);
+  const fen = document.createElement("td"), code = document.createElement("code"); code.textContent = D.fen[i]; fen.append(code);
+  row("Position", fen);
+  const query = document.createElement("td"), q = document.createElement("code"); q.textContent = sql; query.append(q);
+  row("MySQL", query);
+  aside.append(table);
+  const button = document.createElement("button"); button.className = "copy"; button.textContent = "Copy the MySQL query";
+  button.onclick = () => navigator.clipboard.writeText(sql).then(() => { button.textContent = "Copied"; });
+  aside.append(button);
+}
+
+$("chart").addEventListener("click", event => {
+  const box = $("chart").getBoundingClientRect(), mx = event.clientX - box.left, my = event.clientY - box.top;
+  let best = -1, distance = 64;
+  for (const [i, px, py] of hits) { const d = (px - mx) ** 2 + (py - my) ** 2; if (d < distance) { distance = d; best = i; } }
+  if (best >= 0) show(best);
+});
+$("again").onclick = () => { seed++; choose(); };
+for (const id of ["size", "from", "to", "opening", "group"]) $(id).addEventListener("change", choose);
+$("range").addEventListener("change", draw);
+window.addEventListener("resize", draw);
+choose();
+</script>
+</body>
+</html>
