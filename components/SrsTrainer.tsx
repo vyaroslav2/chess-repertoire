@@ -100,6 +100,8 @@ export default function SrsTrainer({
   const [testStatus, setTestStatus] = useState<TestStatus>("idle");
   const [chess] = useState(new Chess());
   const [fen, setFen] = useState(chess.fen());
+  // The king in check is marked red, as on Lichess.
+  const inCheck = useMemo(() => new Chess(fen).inCheck(), [fen]);
   const [lastMove, setLastMove] = useState<[string, string] | undefined>();
 
   // Browsing state
@@ -121,8 +123,8 @@ export default function SrsTrainer({
   // Evals and gauge, shown with the 'e' key; hidden again at each new card (UI.34).
   const [evalsShown, setEvalsShown] = useState(false);
 
-  // Sound ref
-  const moveSoundRef = useRef<HTMLAudioElement | null>(null);
+  // Lichess's sounds: Capture.mp3 for a capture, right or wrong, Move.mp3 for any other move.
+  const soundsRef = useRef<{ move: HTMLAudioElement; capture: HTMLAudioElement } | null>(null);
 
   // Which of your moves in a whole-line card is asked; 0 at each new card.
   const [lineStep, setLineStep] = useState(0);
@@ -162,17 +164,19 @@ export default function SrsTrainer({
 
   useEffect(() => {
     // Initialize audio
-    moveSoundRef.current = new Audio(
-      "https://lichess1.org/assets/sound/standard/Move.mp3",
-    );
+    soundsRef.current = {
+      move: new Audio("https://lichess1.org/assets/sound/standard/Move.mp3"),
+      capture: new Audio("https://lichess1.org/assets/sound/standard/Capture.mp3"),
+    };
   }, []);
 
-  const playSound = () => {
-    if (moveSoundRef.current) {
-      moveSoundRef.current.currentTime = 0;
+  const playSound = (san?: string) => {
+    const sound = san?.includes("x") ? soundsRef.current?.capture : soundsRef.current?.move;
+    if (sound) {
+      sound.currentTime = 0;
       // Browsers block audio autoplay before any user gesture (e.g. the very first
       // card's reveal on page load) — that's expected, not a bug, so stay quiet about it.
-      moveSoundRef.current.play().catch((e) => {
+      sound.play().catch((e) => {
         if (e instanceof DOMException && e.name === "NotAllowedError") return;
         console.error("Audio play failed:", e);
       });
@@ -243,7 +247,7 @@ export default function SrsTrainer({
         chess.load(tempChess.fen()); // Sync main instance
         setLastMove([m.from, m.to]);
         setCurrentPlyIndex(lineMoves.length);
-        playSound();
+        playSound(m.san);
         logFlightBox("ANIMATE_MOVE", { san: finalMove, fen: tempChess.fen() });
       } else {
         logFlightBox("ANIMATE_MOVE_FAIL", {
@@ -301,7 +305,7 @@ export default function SrsTrainer({
 
     // Play sound if we browsed (visual check)
     if (fen !== tempChess.fen()) {
-      playSound();
+      playSound(tempChess.history().at(-1));
     }
 
     setFen(tempChess.fen());
@@ -434,7 +438,7 @@ export default function SrsTrainer({
               setLineStatus("revealed");
               setCurrentPlyIndex(targetPlyIndex + 1);
               goOnInLine();
-              playSound();
+              playSound(move.san);
               logFlightBox("ACTION_REVEAL", {
                 success: true,
                 san: currentStat.targetMove.san,
@@ -569,7 +573,7 @@ export default function SrsTrainer({
     try {
       const move = chess.move({ from, to, promotion: "q" });
       if (move) {
-        playSound();
+        playSound(move.san);
         logFlightBox("ACTION_USER_MOVE", {
           from,
           to,
@@ -843,6 +847,7 @@ export default function SrsTrainer({
               orientation: orientation,
               turnColor: calcTurnColor(),
               lastMove: lastMove,
+              check: inCheck,
               highlight: { lastMove: true, check: true },
               drawable: { enabled: true, visible: true },
               coordinates: true,
