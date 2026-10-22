@@ -9,7 +9,8 @@ import { importFiles, groupObservations } from "../import";
 import { parseEvaluation } from "../engine";
 import { writeJobs } from "../jobs";
 import { importResults } from "../results";
-import { basis, chances, fit } from "../curve";
+import { basis, chances, fit, random } from "../curve";
+import { fitK, logGamma, type KGroup } from "../scatter";
 import { DATA_ROOT, assertDataDirectory, runPath } from "../paths";
 import type { Observation } from "../types";
 
@@ -271,4 +272,31 @@ test("the curve fit finds the chances it was given, and the spline is straight b
   assert.ok(Math.abs(c.win + c.draw + c.loss - 1) < 1e-12 && c.loss > chances(truth, knots, 0).loss);
   const at = (x: number) => basis(x, knots).slice(1);
   for (const x of [7, -7]) at(x).forEach((value, j) => assert.ok(Math.abs(at(x + 1)[j] - 2 * value + at(x - 1)[j]) < 1e-9));
+});
+test("k fit finds the scatter it was given, and none where there is none", () => {
+  for (const [x, expected] of [[1, 0], [5, Math.log(24)], [0.5, Math.log(Math.sqrt(Math.PI))], [100.5, 361.4355404677776], [0.01, 4.599479878042022]])
+    assert.ok(Math.abs(logGamma(x) - expected) < 1e-9, "logGamma " + x);
+  const next = random("k-test");
+  const normal = () => Math.sqrt(-2 * Math.log(1 - next())) * Math.cos(2 * Math.PI * next());
+  // Marsaglia and Tsang; shape < 1 is lifted by one and scaled back.
+  const gamma = (shape: number): number => {
+    if (shape < 1) return gamma(shape + 1) * Math.pow(next(), 1 / shape);
+    const d = shape - 1 / 3, c = 1 / Math.sqrt(9 * d);
+    for (;;) {
+      const z = normal(), v = (1 + c * z) ** 3;
+      if (v > 0 && Math.log(next()) < z * z / 2 + d - d * v + d * Math.log(v)) return d * v;
+    }
+  };
+  const groups = (k: number | null): KGroup[] => Array.from({ length: 3000 }, (_, i) => {
+    const centre = i % 2 ? [0.45, 0.06, 0.49] : [0.3, 0.05, 0.65];
+    const draws = centre.map(p => k === null ? p : gamma(k * p));
+    const chances = draws.map(value => value / draws.reduce((sum, d) => sum + d, 0));
+    const counts = [0, 0, 0];
+    for (let n = 0; n < 2 + (i % 20); n++) { const u = next(); counts[u < chances[0] ? 0 : u < chances[0] + chances[1] ? 1 : 2]++; }
+    return { counts, centre };
+  });
+  const scattered = fitK(groups(30));
+  assert.ok(scattered.range[0]! < 30 && 30 < scattered.range[1]!, JSON.stringify(scattered));
+  const none = fitK(groups(null));
+  assert.ok(none.range[1] === null && none.k > 200, JSON.stringify(none));
 });

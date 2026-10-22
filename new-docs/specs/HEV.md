@@ -189,9 +189,78 @@ HEV.40 **Most groups have one game.** As in January (HER.21):
 | 50–199 | 26 | 2,364 |
 | 200+ | 5 | 1,607 |
 
-One-game groups help the curve only. k is fitted on the 1,629 groups with 2+ games (10,793 games).
+One-game groups help the curve only. k is fitted on the groups with 2+ games: 1,629 (10,793 games), less one mate group, so 1,628 (10,791 games).
 
 HEV.41 **The five biggest groups** are all at Black's move 2, between +23 and +34 cp: 1. d4 d5 2. c4 e6, c6 or dxc4, and 1. e4 c6 2. d4 d5 or 2. Nf3 d5. The scatter check needs another plot (decided 2026-10-10).
+
+## k
+
+HEV.70 **What k is.** The curve gives the usual result for a move at its eval. A real move may do better or worse than usual: a trap, an easy plan, a line people misplay. k measures how much real moves stray from the curve.
+* In [[HE]], each contender starts with k fake games at the curve's win/draw/loss, then adds its real games. So k is also the break-even point: with k real games, a move's own record weighs as much as the curve.
+* **Small k** (say 10): moves stray a lot. A few games should overrule the curve.
+* **Big k** (say 1,000): moves stray little. Only many games should overrule it.
+
+HEV.71 **How it is measured.** Even if every move scored exactly as the curve says, a group's results would still wander by chance, like coin flips: 5 games can easily give 4 wins. k looks for scatter *beyond* that chance. The computer tries every k from 0.5 to 100,000 and keeps the one under which the groups' real results are least surprising. Only groups with 2+ games count: one game cannot show scatter. Small groups count for less by nature: their results are mostly chance.
+
+`npm --prefix experiments/he run k -- --run 2024-02-3000mb`
+
+The method was checked on made-up groups: given a known k of 30, it found a range around 30; given no scatter at all, it found a very large k with no upper limit.
+
+HEV.72 **The result: no scatter beyond chance.** On all 1,628 groups with 2+ games:
+
+| | |
+| --- | --- |
+| Best k | about 7,500 |
+| 95% range | from 335 up, with no upper limit |
+| Gain over "no scatter at all" | 0.0 bits |
+
+In plain words: the groups' results look exactly like coin flips around the curve. The data cannot tell k = 7,500 from k = 1,000,000. It can only say that k is very unlikely to be below about 335.
+
+The five biggest groups show it by hand. Each is within about one standard error of the curve (an ordinary amount of chance):
+
+| Move (Black's move 2) | Games | Real score | Curve | Off by |
+| --- | --- | --- | --- | --- |
+| 1. e4 c6 2. d4 d5 | 541 | 50.7% | 48.2% | +1.2 SE |
+| 1. e4 c6 2. Nf3 d5 | 322 | 51.9% | 48.4% | +1.2 SE |
+| 1. d4 d5 2. c4 e6 | 315 | 45.9% | 48.2% | −0.8 SE |
+| 1. d4 d5 2. c4 dxc4 | 228 | 45.0% | 47.5% | −0.8 SE |
+| 1. d4 d5 2. c4 c6 | 201 | 48.8% | 48.3% | +0.1 SE |
+
+HEV.73 **By group size, eval and move.** [[HE]] asks for k in each part separately.
+
+| Part | Groups | Games | Best k | 95% range |
+| --- | --- | --- | --- | --- |
+| 2–9 games | 1,470 | 4,484 | 150 | 38 up |
+| 10–49 games | 127 | 2,336 | 600 | 79 up |
+| 50–199 games | 26 | 2,364 | none found | 236 up |
+| 200+ games | 5 | 1,607 | 4,600 | 188 up |
+| Eval below −150 | 4 | 8 | — | too few |
+| Eval −150 to −50 | 35 | 231 | 35 | 7 up |
+| Eval −50 to +50 | 1,246 | 9,115 | none found | 372 up |
+| Eval +50 to +150 | 291 | 1,284 | 380 | 39 up |
+| Eval +150 and above | 52 | 153 | none found | 7 up |
+| Black's move 2–3 | 496 | 6,721 | none found | 459 up |
+| Black's move 4–6 | 991 | 3,748 | 100 | 39 up |
+| Black's move 7–10 | 139 | 318 | 32 | 6 up |
+| Black's move 11–15 | 2 | 4 | — | too few |
+
+"None found" = no scatter at all fits best. "Up" = no upper limit.
+
+* **The parts agree.** Every range has no upper limit, and every range overlaps the others. So one k is enough for now, as [[HE]] allows.
+* **But the evidence sits in one place.** 9,115 of the 10,791 games are within ±50 cp, and 6,721 are at Black's move 2–3: the main opening lines. There, moves really do differ little, so a big k is no surprise.
+* **Later moves hint at more scatter, weakly.** Moves 4–6 give k ≈ 100, moves 7–10 k ≈ 32, evals −150 to −50 k ≈ 35. None is clear of chance: each range runs up to "no limit". This is where traps and misplayed lines live, and where we have few repeated groups.
+
+HEV.74 **Why so few later moves repeat.** Each game gives one move, picked at random from move 2 to 15 (HER.12). Two games share a group only if they reach the same position *and* drew the same move number. That happens often at move 2, rarely at move 10. More games help, but slowly: doubling the games roughly quadruples the pairs, but most new pairs again fall at moves 2–4.
+
+HEV.75 **What it means for HE.**
+* With k at least 335, a contender's own games weigh little until it has hundreds. A move with 100 games: its own record counts for at most 100 / (100 + 335) = 23%, the curve for the rest.
+* So, as [[HE]] expected, the champion (the engine's top move) will almost always stay. Human data can only overrule it in the main lines with hundreds of games.
+* The minimum sample (HE item 3) will be large: hundreds of games.
+
+HEV.76 **Open: which k to use.**
+* **335, the low end.** The most generous to human games that this data allows. My suggestion as a working value.
+* **The best fit (about 7,500).** Close to "ignore human games". Not useful: the data cannot pin it down.
+* **Wait for March.** A second 50,000, and then 100,000 together, may narrow the range. Later-move groups stay rare either way (HEV.74).
 
 ## Files
 
@@ -201,11 +270,12 @@ HEV.50 In `experiments/he/data/runs/2024-02-3000mb/`:
 * `evals-manifest.json` — the counts above, and the fingerprints (SHA-256) of both results files, so we can tell if a file changes later.
 * `curve.json` — the three versions and their scores, the chosen curve's numbers, the curve every 25 cp with its range, and the band check.
 * `curve.svg` — the picture, copied to `new-docs/images/hev-curve-feb.svg`.
+* `k.json` — k overall and by size, eval and move number, each with its range and group and game counts.
 
 ## Next
 
 - Try a curve with its own line for draws (HEV.65), and keep it only if it wins on unseen games.
-- Fit k on the groups with 2+ games, and check it by group size.
+- Decide the working k (HEV.76).
 - The sensitivity check: fit again without time losses and without games that ended soon after the sampled move.
 - March 2024: download, jobs, search, import; compare with February.
 

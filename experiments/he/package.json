@@ -11,6 +11,7 @@
     "results": "tsx cli.ts results",
     "recheck": "tsx cli.ts recheck",
     "curve": "tsx cli.ts curve",
+    "k": "tsx cli.ts k",
     "db-check": "tsx cli.ts db-check",
     "load": "tsx cli.ts load",
     "test": "tsx --test tests/*.test.ts",

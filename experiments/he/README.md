@@ -163,6 +163,11 @@ model on cpWhite clipped to ±10 pawns, with a straight line, a 5-knot or a 7-kn
 It keeps the one with the lowest surprise on held-out groups (5 folds), refits it on 200 seeded
 bootstrap resamples of groups for a 95% range, and writes `curve.json` and `curve.svg`.
 
+`npm --prefix experiments/he run k -- --run 2024-02-3000mb` fits k on the groups with 2+ games
+and a cp eval: a Dirichlet-multinomial centred on the curve's win/draw/loss at each group's eval,
+k searched from 0.5 to 100,000 on a log scale, with a 95% profile-likelihood range (open where it
+runs off the scale). It fits all groups, then by group size, eval and move number, into `k.json`.
+
 ## Checks
 
 ```powershell

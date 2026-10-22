@@ -108,7 +108,7 @@ export function fit(groups: Group[], knots: number[], weights?: number[], start?
 }
 
 // A small seeded random generator, so the bootstrap gives the same figures every run.
-function random(seed: string) {
+export function random(seed: string) {
   let state = createHash("sha256").update(seed).digest().readUInt32LE(0);
   return () => {
     state = (state + 0x6d2b79f5) >>> 0;
