@@ -251,7 +251,7 @@ h2 {
   background-image: var(--piece-bK) !important;
 }
 
-/* A king in check: red under the king, as on Lichess (chessground.brown.css). */
+/* A king in check: red under the king, as on Lichess (lila's _chessground.scss). */
 .board-themed cg-board square.check {
   background: radial-gradient(
     ellipse at center,

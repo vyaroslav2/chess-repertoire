@@ -28,13 +28,12 @@ type TestStatus = "idle" | "wrong" | "correct" | "revealed";
 // A moving piece slides over 250ms, Lichess's default (UI.35).
 const slideMs = 250;
 
-// Lichess's mate sign: a red disc with a white #, centred near the square's
-// top-right corner. The shape's origin is the square's top-left; 100 is a square.
-const mateSign = `<defs><filter id="mate-shadow"><feDropShadow dx="4" dy="7" stdDeviation="5" flood-opacity="0.5" /></filter></defs>
-<g transform="translate(71 -12) scale(0.4)">
-  <circle cx="50" cy="50" r="50" fill="#df5353" filter="url(#mate-shadow)" />
-  <path d="M39 19V81M61 19V81M19 38H81M19 62H81" stroke="#fff" stroke-width="7" />
-</g>`;
+// Lichess's mate sign, as it is in Lichess's chessground (glyph.ts: endgameGlyphs.mate,
+// composeGlyph), GPL-3.0-or-later. Its origin is the square's top-left; 100 is a square.
+const mateSign =
+  '<defs><filter id="a"><feDropShadow dx="4" dy="7" flood-opacity=".5" stdDeviation="5"/></filter></defs>' +
+  '<g transform="matrix(.4 0 0 .4 71 -12)"><circle cx="50" cy="50" r="50" fill="#df5353" filter="url(#a)"/>' +
+  '<path fill="none" stroke="#fff" stroke-width="8" d="M38 18 33 82M62 18l-5 64M20 40h60M18 62h60"/></g>';
 
 // Anki's counts (AK.12, UI.22): lighter than their labels, units lined up.
 const ankiCountStyle = { fontWeight: 350, textAlign: "right" } as const;
