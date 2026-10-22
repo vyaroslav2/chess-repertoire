@@ -264,7 +264,7 @@ HEV.76 **Open: which k to use.**
 #question
 ## Looking at the games
 
-HEV.80 **The dot page.** One page shows every game as a dot: its eval across, Black's result up (win, draw or loss). The dots of one result form a band, spread a little up and down so they don't hide each other. Over them: the fitted curve with its 95% range, and orange squares for Black's real score in each eval band of the games shown.
+HEV.80 **The dot page.** One page shows every game as a dot: its eval across, Black's result up. The dots sit in three shaded bands, labelled on the left: Black lost, Draw, Black won. Within a band they are spread a little up and down so they don't hide each other. The scale on the right is Black's score, for the curve and the squares; its steps get finer as you zoom in (10%, then 5%, 2%, 1%). Over them: the fitted curve with its 95% range, and orange squares for Black's real score in each eval band of the games shown.
 
 `npm --prefix experiments/he run dots -- --run 2024-02-3000mb`
 

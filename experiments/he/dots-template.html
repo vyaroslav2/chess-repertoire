@@ -117,29 +117,43 @@ function draw() {
   const g = canvas.getContext("2d");
   g.setTransform(ratio, 0, 0, ratio, 0, 0);
   g.clearRect(0, 0, width, height);
-  const range = +$("range").value, left = 84, right = width - 16, top = 16, bottom = height - 44;
+  const range = +$("range").value, left = 96, right = width - 64, top = 16, bottom = height - 44;
   // Unzoomed, evals beyond the range sit at its edge; zoomed, whatever is outside the view is hidden.
   const v = view ?? home();
   const x = cp => left + ((view ? cp : Math.max(-range, Math.min(range, cp))) - v.x0) / (v.x1 - v.x0) * (right - left);
   const y = score => bottom - (score - v.y0) / (v.y1 - v.y0) * (bottom - top);
   plot = { left, right, top, bottom, v };
   g.font = "12px Segoe UI, Helvetica, Arial, sans-serif"; g.lineWidth = 1;
-  // Grid and labels.
-  g.strokeStyle = color("--grid"); g.fillStyle = color("--muted");
-  for (const [score, label] of [[0, "loss 0"], [0.25, "25%"], [0.5, "draw ½"], [0.75, "75%"], [1, "win 1"]]) {
-    if (score < v.y0 || score > v.y1) continue;
-    g.beginPath(); g.moveTo(left, y(score)); g.lineTo(right, y(score)); g.stroke();
-    g.textAlign = "right"; g.fillText(label, left - 8, y(score) + 4);
+  // Grid lines at round numbers (1, 2, 2.5 or 5 times a power of ten), about `count` of them.
+  const niceStep = (span, count) => { const rough = span / count, power = 10 ** Math.floor(Math.log10(rough));
+    return [1, 2, 2.5, 5, 10].map(m => m * power).find(s => s >= rough); };
+  // Left: the three results, as shaded bands for the dots.
+  g.font = "12px Segoe UI, Helvetica, Arial, sans-serif";
+  for (const [score, label] of [[0, "Black lost"], [0.5, "Draw"], [1, "Black won"]]) {
+    const y0 = Math.max(top, y(score + 0.13)), y1 = Math.min(bottom, y(score - 0.13));
+    if (y1 <= y0) continue;
+    g.fillStyle = color("--grid"); g.globalAlpha = 0.35; g.fillRect(left, y0, right - left, y1 - y0); g.globalAlpha = 1;
+    g.fillStyle = color("--text"); g.textAlign = "right"; g.fillText(label, left - 8, (y0 + y1) / 2 + 4);
   }
-  // About 8 grid lines across, at round numbers: 1, 2 or 5 times a power of ten.
-  const rough = (v.x1 - v.x0) / 8, power = 10 ** Math.floor(Math.log10(rough));
-  const step = [1, 2, 2.5, 5, 10].map(m => m * power).find(s => s >= rough);
+  // Right: Black's score, for the curve and the squares.
+  g.strokeStyle = color("--grid"); g.fillStyle = color("--muted"); g.textAlign = "left";
+  const yStep = niceStep(v.y1 - v.y0, 14);
+  for (let s = Math.ceil(v.y0 / yStep) * yStep; s <= Math.min(1, v.y1) + 1e-9; s += yStep) {
+    if (s < -1e-9) continue;
+    g.beginPath(); g.moveTo(left, y(s)); g.lineTo(right, y(s)); g.stroke();
+    g.fillText(+(100 * s).toFixed(1) + "%", right + 8, y(s) + 4);
+  }
+  g.save(); g.translate(width - 10, (top + bottom) / 2); g.rotate(Math.PI / 2); g.textAlign = "center";
+  g.fillText("Black's score: curve and squares", 0, 0); g.restore();
+  // Across.
+  const step = niceStep(v.x1 - v.x0, 8);
   for (let cp = Math.ceil(v.x0 / step) * step; cp <= v.x1; cp += step) {
     g.beginPath(); g.moveTo(x(cp), top); g.lineTo(x(cp), bottom); g.stroke();
     g.textAlign = "center"; g.fillText((cp > 0 ? "+" : "") + Math.round(cp), x(cp), bottom + 16);
   }
   g.fillText("Eval after Black's move, cp, White's view (+ = good for White). " + (view ? "Zoomed in." : "Evals beyond the range sit at its edge."), (left + right) / 2, bottom + 34);
-  g.save(); g.translate(14, (top + bottom) / 2); g.rotate(-Math.PI / 2); g.fillText("Black's result", 0, 0); g.restore();
+  g.fillStyle = color("--muted");
+  g.save(); g.translate(14, (top + bottom) / 2); g.rotate(-Math.PI / 2); g.fillText("Each dot: one game's result", 0, 0); g.restore();
   g.save(); g.beginPath(); g.rect(left, top, right - left, bottom - top); g.clip();
   // The curve's 95% range and line.
   const curve = D.curve.filter(row => row[0] >= -range && row[0] <= range);
