@@ -1,6 +1,6 @@
 ---
 tags:
-  - in-progress
+  - processed
 ---
 # AK — Anki
 
@@ -46,7 +46,6 @@ Anki's own reviewer runs the session; the web app is its screen. `/` trains from
 - The app opens Anki's study screen on the deck (`guiDeckReview`) and shows the card Anki shows there (`guiCurrentCard`). Anki picks the card, with its learning steps and daily limits.
 - Cards are answered and graded as in [[GR]]. Each grade goes to Anki with `guiShowAnswer` then `guiAnswerCard`, as if pressed in Anki.
 - The deck is found by note type (AK.06): the deck of the first `Chess Repertoire` card. The app does not switch profiles.
-==`AK.07.02` //- #roadmap multi decks support. -//==
 - The app asks Anki only when it needs a card: on page load and after each grade. No polling.
 - Why not `answerCards`: the app would pick the order, not Anki, and Anki would log each answer as taking 0s.
 - Downside: while you train, Anki's main window stays on its study screen for our deck, out of sight behind the browser. Anki is not frozen: Browse works as usual, and the main window can go elsewhere, but the app switches it back at the next card.
@@ -69,8 +68,8 @@ Left of the board, Anki's counts for the deck, as on its overview screen: New, L
 ```
 New        54 
 Learning    5 
-Done        6 
 To Review   0 
+Done        6 
 ```
 
 - Numbers right-aligned, in Anki's own colours: blue, red, green; Done in violet, ours. The look: [[UI|UI.22]].

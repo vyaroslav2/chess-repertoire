@@ -1,6 +1,6 @@
 ---
 tags:
-  - reviewed
+  - processed
 ---
 # AD — Anki add-on: Anki's messages on the page
 
