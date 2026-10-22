@@ -284,6 +284,10 @@ HEV.82 **Checking a game.** Click a dot. The panel shows the game: a link to it 
 
 Example, checked by hand: game `g8gCaNm4`, Black's move 5… Nc6, eval −0.06. Its line in `results-a.jsonl` (id 3817) says Stockfish gave +6 from Black's side, which is −0.06 from White's. Its PGN in `sample.pgn` says 1-0, as the page does.
 
+HEV.82a **Checking a bucket.** Click an orange square. The panel shows its bucket: the eval range, how many of the games shown fall in it, their average eval, Black's wins, draws and losses, Black's real score, and what the curve expects for the same games (its score at each game's eval, averaged). It also gives the chance range: where the bucket's score would land 95 times in 100 if every game followed the curve. A verdict says whether the real score is inside it. The bucket's dots light up in orange, and clicking one shows its game.
+
+With all 49,909 games and the default buckets, all 16 buckets are inside their chance range (gaps −2.0 to +1.7 points). This agrees with HEV.65.
+
 HEV.83 **The games in MySQL.** A new table, `sampled_moves`, holds one row per game: the sampled move (number, SAN, UCI), the position before it, its group and search (`group_id`, `results`), the group's size, and the eval (`cp_white` or `mate_white`, and depth). It joins `games` by `game_id`. Loading it again overwrites rows, never doubles them.
 
 `npm --prefix experiments/he run load-moves -- --run 2024-02-3000mb`

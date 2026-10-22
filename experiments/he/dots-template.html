@@ -65,7 +65,7 @@
       <canvas id="chart" aria-label="Each dot is one game: its eval across, Black's result up"></canvas>
       <div class="status" id="status"></div>
     </div>
-    <aside id="details"><h2>Click a dot</h2><p class="help">Each dot is one game. Click one to see the game, its move and its eval, with a link to the game on Lichess.</p></aside>
+    <aside id="details"><h2>Click a dot or a square</h2><p class="help">Each dot is one game. Click one to see the game, its move and its eval, with a link to the game on Lichess.</p><p class="help">Each orange square is a bucket of games. Click one to see its games counted and compared with the curve.</p></aside>
   </div>
 </main>
 <script id="data" type="application/json">__DATA__</script>
@@ -78,7 +78,7 @@ const OPENING = ["1. d4 d5", "1. e4 c6"], SPEED = ["Rapid", "Classical"];
 const RESULT = ["1-0, Black lost", "1/2-1/2, a draw", "0-1, Black won"];
 const fmt = n => n.toLocaleString("en-GB");
 const pawns = cp => (cp > 0 ? "+" : "") + (cp / 100).toFixed(2);
-let seed = 1, selected = -1, shown = [], hits = [], view = null, plot = null;
+let seed = 1, selected = -1, shown = [], hits = [], view = null, plot = null, bucket = null, squares = [];
 
 $("lead").textContent = "Run " + D.run + ". " + fmt(N) + " games with a cp eval (" + D.mates +
   " with a mate score are left out). Across: the eval after Black's sampled move, in White's view. Up: Black's result. Line: the fitted curve (" + D.curveName + "), with its 95% range.";
@@ -118,8 +118,12 @@ function choose() {
   shown = keep.slice(0, size);
   $("seed").textContent = $("size").value === "all" ? "" : "(sample " + seed + ")";
   if (!shown.includes(selected)) selected = -1;
-  draw();
+  // A clicked bucket is worked out again for the new games, if it still has 10+ of them.
+  if (bucket && shown.filter(i => D.cp[i] >= bucket[0] && D.cp[i] < bucket[1]).length >= 10) showBucket(...bucket);
+  else { if (bucket) clearPanel(); draw(); }
 }
+const PANEL = $("details").innerHTML;
+function clearPanel() { bucket = null; $("details").innerHTML = PANEL; }
 
 function draw() {
   const canvas = $("chart"), css = getComputedStyle(document.documentElement), color = name => css.getPropertyValue(name).trim();
@@ -186,6 +190,11 @@ function draw() {
   const size = Math.min(8, 4 * Math.sqrt(zoom));
   g.fillStyle = "rgba(" + color("--dot") + "," + alpha + ")";
   for (const [, px, py] of hits) g.fillRect(px - size / 2, py - size / 2, size, size);
+  // A clicked bucket's games light up.
+  if (bucket) {
+    g.fillStyle = color("--band");
+    for (const [i, px, py] of hits) if (D.cp[i] >= bucket[0] && D.cp[i] < bucket[1]) g.fillRect(px - size / 2, py - size / 2, size, size);
+  }
   // Black's real score per eval bucket, over the games shown. Each square sits at its games'
   // average eval; a thin line spans its whole bucket. A striped strip along the bottom shows the buckets.
   const edges = buckets();
@@ -194,7 +203,7 @@ function draw() {
     g.fillStyle = color(b % 2 ? "--grid" : "--axis"); g.globalAlpha = 0.6;
     g.fillRect(edgeX(edges[b]), bottom - 6, edgeX(edges[b + 1]) - edgeX(edges[b]), 6); g.globalAlpha = 1;
   }
-  g.lineWidth = 1;
+  g.lineWidth = 1; squares = [];
   for (let b = 0; b < edges.length - 1; b++) {
     const inBand = shown.filter(i => D.cp[i] >= edges[b] && D.cp[i] < edges[b + 1]);
     if (inBand.length < 10) continue;
@@ -206,6 +215,10 @@ function draw() {
     g.moveTo(edgeX(edges[b]), y(score)); g.lineTo(edgeX(edges[b + 1]), y(score)); g.stroke(); g.globalAlpha = 1;
     g.fillStyle = color("--band"); g.strokeStyle = color("--bg");
     g.fillRect(x(mean) - r, y(score) - r, 2 * r, 2 * r); g.strokeRect(x(mean) - r, y(score) - r, 2 * r, 2 * r);
+    squares.push([edges[b], edges[b + 1], x(mean), y(score), r]);
+    if (bucket && bucket[0] === edges[b] && bucket[1] === edges[b + 1]) {
+      g.strokeStyle = color("--text"); g.lineWidth = 2; g.strokeRect(x(mean) - r - 4, y(score) - r - 4, 2 * r + 8, 2 * r + 8); g.lineWidth = 1;
+    }
   }
   if (selected >= 0) {
     g.strokeStyle = color("--pick"); g.lineWidth = 2.5; g.beginPath();
@@ -220,8 +233,51 @@ function draw() {
   $("reset").disabled = !view;
 }
 
+// The curve between its 25 cp points: Black's score, win and draw chances.
+function curveAt(cp) {
+  const c = Math.max(-1000, Math.min(1000, cp)), k = Math.min(D.curve.length - 2, Math.floor((c + 1000) / 25));
+  const a = D.curve[k], b = D.curve[k + 1], t = (c - a[0]) / (b[0] - a[0]), mix = j => a[j] + t * (b[j] - a[j]);
+  return { score: mix(1), win: mix(4), draw: mix(5) };
+}
+const pct = p => (100 * p).toFixed(1) + "%";
+const edgeText = (lo, hi) => lo === -Infinity ? "below " + hi : hi === Infinity ? lo + " and above" : lo + " to " + hi;
+
+// A bucket's games against the curve. The chance range is where the bucket's score would land
+// 95 times in 100 if every game followed the curve: a gap beyond it is more than chance.
+function showBucket(lo, hi) {
+  bucket = [lo, hi]; selected = -1; draw();
+  const games = shown.filter(i => D.cp[i] >= lo && D.cp[i] < hi), n = games.length;
+  const count = o => games.filter(i => D.outcome[i] === o).length;
+  const [won, drew, lost] = [count(2), count(1), count(0)];
+  const real = (won + drew / 2) / n, meanCp = games.reduce((s, i) => s + D.cp[i], 0) / n;
+  let expected = 0, variance = 0;
+  for (const i of games) { const c = curveAt(D.cp[i]); expected += c.score; variance += c.win + c.draw / 4 - c.score ** 2; }
+  expected /= n; const spreadBy = 1.96 * Math.sqrt(variance) / n;
+  const low = Math.max(0, expected - spreadBy), high = Math.min(1, expected + spreadBy), gap = 100 * (real - expected);
+  const inside = real >= low && real <= high;
+  const aside = $("details"); aside.replaceChildren();
+  const h2 = document.createElement("h2"); h2.textContent = "Bucket " + edgeText(lo, hi) + " cp"; aside.append(h2);
+  const table = document.createElement("table");
+  const row = (label, text) => { const tr = document.createElement("tr"), th = document.createElement("th"), td = document.createElement("td");
+    th.textContent = label; td.textContent = text; tr.append(th, td); table.append(tr); };
+  row("Games", fmt(n) + " of the " + fmt(shown.length) + " shown");
+  row("Average eval", pawns(meanCp) + " for White");
+  row("Black won", fmt(won) + " (" + pct(won / n) + ")");
+  row("Draws", fmt(drew) + " (" + pct(drew / n) + ")");
+  row("Black lost", fmt(lost) + " (" + pct(lost / n) + ")");
+  row("Black's real score", pct(real));
+  row("Curve expects", pct(expected) + ", the curve's score at each game's eval, averaged");
+  row("Chance range", pct(low) + " to " + pct(high) + " (95%, for " + fmt(n) + " games)");
+  row("Verdict", (inside ? "Inside the chance range: the gap of " : "Outside the chance range: the gap of ") +
+    (gap > 0 ? "+" : "") + gap.toFixed(1) + " points is " + (inside ? "what chance alone gives." : "more than chance alone would give, or a 1 in 20 fluke."));
+  aside.append(table);
+  const help = document.createElement("p"); help.className = "help";
+  help.textContent = "This bucket's games are lit up in orange. Click one to see its game.";
+  aside.append(help);
+}
+
 function show(i) {
-  selected = i; draw();
+  selected = i; bucket = null; draw();
   const m = D.move[i], ply = 2 * m, cell = text => { const td = document.createElement("td"); td.textContent = text; return td; };
   const sql = "SELECT * FROM games JOIN sampled_moves USING (game_id) WHERE game_id = '" + D.id[i] + "';";
   const aside = $("details"); aside.replaceChildren();
@@ -291,8 +347,10 @@ window.addEventListener("mouseup", event => {
   if (!drag) return;
   const moved = drag.moved; drag = null; canvas.style.cursor = "";
   if (moved) return;
-  // A click without a drag picks the nearest dot.
+  // A click without a drag picks a square's bucket, or else the nearest dot.
   const { mx, my } = point(event);
+  const square = squares.find(([, , px, py, r]) => Math.abs(mx - px) <= r + 3 && Math.abs(my - py) <= r + 3);
+  if (square) { showBucket(square[0], square[1]); return; }
   let best = -1, distance = 64;
   for (const [i, px, py] of hits) { const d = (px - mx) ** 2 + (py - my) ** 2; if (d < distance) { distance = d; best = i; } }
   if (best >= 0) show(best);
@@ -302,7 +360,7 @@ $("reset").onclick = () => { view = null; draw(); };
 $("again").onclick = () => { seed++; choose(); };
 for (const id of ["size", "from", "to", "opening", "group"]) $(id).addEventListener("change", choose);
 $("range").addEventListener("change", () => { view = null; draw(); });
-$("buckets").addEventListener("change", draw);
+$("buckets").addEventListener("change", () => { if (bucket) clearPanel(); draw(); });
 window.addEventListener("resize", draw);
 choose();
 </script>

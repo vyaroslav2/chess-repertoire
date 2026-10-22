@@ -30,8 +30,10 @@ export async function writeDots(run: string) {
   const curve = JSON.parse(await readFile(path.join(directory, "curve.json"), "utf8"));
   const outcome = { losses: 0, draws: 1, wins: 2 } as const;
   const data = { run, mates: all.length - games.length, curveName: curve.chosen.name,
-    curve: curve.table.map((row: { cpWhite: number; score: number; scoreRange: number[] }) =>
-      [row.cpWhite, +row.score.toFixed(4), +row.scoreRange[0].toFixed(4), +row.scoreRange[1].toFixed(4)]),
+    // Every 25 cp: eval, Black's score, its 95% range, Black's win and draw chances.
+    curve: curve.table.map((row: { cpWhite: number; score: number; scoreRange: number[]; win: number; draw: number }) =>
+      [row.cpWhite, +row.score.toFixed(4), +row.scoreRange[0].toFixed(4), +row.scoreRange[1].toFixed(4),
+        +row.win.toFixed(4), +row.draw.toFixed(4)]),
     // One array per field, in the same game order: smaller than one object per game.
     id: games.map(g => g.gameId), date: games.map(g => g.date), white: games.map(g => g.white), black: games.map(g => g.black),
     whiteRating: games.map(g => g.whiteRating), blackRating: games.map(g => g.blackRating),
