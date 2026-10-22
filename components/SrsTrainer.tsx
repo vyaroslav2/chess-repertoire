@@ -134,8 +134,9 @@ export default function SrsTrainer({
   const isInitializingRef = useRef(true);
   // The opponent's move has started to slide in (the wait before it is over).
   const slideStartedRef = useRef(false);
-  // A wrong move has played its own sound; the redraw it sets off stays silent, as on Lichess.
-  const silentRedrawRef = useRef(false);
+  // A wrong move stays on the board, its check shown, until it goes back (GR.02), as on
+  // Lichess; the redraw it sets off is skipped, so no second sound either.
+  const wrongMoveShownRef = useRef(false);
   // The ply last shown: stepping back through the moves is silent, as on Lichess.
   const shownPlyRef = useRef(-1);
   const animTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -311,6 +312,10 @@ export default function SrsTrainer({
     if (!currentStat) return;
     if (currentPlyIndex < 0) return;
     if (isInitializingRef.current) return; // Prevent interference during the opening animation
+    if (wrongMoveShownRef.current) {
+      wrongMoveShownRef.current = false;
+      return;
+    }
 
     // Rebuild board to currentPlyIndex
     const startTime = performance.now();
@@ -334,9 +339,7 @@ export default function SrsTrainer({
     }
 
     // Play sound if we browsed (visual check)
-    const silent = silentRedrawRef.current;
-    silentRedrawRef.current = false;
-    if (fen !== tempChess.fen() && !silent && forward) {
+    if (fen !== tempChess.fen() && forward) {
       playSound(tempChess.history().at(-1));
     }
 
@@ -622,7 +625,7 @@ export default function SrsTrainer({
           goOnInLine();
         } else {
           // Wrong move
-          silentRedrawRef.current = true;
+          wrongMoveShownRef.current = true;
           setFen(chess.fen());
           setLastMove([from, to]);
           setTestStatus("wrong");
