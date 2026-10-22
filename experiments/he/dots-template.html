@@ -57,6 +57,8 @@
     <span><label for="range">Eval range</label>
       <select id="range"><option value="300">±300</option><option value="600" selected>±600</option><option value="1000">±1000</option></select>
       <button id="reset" title="Back to the whole range (or double-click the chart)">Zoom out</button></span>
+    <span><label for="buckets">Buckets</label>
+      <select id="buckets"><option value="uneven">narrow near 0</option><option value="25">25 cp</option><option value="50">50 cp</option><option value="100">100 cp</option></select></span>
   </div>
   <div class="layout">
     <div class="chart">
@@ -91,6 +93,15 @@ const jitter = i => (random(i * 2654435761)() - 0.5) * 0.22;
 // Evals are whole centipawns, so many games share one. Across, each dot moves at most 0.45 cp,
 // inside its own centipawn, so a zoomed-in column of games opens out without changing any eval.
 const spread = i => { const next = random(i * 2654435761); next(); return (next() - 0.5) * 0.9; };
+
+// Eval buckets for the squares: narrow near 0, where games are many, or all the same width.
+function buckets() {
+  const width = $("buckets").value;
+  if (width === "uneven") return [-Infinity, -600, -400, -300, -200, -150, -100, -50, -25, 0, 25, 50, 100, 150, 200, 300, 400, 600, Infinity];
+  const edges = [-Infinity];
+  for (let cp = -1000; cp <= 1000; cp += +width) edges.push(cp);
+  return [...edges, Infinity];
+}
 
 function choose() {
   const from = +$("from").value, to = +$("to").value, opening = $("opening").value, group = $("group").value;
@@ -175,9 +186,15 @@ function draw() {
   const size = Math.min(8, 4 * Math.sqrt(zoom));
   g.fillStyle = "rgba(" + color("--dot") + "," + alpha + ")";
   for (const [, px, py] of hits) g.fillRect(px - size / 2, py - size / 2, size, size);
-  // Black's real score per eval band, over the games shown.
-  const edges = [-Infinity, -600, -400, -300, -200, -150, -100, -50, -25, 0, 25, 50, 100, 150, 200, 300, 400, 600, Infinity];
-  g.fillStyle = color("--band"); g.strokeStyle = color("--bg"); g.lineWidth = 1;
+  // Black's real score per eval bucket, over the games shown. Each square sits at its games'
+  // average eval; a thin line spans its whole bucket. A striped strip along the bottom shows the buckets.
+  const edges = buckets();
+  const edgeX = cp => Math.max(left, Math.min(right, x(Math.max(view ? v.x0 : -range, Math.min(view ? v.x1 : range, cp)))));
+  for (let b = 0; b < edges.length - 1; b++) {
+    g.fillStyle = color(b % 2 ? "--grid" : "--axis"); g.globalAlpha = 0.6;
+    g.fillRect(edgeX(edges[b]), bottom - 6, edgeX(edges[b + 1]) - edgeX(edges[b]), 6); g.globalAlpha = 1;
+  }
+  g.lineWidth = 1;
   for (let b = 0; b < edges.length - 1; b++) {
     const inBand = shown.filter(i => D.cp[i] >= edges[b] && D.cp[i] < edges[b + 1]);
     if (inBand.length < 10) continue;
@@ -185,6 +202,9 @@ function draw() {
     if (Math.abs(mean) > range) continue;
     const score = inBand.reduce((s, i) => s + D.outcome[i] / 2, 0) / inBand.length;
     const r = Math.max(3, Math.min(9, Math.sqrt(inBand.length) / 4));
+    g.strokeStyle = color("--band"); g.globalAlpha = 0.7; g.beginPath();
+    g.moveTo(edgeX(edges[b]), y(score)); g.lineTo(edgeX(edges[b + 1]), y(score)); g.stroke(); g.globalAlpha = 1;
+    g.fillStyle = color("--band"); g.strokeStyle = color("--bg");
     g.fillRect(x(mean) - r, y(score) - r, 2 * r, 2 * r); g.strokeRect(x(mean) - r, y(score) - r, 2 * r, 2 * r);
   }
   if (selected >= 0) {
@@ -195,7 +215,7 @@ function draw() {
   const score = shown.reduce((s, i) => s + D.outcome[i] / 2, 0) / (shown.length || 1);
   $("status").textContent = "Showing " + fmt(shown.length) + " games" + (view ? ", " + fmt(hits.length) + " of them in view" : "") +
     ". Black's score in them: " + (100 * score).toFixed(1) +
-    "%. Squares: Black's real score in each eval band of the games shown (bands with 10+ games). " +
+    "%. Squares: Black's real score in each eval bucket of the games shown (buckets with 10+ games), at their average eval; the thin line spans the bucket, and the strip at the bottom shows all buckets. " +
     "Scroll to zoom (Shift + scroll: across only), drag to move, double-click to zoom out.";
   $("reset").disabled = !view;
 }
@@ -282,6 +302,7 @@ $("reset").onclick = () => { view = null; draw(); };
 $("again").onclick = () => { seed++; choose(); };
 for (const id of ["size", "from", "to", "opening", "group"]) $(id).addEventListener("change", choose);
 $("range").addEventListener("change", () => { view = null; draw(); });
+$("buckets").addEventListener("change", draw);
 window.addEventListener("resize", draw);
 choose();
 </script>

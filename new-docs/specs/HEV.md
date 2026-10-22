@@ -276,6 +276,7 @@ HEV.81 **What you can choose.**
 * **Opening:** both, 1. d4 d5 or 1. e4 c6.
 * **Group:** any size, one-game groups only, 2+ or 10+ games.
 * **Eval range:** ±300, ±600 or ±1000. Evals beyond the range sit at its edge.
+* **Buckets:** how the games are grouped for the orange squares. "Narrow near 0" (the default) uses −25 to 0, 0 to +25, +25 to +50, then wider buckets further out, where games are fewer. Or every bucket 25, 50 or 100 cp wide. A striped strip along the bottom shows the buckets. Each square sits at its games' average eval, with a thin line across its whole bucket; a square needs 10+ games.
 * **Zoom:** scroll on the chart to zoom in or out where the pointer is; Shift + scroll zooms across only. Drag to move. Double-click, or "Zoom out", goes back to the whole range. Dots grow a little as you zoom in, so single games stand apart even when all 49,909 are shown.
 * Evals are whole centipawns, so hundreds of games can share one eval. Each dot is moved across by at most 0.45 cp, so a stack of games on one eval opens out when zoomed in. No dot leaves its own centipawn.
 
