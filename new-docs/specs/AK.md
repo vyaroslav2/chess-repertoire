@@ -64,8 +64,14 @@ The card has the line, the opening and the answer. The evals (UI.26) and the ope
 - This reads the database; it does not link to it (AK.05). Card state stays in Anki.
 
 AK.12 **Status line.**
-Left of the board, Anki's counts for the deck: `Black to move · 12 new · 3 learning · 5 due`.
-==AK.12.01 //- #roadmap  polish the status line -//==
+Left of the board, Anki's counts for the deck, as on its overview screen: New, Learning, To Review. They come from AnkiConnect's `getDeckStats`, which reads Anki's own due tree; the app counts nothing. They are today's counts, after daily limits. The page asks for them on load, after each grade and after each undo.
+
+```
+New        54 
+Learning   5 
+To Review  0 
+```
+
 
 AK.13 **Undo.**
 `Ctrl + Z` on the page is Anki's own undo, through AnkiConnect's `guiUndo`: it undoes Anki's next step, whatever it is ([[AD|AD.13]]). Anki's message about it shows on the page ([[AD|AD.14]], [[MS|MS.04]]). Replaces the local history of [[UN]] on `/`.

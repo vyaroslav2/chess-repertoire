@@ -31,7 +31,10 @@ Ctrl + Alt + Shift + C + U switches the coordinates to a large style and back. A
 - In the app since 2026-10-13.
 
 UI.22 **Status line (temporary).**
-Inter, 16px (20), weight 400, line height 24px, `#787674`. Hidden until the pointer is over it. It sits in the free space left of the board: level with the board's top, 40px left of it, 280px wide, right-aligned. It will be redone.
+Inter, 16px (20), weight 400, line height 24px, letter spacing -0.011em (-0.175px), `#787674`. Hidden until the pointer is over it. It sits in the free space left of the board, level with the board's top, its right edge 40px left of the board. It will be redone.
+- Letter spacing is Inter's own for 16px, by the formula in UI.20.
+- On `/`: Anki's counts ([[AK|AK.12]]), three rows, no colons. Labels in one column, numbers in another, both left-aligned, 16px apart. Digits all one width (`tabular-nums`). The block is as wide as its text. Since 2026-10-22.
+- On `/demo`: one line, 280px wide, right-aligned.
 
 **Was:** Segoe UI, above the board.
 

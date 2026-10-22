@@ -740,23 +740,46 @@ export default function SrsTrainer({
         }}
       >
         {/* Status line, in the free space left of the board (temporary) */}
-        <p
-          className="demo-status-hover"
-          style={{
-            position: "absolute",
-            right: "calc(100% + 40px)",
-            top: 0,
-            width: "280px",
-            textAlign: "right",
-            color: "var(--lichess-text-muted)",
-          }}
-        >
-          {ankiMode && ankiCounts
-            ? `${baseOrientation === "black" ? "Black" : "White"} to move · ${ankiCounts.newCount} new · ${ankiCounts.learnCount} learning · ${ankiCounts.reviewCount} due`
-            : demoMode
+        {ankiMode && ankiCounts ? (
+          // AK.12: Anki's counts for the deck, as on its overview screen.
+          <div
+            className="demo-status-hover"
+            style={{
+              position: "absolute",
+              right: "calc(100% + 40px)",
+              top: 0,
+              display: "grid",
+              gridTemplateColumns: "auto auto",
+              columnGap: "16px",
+              fontVariantNumeric: "tabular-nums",
+              whiteSpace: "nowrap",
+              // Inter's recommended tracking at 16px (UI.20's formula): -0.175px
+              letterSpacing: "-0.011em",
+              color: "var(--lichess-text-muted)",
+            }}
+          >
+            <span>New</span><span>{ankiCounts.newCount}</span>
+            <span>Learning</span><span>{ankiCounts.learnCount}</span>
+            <span>To Review</span><span>{ankiCounts.reviewCount}</span>
+          </div>
+        ) : (
+          <p
+            className="demo-status-hover"
+            style={{
+              position: "absolute",
+              right: "calc(100% + 40px)",
+              top: 0,
+              width: "280px",
+              textAlign: "right",
+              letterSpacing: "-0.011em",
+              color: "var(--lichess-text-muted)",
+            }}
+          >
+            {demoMode
               ? `Black to move · ${stats.length} cards remaining · ${graduatedCount} graduated · Good ${goodHitsByCard[currentStat.demoId ?? currentStat.id] ?? 0}/2`
               : `Position 1 of ${stats.length}`}
-        </p>
+          </p>
+        )}
 
         {/* Opening name, 4px above the board (UI.04) */}
         <div
