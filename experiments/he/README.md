@@ -153,6 +153,9 @@ one binary for both files, legal move, exact score, no missing or conflicting id
 job to its group and writes `evals.jsonl` (each group with `cpWhite` or `mateWhite`) and
 `evals-manifest.json`. It writes nothing if any check fails, and never overwrites. `recheck`
 searches 20 fixed random jobs from each file again here; each must give the same line, only faster or slower.
+`recheck --game <id>` instead searches one game's position afresh (never from the cache) and prints the
+Colab line above the local one, with the Lichess link and the search's file and id. It exits with code 1
+if they differ.
 
 ```powershell
 npm --prefix experiments/he run curve -- --run 2024-02-3000mb

@@ -3,7 +3,7 @@ import { importFiles } from "./import";
 import { downloadRun, filterDownloaded } from "./download";
 import { evaluateRun } from "./evaluate";
 import { writeJobs } from "./jobs";
-import { importResults, recheckResults } from "./results";
+import { importResults, recheckGame, recheckResults } from "./results";
 import { writeCurve } from "./curve";
 import { writeK } from "./scatter";
 import type { Period } from "./types";
@@ -20,7 +20,7 @@ const HELP = String.raw`Human evidence pilot
   npm --prefix experiments/he run evaluate -- --run pilot-50k --engine <stockfish-19-binary> [--period fit] [--limit 5]
   npm --prefix experiments/he run jobs -- --run 2024-02-3000mb [--period fit] [--split 20000]
   npm --prefix experiments/he run results -- --run 2024-02-3000mb [--period fit]
-  npm --prefix experiments/he run recheck -- --run 2024-02-3000mb --engine <stockfish-19-binary> [--count 20]
+  npm --prefix experiments/he run recheck -- --run 2024-02-3000mb --engine <stockfish-19-binary> [--count 20 | --game g8gCaNm4]
   npm --prefix experiments/he run curve -- --run 2024-02-3000mb
   npm --prefix experiments/he run k -- --run 2024-02-3000mb
   npm --prefix experiments/he run dots -- --run 2024-02-3000mb
@@ -38,6 +38,7 @@ Dots writes dots.html into the run's folder: every game as a dot, eval against r
 Jobs writes the groups as Colab search jobs: ids 1 to --split in jobs-a.jsonl, the rest in jobs-b.jsonl.
 Results checks results-a.jsonl and results-b.jsonl against their jobs and writes evals.jsonl: each group with its eval.
 Recheck searches --count random jobs from each results file again here; they must match exactly.
+With --game it searches that one game's position afresh and prints the Colab line above the local one.
 Curve fits eval → Black's win/draw/loss on evals.jsonl and writes curve.json and curve.svg.
 K fits the scatter around the curve on groups with 2+ games, overall and by size, eval and move, into k.json.
 Input supports .pgn and .pgn.gz. Decompress Lichess .pgn.zst exports first.
@@ -47,7 +48,7 @@ async function main() {
   if (!command || command === "--help" || command === "help") { console.log(HELP); return; }
   const parsed = parseArgs({ args: process.argv.slice(3), allowPositionals: true, options: {
     run: { type: "string" }, seed: { type: "string" }, "max-gap": { type: "string" },
-    month: { type: "string" }, gb: { type: "string" }, limit: { type: "string" }, engine: { type: "string" }, period: { type: "string" }, split: { type: "string" }, count: { type: "string" }, help: { type: "boolean" },
+    month: { type: "string" }, gb: { type: "string" }, limit: { type: "string" }, engine: { type: "string" }, period: { type: "string" }, split: { type: "string" }, count: { type: "string" }, game: { type: "string" }, help: { type: "boolean" },
   } });
   const { values, positionals } = parsed;
   if (values.help) { console.log(HELP); return; }
@@ -104,9 +105,13 @@ async function main() {
     console.log(JSON.stringify(await writeK(values.run), null, 2));
   } else if (command === "recheck") {
     if (!values.engine) throw new Error("--engine is required; point to a Stockfish 19 binary.");
-    if (positionals.length || values.seed || values["max-gap"] || values.limit || values.split || values.period)
-      throw new Error("Recheck takes only --run, --engine and --count.");
-    console.log(JSON.stringify(await recheckResults(values.run, resolveInputPath(values.engine), Number(values.count ?? 20)), null, 2));
+    if (positionals.length || values.seed || values["max-gap"] || values.limit || values.split || values.period || (values.game && values.count))
+      throw new Error("Recheck takes only --run, --engine, and --count or --game.");
+    if (values.game) {
+      const check = await recheckGame(values.run, resolveInputPath(values.engine), values.game);
+      console.log(check.text);
+      if (!check.same) process.exitCode = 1;
+    } else console.log(JSON.stringify(await recheckResults(values.run, resolveInputPath(values.engine), Number(values.count ?? 20)), null, 2));
   } else if (command === "evaluate") {
     if (!values.engine) throw new Error("--engine is required; point to a Stockfish 19 binary.");
     if (positionals.length || values.seed || values["max-gap"]) throw new Error("Evaluate uses the import run's inputs and filters.");

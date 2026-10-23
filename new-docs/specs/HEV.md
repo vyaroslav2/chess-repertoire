@@ -81,6 +81,12 @@ HEV.24 **The local recheck.** 20 jobs picked at random from each file were searc
 
 The random pick is fixed, so running it again checks the same 40 jobs. It took about 5 minutes.
 
+One chosen game can be checked live, in a few seconds:
+
+`npm --prefix experiments/he run recheck -- --run 2024-02-3000mb --engine stockfish-windows-x86-64-universal/stockfish/stockfish-windows-x86-64-universal.exe --game g8gCaNm4`
+
+It searches that game's position afresh (never from the cache) and prints the Colab line above the local one. For `g8gCaNm4`: the same depth, score, nodes and line, searched in 3.9 s.
+
 ## A first look at the curve
 
 HEV.30 **Not the curve yet** (that is HEV.60–68). This is a plain count: the games put into eval bands, and Black's results in each band. The real curve is a smooth line fitted through the games, not through bands. But the count already shows its shape.

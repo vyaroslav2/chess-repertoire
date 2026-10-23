@@ -99,8 +99,9 @@ export class HeEngine {
   async evaluate(fen: string, candidate?: string): Promise<Evaluation> {
     return (await this.search(fen, candidate)).evaluation;
   }
-  // The evaluation with Stockfish's raw lines, cached or new.
-  async search(fen: string, candidate?: string): Promise<{ evaluation: Evaluation; rawLines: string[] }> {
+  // The evaluation with Stockfish's raw lines, cached or new. `fresh` always searches,
+  // so a live check never just reads back an earlier result.
+  async search(fen: string, candidate?: string, fresh = false): Promise<{ evaluation: Evaluation; rawLines: string[] }> {
     const chess = new Chess(fen);
     if (chess.turn() !== "b") throw new Error("HE evaluates Black decisions only.");
     if (candidate && !chess.moves({ verbose: true }).some(move => move.lan === candidate)) throw new Error("Illegal HE candidate.");
@@ -109,7 +110,7 @@ export class HeEngine {
     const directory = path.join(DATA_ROOT, "eval-cache", this.profile.id);
     await assertDataDirectory(directory);
     const cachePath = path.join(directory, key + ".json");
-    try {
+    if (!fresh) try {
       const cached = JSON.parse(await readFile(cachePath, "utf8"));
       if (JSON.stringify(cached.request) !== JSON.stringify(request) ||
           !Array.isArray(cached.rawLines)) throw new Error("Invalid HE evaluation cache: " + cachePath);

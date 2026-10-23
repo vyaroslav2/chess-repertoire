@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { open, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { HeEngine, parseEvaluation, SETTINGS } from "./engine";
+import { HeEngine, parseEvaluation, SETTINGS, type Evaluation } from "./engine";
 import type { Job } from "./jobs";
 import { assertDataDirectory, runPath } from "./paths";
-import type { MoveGroup, Period } from "./types";
+import type { MoveGroup, Observation, Period } from "./types";
 
 // One finished Colab search, as colab/he_colab.py writes it. cp and mate are Black's view.
 export type ResultLine = { type: "result"; id: number; uci: string; cp: number | null; mate: number | null;
@@ -123,6 +123,60 @@ export async function importResults(name: string, period: Period) {
     throw error;
   }
   return { destination, ...summary };
+}
+
+// Searches one chosen game's position again here, always afresh, and sets the Colab line above
+// the local one. Reads only what that game needs, so it answers in seconds.
+export async function recheckGame(name: string, binary: string, gameId: string) {
+  if (!/^[A-Za-z0-9]{8}$/.test(gameId)) throw new Error("A game id is 8 letters or digits, e.g. g8gCaNm4.");
+  const directory = runPath(name);
+  const first = async <T>(file: string, hint: string, test: (row: T) => boolean) => {
+    for (const line of (await readFile(path.join(directory, file), "utf8")).split("\n")) {
+      if (!line.includes(hint)) continue;
+      const row = JSON.parse(line) as T;
+      if (test(row)) return row;
+    }
+  };
+  const game = await first<Observation>("observations.jsonl", gameId, row => row.gameId === gameId);
+  if (!game) throw new Error("Game " + gameId + " is not in run " + name + ".");
+  let hit: { job: Job; part: Part; result: ResultLine } | undefined;
+  for (const part of PARTS) {
+    const job = await first<Job>("jobs-" + part + ".jsonl", game.uci, row => row.positionKey === game.positionKey && row.uci === game.uci);
+    if (!job) continue;
+    const result = await first<ResultLine>("results-" + part + ".jsonl", '"id": ' + job.id + ",", row => row.type === "result" && row.id === job.id);
+    if (!result) throw new Error("results-" + part + ".jsonl has no result for id " + job.id + ".");
+    hit = { job, part, result };
+  }
+  if (!hit) throw new Error("No search job for game " + gameId + "'s move.");
+  const { job, part, result } = hit;
+  const colab = parseEvaluation([result.info, result.bestmove], job.fen, job.uci);
+  const engine = await HeEngine.start(binary);
+  const started = Date.now();
+  let rawLines: string[];
+  try { rawLines = (await engine.search(job.fen, job.uci, true)).rawLines; } finally { engine.close(); }
+  const seconds = (Date.now() - started) / 1000;
+  const local = parseEvaluation(rawLines, job.fen, job.uci);
+  // The line the score was read from: the last exact one, as parseEvaluation reads it.
+  const localInfo = [...rawLines].reverse().find(line => line.startsWith("info ") && / pv /.test(line) &&
+    !/\b(?:lowerbound|upperbound)\b/.test(line) && / score (?:cp|mate) /.test(line)) ?? "";
+  const same = found(localInfo) === found(result.info) && rawLines.at(-1) === result.bestmove &&
+    JSON.stringify(local) === JSON.stringify(colab);
+  const evalText = (e: Evaluation) => e.mateWhite !== null ? "mate " + e.mateWhite :
+    (e.cpWhite! > 0 ? "+" : "") + (e.cpWhite! / 100).toFixed(2);
+  const outcome = { wins: "0-1, Black won", draws: "1/2-1/2, a draw", losses: "1-0, Black lost" }[game.outcome];
+  return { same, text: [
+    "Game " + gameId + ": https://lichess.org/" + gameId + "/black#" + 2 * game.moveNumber,
+    "Black's move " + game.moveNumber + "... " + game.san + " (" + game.uci + "), result " + outcome,
+    "Position: " + job.fen + (job.fen === game.fen ? "" : " (the group's first position; this game's differs only in the clocks)"),
+    "Search: results-" + part + ".jsonl, id " + job.id,
+    "",
+    "Colab: " + found(result.info),
+    "Here:  " + found(localInfo),
+    "",
+    "Eval for White: " + evalText(colab) + " on Colab, " + evalText(local) + " here (searched now, " + seconds.toFixed(1) + " s)",
+    same ? "SAME: depth, score, nodes and every move of the line match. Only the speed differs."
+      : "DIFFERENT: compare the two lines above.",
+  ].join("\n") };
 }
 
 // Searches a fixed random choice of jobs from each file again on this machine. Each must give
