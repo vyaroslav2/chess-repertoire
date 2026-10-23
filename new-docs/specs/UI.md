@@ -134,9 +134,10 @@ A copy of the Lichess gauge, dark theme. A bar 15px wide and as tall as the boar
 - In the app since 2026-10-13.
 
 UI.34 **Showing evals.**
-The evals (UI.26) and the eval gauge (UI.31) are hidden at the start of each card. `E` shows them; a second press hides them again. Each new card starts hidden again.
+The evals (UI.26) and the eval gauge (UI.31) are hidden by default. `E` shows them; a second press hides them again. The choice stays across cards and reloads, like `S` (UI.22). Holding `E` down toggles once.
+- Kept in localStorage (`evals`). Read on mount, so a saved "on" shows a moment after the page loads. One setting for `/` and `/demo`. Since 2026-10-23; before, each new card started hidden again.
 - Why: cards are Anki style, and a game has no evals. The eval on the opponent's last move is the eval of the position you face, so it gives away roughly how strong the best reply is. The gauge shows the same figure.
-- Why not remove them: they are worth a look after answering, or when stuck. One press spoils only the current card.
+- Why not remove them: they are worth a look after answering, or when stuck. Left on, they spoil every card until `E` turns them off; that is the user's choice.
 - Hidden, the move list's cells keep their width with no eval in them, and the gauge's slot stays empty, so nothing moves when they show.
 - Not clipped when hidden: a narrower panel would make every move jump sideways on each press, and the space saved is no use, since only the board is centred (UI.27).
 - A plain key, read as `e.key`, like `F` for flipping.

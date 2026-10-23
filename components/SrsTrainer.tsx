@@ -8,6 +8,9 @@ import LichessMoveList from "./LichessMoveList";
 import EvalGauge from "./EvalGauge";
 import SettingsMenu from "./SettingsMenu";
 import { toggleStatusLine } from "./status-line";
+
+// UI.34: whether the evals and gauge show.
+const evalsKey = "evals";
 import { logFlightBox } from "../lib/logger";
 import {
   ankiGrade,
@@ -149,8 +152,13 @@ export default function SrsTrainer({
   // Manual board flip, toggled with the 'f' key.
   const [flipped, setFlipped] = useState(false);
 
-  // Evals and gauge, shown with the 'e' key; hidden again at each new card (UI.34).
+  // Evals and gauge, shown with the 'e' key; the choice is kept across cards and reloads (UI.34).
   const [evalsShown, setEvalsShown] = useState(false);
+  useLayoutEffect(() => {
+    try {
+      if (localStorage.getItem(evalsKey) === "1") setEvalsShown(true);
+    } catch {}
+  }, []);
 
   // Lichess's sounds: Capture.mp3 for a capture, right or wrong, Move.mp3 for any other move.
   const soundsRef = useRef<{ move: HTMLAudioElement; capture: HTMLAudioElement } | null>(null);
@@ -248,10 +256,7 @@ export default function SrsTrainer({
     const playedMove = lineStep > 0 ? tempChess.history({ verbose: true }).at(-1) : undefined;
     setLastMove(playedMove ? [playedMove.from, playedMove.to] : undefined);
     setTestStatus("idle");
-    if (lineStep === 0) {
-      setEvalsShown(false);
-      setLineStatus(null);
-    }
+    if (lineStep === 0) setLineStatus(null);
     setCurrentPlyIndex(priorMoves.length);
 
     if (!finalMove) {
@@ -429,9 +434,14 @@ export default function SrsTrainer({
         return;
       }
 
-      // Show or hide the evals and gauge (UI.34)
+      // Show or hide the evals and gauge, kept in localStorage (UI.34)
       if ((e.key === "e" || e.key === "E") && plainKey) {
-        setEvalsShown((prev) => !prev);
+        if (e.repeat) return;
+        const shown = !evalsShown;
+        setEvalsShown(shown);
+        try {
+          localStorage.setItem(evalsKey, shown ? "1" : "0");
+        } catch {}
         return;
       }
 
@@ -504,7 +514,7 @@ export default function SrsTrainer({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentStat, testStatus, chess, isBrowsing, targetPlyIndex]);
+  }, [currentStat, testStatus, chess, isBrowsing, targetPlyIndex, evalsShown]);
 
   if (!currentStat && ankiMode) {
     // AK.14
