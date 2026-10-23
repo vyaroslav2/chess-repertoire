@@ -7,6 +7,7 @@ export type MoveEval = { cp: number | null; mate: number | null };
 interface LichessMoveListProps {
   moves: string[]; // e.g. ['d4', 'd5', 'c4', 'dxc4']
   evals?: (MoveEval | null)[]; // by ply, as moves (DB.11); null shows nothing
+  marks?: Record<number, "wrong" | "revealed">; // by ply: tints the move number (GR.07)
   currentPlyIndex: number; // -1 for start, 0 for White's first move, 1 for Black's, etc.
   onMoveClick: (index: number) => void;
 }
@@ -18,7 +19,7 @@ function formatEval({ cp, mate }: MoveEval) {
   return (cp < 0 ? "-" : "+") + (Math.abs(cp) / 100).toFixed(2);
 }
 
-export default function LichessMoveList({ moves, evals, currentPlyIndex, onMoveClick }: LichessMoveListProps) {
+export default function LichessMoveList({ moves, evals, marks = {}, currentPlyIndex, onMoveClick }: LichessMoveListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const activeMoveRef = useRef<HTMLDivElement>(null);
 
@@ -62,14 +63,23 @@ export default function LichessMoveList({ moves, evals, currentPlyIndex, onMoveC
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [currentPlyIndex, moves.length, onMoveClick]);
 
+  // Only one side is yours, so a row holds at most one marked move.
+  const markClass = (...plies: number[]) => {
+    const mark = plies.map((ply) => marks[ply]).find(Boolean);
+    return mark ? `mark-${mark}` : '';
+  };
+
   const evalAt = (index: number) => {
     const moveEval = evals?.[index];
     return moveEval ? <span className="move-eval">{formatEval(moveEval)}</span> : null;
   };
 
+  // A marked move not yet listed (a wrong White move, back at once) still shows its number (GR.07).
+  const rowsEnd = Math.max(moves.length, ...Object.keys(marks).map((ply) => Number(ply) + 1));
+
   // Group linear moves into [turnNumber, whiteMove, blackMove]
   const turns = [];
-  for (let i = 0; i < moves.length; i += 2) {
+  for (let i = 0; i < rowsEnd; i += 2) {
     turns.push({
       turnNumber: Math.floor(i / 2) + 1,
       whiteMove: moves[i],
@@ -88,17 +98,20 @@ export default function LichessMoveList({ moves, evals, currentPlyIndex, onMoveC
         {turns.map((turn) => (
           <React.Fragment key={turn.turnNumber}>
             {/* Column 1: Move Number, no dot (as on Lichess) */}
-            <div className="move-number">{turn.turnNumber}</div>
-            
+            {/* Tinted if your move in the row is marked (GR.07) */}
+            <div className={`move-number ${markClass(turn.whiteIndex, turn.blackIndex)}`}>{turn.turnNumber}</div>
+
             {/* Column 2: White's Move */}
-            <div 
-              ref={currentPlyIndex === turn.whiteIndex ? activeMoveRef : null}
-              className={`move-san ${currentPlyIndex === turn.whiteIndex ? 'active' : ''}`}
-              onClick={() => onMoveClick(turn.whiteIndex)}
-            >
-              {turn.whiteMove}
-              {evalAt(turn.whiteIndex)}
-            </div>
+            {turn.whiteMove !== undefined && (
+              <div
+                ref={currentPlyIndex === turn.whiteIndex ? activeMoveRef : null}
+                className={`move-san ${currentPlyIndex === turn.whiteIndex ? 'active' : ''}`}
+                onClick={() => onMoveClick(turn.whiteIndex)}
+              >
+                {turn.whiteMove}
+                {evalAt(turn.whiteIndex)}
+              </div>
+            )}
 
             {/* Column 3: Black's Move */}
             {turn.blackMove !== undefined && (

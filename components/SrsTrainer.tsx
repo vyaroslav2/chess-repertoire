@@ -27,6 +27,7 @@ interface SrsTrainerProps {
 }
 
 type TestStatus = "idle" | "wrong" | "correct" | "revealed";
+type MoveMark = "wrong" | "revealed";
 
 // A moving piece slides over 250ms, Lichess's default (UI.35).
 const slideMs = 250;
@@ -165,9 +166,16 @@ export default function SrsTrainer({
 
   // Which of your moves in a whole-line card is asked; 0 at each new card.
   const [lineStep, setLineStep] = useState(0);
-  // The status light (GR.06): how the line has gone so far. Red or amber is
-  // never turned back to green; null until your first move, and at each new card.
-  const [lineStatus, setLineStatus] = useState<Exclude<TestStatus, "idle"> | null>(null);
+  // GR.07: your moves marked wrong or revealed, by ply; a right move has none.
+  // X clears the latest. Empty at each new card.
+  const [marks, setMarks] = useState<Record<number, MoveMark>>({});
+  // One of your moves is on the board, played or revealed: with no marks, the light is green.
+  const [lineAnswered, setLineAnswered] = useState(false);
+  // The status light (GR.06): the latest mark left, else green once a move is on
+  // the board; none before your first move.
+  const latestMarkPly = Math.max(-1, ...Object.keys(marks).map(Number));
+  const lineStatus: Exclude<TestStatus, "idle"> | null =
+    latestMarkPly >= 0 ? marks[latestMarkPly] : lineAnswered ? "correct" : null;
   const currentStat = useMemo(() => lineStepCard(stats[0], lineStep), [stats[0], lineStep]);
   // Grades wait for the line's end: your last move, with no White move after it.
   const isLastStep = !currentStat?.fullLine || lineStep >= lastLineStep(currentStat);
@@ -256,7 +264,10 @@ export default function SrsTrainer({
     const playedMove = lineStep > 0 ? tempChess.history({ verbose: true }).at(-1) : undefined;
     setLastMove(playedMove ? [playedMove.from, playedMove.to] : undefined);
     setTestStatus("idle");
-    if (lineStep === 0) setLineStatus(null);
+    if (lineStep === 0) {
+      setMarks({});
+      setLineAnswered(false);
+    }
     setCurrentPlyIndex(priorMoves.length);
 
     if (!finalMove) {
@@ -445,6 +456,14 @@ export default function SrsTrainer({
         return;
       }
 
+      // X: clear the latest mark, for a misclick (GR.07)
+      if ((e.key === "x" || e.key === "X") && plainKey) {
+        if (e.repeat || latestMarkPly < 0) return;
+        logFlightBox("ACTION_CLEAR_MARK", { ply: latestMarkPly, mark: marks[latestMarkPly] });
+        setMarks(({ [latestMarkPly]: _, ...rest }) => rest);
+        return;
+      }
+
       // During the intro (the wait, then the opponent's slide), only Enter acts:
       // it ends the intro and reveals the answer below. Other keys leave the slide alone (GR.01).
       if (isInitializingRef.current) {
@@ -480,7 +499,8 @@ export default function SrsTrainer({
               chess.load(tempChess.fen());
               setLastMove([move.from, move.to]);
               setTestStatus("revealed");
-              setLineStatus("revealed");
+              setMarks((previous) => ({ ...previous, [targetPlyIndex]: "revealed" }));
+              setLineAnswered(true);
               setCurrentPlyIndex(targetPlyIndex + 1);
               goOnInLine();
               playSound(move.san);
@@ -514,7 +534,7 @@ export default function SrsTrainer({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentStat, testStatus, chess, isBrowsing, targetPlyIndex, evalsShown]);
+  }, [currentStat, testStatus, chess, isBrowsing, targetPlyIndex, evalsShown, marks]);
 
   if (!currentStat && ankiMode) {
     // AK.14
@@ -630,7 +650,7 @@ export default function SrsTrainer({
           setFen(chess.fen());
           setLastMove([from, to]);
           setTestStatus("correct");
-          setLineStatus((previous) => previous ?? "correct");
+          setLineAnswered(true);
           setCurrentPlyIndex(targetPlyIndex + 1);
           goOnInLine();
         } else {
@@ -639,7 +659,7 @@ export default function SrsTrainer({
           setFen(chess.fen());
           setLastMove([from, to]);
           setTestStatus("wrong");
-          setLineStatus("wrong");
+          setMarks((previous) => ({ ...previous, [targetPlyIndex]: "wrong" }));
           setCurrentPlyIndex(targetPlyIndex + 1);
 
           // Back after 300ms, as on Lichess (GR.02)
@@ -955,6 +975,7 @@ export default function SrsTrainer({
                 : [],
             )}
             evals={evalsShown ? moveEvals : undefined}
+            marks={marks}
             currentPlyIndex={currentPlyIndex - 1}
             onMoveClick={(index) => {
               logFlightBox("ACTION_CLICK_MOVE_LIST", {

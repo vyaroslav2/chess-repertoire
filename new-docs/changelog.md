@@ -20,5 +20,11 @@ tags:
 - HE: dot page of every game; sampled moves and evals in MySQL, now on port 13306.
 - HE: `recheck --game` searches one game live, depth by depth, beside the Colab result.
 - Russian write-ups of the curve and k; for a presentation.
+- //- the evaluations are now a toggle -//
+- //- what else? -//
+
+## 2026-10-23
+
+- Trainer: wrong and revealed moves mark their move number red or amber; X clears the latest mark, for a misclick ([[GR|GR.07]], [[UI|UI.36]]).
 
 

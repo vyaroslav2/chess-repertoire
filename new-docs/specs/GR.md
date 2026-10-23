@@ -10,7 +10,7 @@ GR.01 **A card.**
 The board shows the position before the opponent's last move. After a 500ms wait, that move slides in ([[UI|UI.35]]). You answer for the side to move.
 - The wait and the slide are the intro. The board takes moves only once it has ended.
 - During the intro, only `Enter` acts: it ends the intro and reveals the answer (GR.03). Mid-slide, the opponent's piece lands at once and the answer slides in. In the wait, the answer just appears.
-- During the intro, `1`–`4` and other keys do nothing, and the intro plays on. `Ctrl + Z`, `F` and `E` work as always.
+- During the intro, `1`–`4` and other keys do nothing, and the intro plays on. `Ctrl + Z`, `F`, `E` and `X` (GR.07) work as always.
 - During the slide of the answer, `1`–`4` or `Enter` grade at once; the next card cuts the slide short.
 - Why `Enter` acts during the intro: one press shows the answer, with no waiting for a slide you've seen before, and `Enter`, `Enter` passes over a card quickly.
 - The 500ms wait is Lichess's: its puzzles play the first move 500ms after loading, or at once with animation off (`ui/puzzle/src/ctrl.ts`).
@@ -46,9 +46,24 @@ A card is a whole line: you play each of your moves in turn. The status light ([
 - No light until your first move in the line.
 - A right move turns it green.
 - A wrong move turns it red; a reveal turns it amber. The latest of these wins.
-- Once red or amber, it can't go back to green.
+- Once red or amber, it can't go back to green, except by clearing marks with `X` (GR.07).
 - It stays through the opponent's replies, and goes off at the next card: after a grade or `Ctrl + Z`.
-- `1`–`4` and `Enter` grade at the line's end whatever the light shows. A misclick turns it red, but you can still grade Good.
-- In the app since 2026-10-22: `lineStatus` in `components/SrsTrainer.tsx`. Before, the light showed only the move being asked, so mid-line green and amber went off at once.
+- `1`–`4` and `Enter` grade at the line's end whatever the light shows. A misclick turns it red, but you can still grade Good, or clear it with `X`.
+- In the app since 2026-10-22: `lineStatus` in `components/SrsTrainer.tsx`. Before, the light showed only the move being asked, so mid-line green and amber went off at once. Since 2026-10-23, worked out from the marks (GR.07).
 
 Checked in the app 2026-10-22, on `/demo`: no light before the first move; right move green, kept through the reply; wrong move red; right move after it still red; reveal amber; right last move still amber; off after a grade and after `Ctrl + Z`; a wrong move then `Enter` on the same move gives amber. Not checked on `/`, but it's the same code.
+
+GR.07 **Clearing a mark.**
+A misclick turns the light red. `X` takes it back.
+- A wrong move tints its move number red in the move list; a reveal tints it amber ([[UI|UI.36]]). Right moves are not marked.
+- One mark per move. A wrong move then a reveal on the same move leaves amber, as on the light (GR.06).
+- The light shows the latest mark left. With none, it's green once one of your moves is on the board, and off before that.
+- `X` clears the latest mark. The light updates to match.
+- Press again to clear the one before it. Each press changes a number you can see, so you know what it did.
+- No marks: nothing happens. Holding `X` down clears one.
+- A plain key, read as `e.key`, like `E` and `F` ([[UI|UI.34]]). With Ctrl, Alt or Meta held it does nothing, so `Ctrl + X` stays the browser's.
+- Why `X`: your right hand is on the mouse, and `1`–`4`, `E`, `F` and `S` are under the left. `X` is there too, on the bottom row, away from `1`–`4`, so a slip can't cost a grade.
+- Why marks, not a one-step undo of the light: a second red on a red light changes nothing you can see. An undo of it would leave you unsure which mistake it took back.
+- In the app since 2026-10-23: `marks` in `components/SrsTrainer.tsx`, by ply.
+
+Checked in the app 2026-10-23, on `/demo`, a Black line: wrong move, number 1 red, light red; `X`, number plain, light off; wrong then `Enter`, number 1 amber; wrong on the next move, number 2 red, light red; `X`, 2 plain, light amber; `X`, 1 plain, light green; `X` with no marks, nothing. Not checked: a White line, where a wrong move's row has only its number until the right move is played.

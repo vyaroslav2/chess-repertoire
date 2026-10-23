@@ -80,6 +80,20 @@ In each move's cell, pushed to its right edge and centred vertically in the row,
 - Beyond ±9.99 the eval keeps two decimals (e.g. `+12.34`). A mate shows as on Lichess: `#3` (White mates), `#-3` (Black mates).
 - In the app since 2026-10-13. `/grid` keeps the mock.
 
+UI.36 **Marked moves.**
+Your move's number cell, filled when the move is marked ([[GR|GR.07]]), in the status light's fills (UI.30):
+
+| Mark | Fill | Number |
+|---|---|---|
+| wrong | `#c62828` | `#ffffff`, 5.6 : 1 |
+| revealed | `#f9a825` | `#262421` (the panel), 7.9 : 1 |
+
+- The number cell, not the move: you play one side, so a row holds one of your moves, and its number can only mean that move. The number is never the current move, so the blue of UI.25 never covers it. It takes no room from the move and its eval (UI.26).
+- The light's own fills, so a colour means one thing in both places. Full fills, like the current move's blue, so a mark is seen at a glance. Not tried: fainter tints.
+- White on amber is 2.0 : 1, so amber takes the panel's dark colour instead.
+- The whole 44 × 26px cell is filled; two marked rows in a row touch.
+- A wrong White move goes back at once and isn't listed. Its row still shows, with just its number, so you see the mark.
+
 ## Layout
 
 UI.27 **Centring.** The board is centred across and down; only the board counts. The gap above it is half the free height, rounded to the nearest 0.8px (1 screen px), so the board stays on whole screen pixels and is at most 0.4px off centre. In a 779px-high window: 44px above, 43.8px below.

@@ -415,6 +415,18 @@ html.coords-large .cg-wrap coords coord {
   font-family: var(--font-roboto), sans-serif;
 }
 
+/* GR.07, UI.36: your move's number, marked wrong or revealed, in the status
+   light's fills (UI.30). White on red 5.6 : 1; the panel's colour on amber 7.9 : 1. */
+.move-number.mark-wrong {
+  background-color: #c62828;
+  color: #ffffff;
+}
+
+.move-number.mark-revealed {
+  background-color: #f9a825;
+  color: #262421;
+}
+
 .move-san {
   /* Roboto: chosen over Arial and Inter on /moves as the cleanest for SAN. */
   font-family: var(--font-roboto), sans-serif;
