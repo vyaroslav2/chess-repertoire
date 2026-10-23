@@ -2,8 +2,9 @@
 
 Paste the whole file into one Colab cell, after mounting Drive (drive.mount). Set JOBS and
 RESULTS below, then run the cell. It installs Stockfish 19, checks it with bench, and
-searches every job not yet in RESULTS, writing one line per finished search. Stop it at
-any time with the stop button; run the cell again to carry on where it stopped.
+searches every job not yet in RESULTS, writing one line per finished search. Drive gets
+RESULTS only when the file is closed, so it is closed and reopened every SAVE_EVERY results.
+Stop it at any time with the stop button; run the cell again to carry on where it stopped.
 
 The engine settings match experiments/he/engine.ts. Both people must use them unchanged,
 or the two halves cannot be joined.
@@ -14,6 +15,7 @@ JOBS = "/content/drive/MyDrive/he/jobs-a.jsonl"
 RESULTS = "/content/drive/MyDrive/he/results-a.jsonl"
 LIMIT = 50                         # e.g. 50 for a test run: only the first 50 jobs; None for all jobs 
 ENGINES = os.cpu_count() or 1        # one single-threaded engine per core
+SAVE_EVERY = 500                     # close RESULTS this often, so Drive gets it
 
 # Fixed. Do not change: they define the eval profile.
 NODES, HASH_MB, THREADS, MULTIPV = 2_000_000, 64, 1, 1
@@ -180,6 +182,7 @@ def main(binary=None):
     out.flush()
 
     def worker():
+        nonlocal out
         engine = None
         try:
             engine = Engine(binary)
@@ -200,6 +203,11 @@ def main(binary=None):
                         rate = count / hours
                         left = (remaining - count) / rate
                         print(f"{len(done) + count:,} / {total:,} done | {rate:,.0f} an hour | about {left:.1f} h left")
+                    if count % SAVE_EVERY == 0:
+                        # Drive uploads a file only once it is closed.
+                        out.close()
+                        out = open(RESULTS, "a", encoding="utf-8")
+                        print(f"Saved {len(done) + count:,} results to Drive")
         except Exception as error:
             errors.append(error)
             stop.set()
