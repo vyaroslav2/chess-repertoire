@@ -182,7 +182,7 @@ AK.14 **Errors.**
 
 AK.15 **The demo.**
 The trainer without Anki moves to `/demo`, unchanged: its own queue, nothing saved.
-- #note Temporary, since 2026-10-21: on `/demo` a card is a whole line, from move 1 to its end. You play each of your moves in turn ([[GR|GR.01]]–[[GR|GR.03]] for each). A move played or revealed goes straight on to the opponent's reply. The line ends at your last move, with no opponent move after it; only then do `1`–`4` and `Enter` grade ([[GR|GR.04]]). There is no cue for the end. Source: `fetchDemoLines` in `app/actions.ts`, `lineStepCard` in `components/SrsTrainer.tsx`.
+- #note Temporary, since 2026-10-21: on `/demo` a card is a whole line, from move 1 to its end. You play each of your moves in turn ([[GR|GR.01]]–[[GR|GR.03]] for each). A move played or revealed goes straight on to the opponent's reply. The line ends at your last move, with no opponent move after it; only then do `2`–`4` and `Enter` grade. `1` grades Again at any move ([[GR|GR.04]]). There is no cue for the end. Source: `fetchDemoLines` in `app/actions.ts`, `lineStepCard` in `components/SrsTrainer.tsx`.
 - Since 2026-10-22, `/` trains whole lines the same way, from Anki's cards (AK.02). `trainerCard` in `app/anki.ts` gives the line (`fullLine`). A grade or `Ctrl + Z` brings Anki's next card from move 1.
 
 AK.08 **The test.**

@@ -538,8 +538,18 @@ export default function SrsTrainer({
         }
       }
 
-      // 1, 2, 3, 4 (Grade)
-      if (["1", "2", "3", "4"].includes(e.key) && testStatus !== "idle" && isLastStep) {
+      // 1 (Again): at any of your moves, even before the first, once the intro has
+      // ended; the rest of the line is skipped (GR.04). Not on repeat, so holding it
+      // can't grade the next card too.
+      if (e.key === "1") {
+        if (e.repeat) return;
+        logFlightBox("ACTION_RATE_KEY", { key: e.key, quality: 0, lineStep });
+        handleRate(0);
+        return;
+      }
+
+      // 2, 3, 4 (Grade)
+      if (["2", "3", "4"].includes(e.key) && testStatus !== "idle" && isLastStep) {
         // Map 1-4 to 0-3 quality
         const quality = parseInt(e.key) - 1;
         logFlightBox("ACTION_RATE_KEY", { key: e.key, quality });
