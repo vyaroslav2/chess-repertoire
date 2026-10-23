@@ -18,7 +18,7 @@ const HELP = String.raw`Human evidence pilot
   npm --prefix experiments/he run filter -- --run 2024-01-2500mb
   npm --prefix experiments/he run import -- --run pilot-50k --limit 50000 file.pgn [other.pgn.gz]
   npm --prefix experiments/he run evaluate -- --run pilot-50k --engine <stockfish-19-binary> [--period fit] [--limit 5]
-  npm --prefix experiments/he run jobs -- --run 2024-02-3000mb [--period fit] [--split 20000]
+  npm --prefix experiments/he run jobs -- --run 2024-03-3000mb [--period fit] [--split 20000] [--reuse 2024-02-3000mb ...]
   npm --prefix experiments/he run results -- --run 2024-02-3000mb [--period fit]
   npm --prefix experiments/he run recheck -- --run 2024-02-3000mb --engine <stockfish-19-binary> [--count 20 | --game g8gCaNm4]
   npm --prefix experiments/he run curve -- --run 2024-02-3000mb
@@ -35,7 +35,8 @@ All outputs live in experiments/he/data/. Existing run/results names are protect
 Load copies a download's sample.pgn into the MySQL games table; repeating it is safe.
 Load-moves copies each game's sampled move and its eval into the MySQL sampled_moves table; repeating it is safe.
 Dots writes dots.html into the run's folder: every game as a dot, eval against result; open it in a browser.
-Jobs writes the groups as Colab search jobs: ids 1 to --split in jobs-a.jsonl, the rest in jobs-b.jsonl.
+Jobs writes the groups as Colab search jobs: the first --split in jobs-a.jsonl, the rest in jobs-b.jsonl.
+With --reuse, groups a finished earlier run has searched go to jobs-reused.jsonl instead; results takes their evals from that run.
 Results checks results-a.jsonl and results-b.jsonl against their jobs and writes evals.jsonl: each group with its eval.
 Recheck searches --count random jobs from each results file again here; they must match exactly.
 With --game it searches that one game's position afresh and prints the Colab line above the local one.
@@ -48,7 +49,7 @@ async function main() {
   if (!command || command === "--help" || command === "help") { console.log(HELP); return; }
   const parsed = parseArgs({ args: process.argv.slice(3), allowPositionals: true, options: {
     run: { type: "string" }, seed: { type: "string" }, "max-gap": { type: "string" },
-    month: { type: "string" }, gb: { type: "string" }, limit: { type: "string" }, engine: { type: "string" }, period: { type: "string" }, split: { type: "string" }, count: { type: "string" }, game: { type: "string" }, help: { type: "boolean" },
+    month: { type: "string" }, gb: { type: "string" }, limit: { type: "string" }, engine: { type: "string" }, period: { type: "string" }, split: { type: "string" }, reuse: { type: "string", multiple: true }, count: { type: "string" }, game: { type: "string" }, help: { type: "boolean" },
   } });
   const { values, positionals } = parsed;
   if (values.help) { console.log(HELP); return; }
@@ -57,6 +58,7 @@ async function main() {
   const limit = values.limit === undefined ? undefined : Number(values.limit);
   if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) throw new Error("--limit must be a positive integer.");
   if (command !== "download" && (values.month || values.gb)) throw new Error("--month and --gb belong to download.");
+  if (command !== "jobs" && values.reuse) throw new Error("--reuse belongs to jobs.");
   if (command === "download") {
     if (positionals.length || values.engine || values.period) throw new Error("Download takes --month and --gb, not input paths or engine options.");
     if (!values.month || !values.gb) throw new Error("Download requires --month YYYY-MM and --gb (e.g. 2.5).");
@@ -80,10 +82,10 @@ async function main() {
     console.log(JSON.stringify(await loadGames(path.join(DATA_ROOT, "downloads", values.run, "sample.pgn"), limit), null, 2));
   } else if (command === "jobs") {
     if (positionals.length || values.seed || values["max-gap"] || values.engine || values.limit)
-      throw new Error("Jobs takes only --run, --period and --split.");
+      throw new Error("Jobs takes only --run, --period, --split and --reuse.");
     const period = values.period ?? "fit";
     if (!["fit", "tune", "test"].includes(period)) throw new Error("--period must be fit, tune or test.");
-    console.log(JSON.stringify(await writeJobs(values.run, period as Period, Number(values.split ?? 20000)), null, 2));
+    console.log(JSON.stringify(await writeJobs(values.run, period as Period, Number(values.split ?? 20000), values.reuse), null, 2));
   } else if (command === "results") {
     if (positionals.length || values.seed || values["max-gap"] || values.engine || values.limit || values.split || values.count)
       throw new Error("Results takes only --run and --period.");

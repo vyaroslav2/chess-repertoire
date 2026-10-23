@@ -209,23 +209,24 @@ test("jobs split one period's groups by id and keep each group's first FEN", asy
     await assert.rejects(writeJobs(name, "fit", 1));
   } finally { await rm(run, { recursive: true }); }
 });
+// Colab's session and result lines, as colab/he_colab.py writes them.
+const session = (part: string, overrides = {}) => JSON.stringify({ type: "session", startedAt: "2026-10-12T00:00:00Z",
+  engine: "Stockfish 19", archiveSha256: "9defc0d4e55d49c65a6d042f3e571a39fcea499ade6dbe741b53b8c65e03611f",
+  binarySha256: "x", bench: 2497913, nodes: 2000000, hashMb: 64, threads: 1, multiPv: 1, engines: 2,
+  jobs: "jobs-" + part + ".jsonl", ...overrides });
+const result = (id: number, uci: string, reply: string, score: string, overrides = {}) => {
+  const [kind, value] = score.split(" ");
+  return JSON.stringify({ type: "result", id, uci, cp: kind === "cp" ? Number(value) : null,
+    mate: kind === "mate" ? Number(value) : null, depth: 24, nodes: 2000100,
+    info: "info depth 24 seldepth 30 multipv 1 score " + score + " nodes 2000100 nps 9 hashfull 1 tbhits 0 time 9 pv " + uci + " " + reply,
+    bestmove: "bestmove " + uci + " ponder " + reply, ...overrides });
+};
 test("results join both files to their groups, flip to White's view and refuse bad input", async () => {
   const name = "test-results-" + process.pid, run = runPath(name);
   await assertDataDirectory(run);
   const fen = "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1";
   const group = (period: string, uci: string) => ({ period, positionKey: fen.split(" ").slice(0, 4).join(" "), uci,
     fens: [fen], games: 2, wins: 1, draws: 0, losses: 1, moveNumbers: { "1": 2 } });
-  const session = (part: string, overrides = {}) => JSON.stringify({ type: "session", startedAt: "2026-10-12T00:00:00Z",
-    engine: "Stockfish 19", archiveSha256: "9defc0d4e55d49c65a6d042f3e571a39fcea499ade6dbe741b53b8c65e03611f",
-    binarySha256: "x", bench: 2497913, nodes: 2000000, hashMb: 64, threads: 1, multiPv: 1, engines: 2,
-    jobs: "jobs-" + part + ".jsonl", ...overrides });
-  const result = (id: number, uci: string, reply: string, score: string, overrides = {}) => {
-    const [kind, value] = score.split(" ");
-    return JSON.stringify({ type: "result", id, uci, cp: kind === "cp" ? Number(value) : null,
-      mate: kind === "mate" ? Number(value) : null, depth: 24, nodes: 2000100,
-      info: "info depth 24 seldepth 30 multipv 1 score " + score + " nodes 2000100 nps 9 hashfull 1 tbhits 0 time 9 pv " + uci + " " + reply,
-      bestmove: "bestmove " + uci + " ponder " + reply, ...overrides });
-  };
   const write = (file: string, rows: string[]) => writeFile(path.join(run, file), rows.join("\n") + "\n");
   const goodA = [session("a"), result(1, "d7d5", "c2c4", "cp -15")];
   // Id 2 again after a dropped session: the same search, at another speed, is allowed.
@@ -258,6 +259,39 @@ test("results join both files to their groups, flip to White's view and refuse b
       [[1, "d7d5", "a", 15, null, 1], [2, "g8f6", "b", null, -3, 1]]);
     await assert.rejects(importResults(name, "fit"));
   } finally { await rm(run, { recursive: true }); }
+});
+test("jobs skip groups an earlier run searched, and results take those evals from it", async () => {
+  const earlier = "test-reuse-feb-" + process.pid, later = "test-reuse-mar-" + process.pid;
+  const fen = "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1";
+  const group = (uci: string, clocks = " 0 1") => JSON.stringify({ period: "fit", positionKey: fen.split(" ").slice(0, 4).join(" "), uci,
+    fens: [fen.replace(" 0 1", clocks)], games: 2, wins: 1, draws: 0, losses: 1, moveNumbers: { "1": 2 } });
+  const write = (name: string, file: string, rows: string[]) => writeFile(path.join(runPath(name), file), rows.join("\n") + "\n");
+  const read = async (file: string) => (await readFile(path.join(runPath(later), file), "utf8")).trim().split("\n").map(l => JSON.parse(l));
+  try {
+    for (const name of [earlier, later]) await assertDataDirectory(runPath(name));
+    await write(earlier, "groups.jsonl", [group("d7d5"), group("g8f6")]);
+    await writeJobs(earlier, "fit", 1);
+    await write(earlier, "results-a.jsonl", [session("a"), result(1, "d7d5", "c2c4", "cp -15")]);
+    await write(earlier, "results-b.jsonl", [session("b"), result(2, "g8f6", "c2c4", "cp 20")]);
+    // d7d5 here has other clocks: still the same group for the eval.
+    await write(later, "groups.jsonl", [group("e7e6"), group("d7d5", " 2 3"), group("g8f6"), group("c7c5")]);
+    await assert.rejects(writeJobs(later, "fit", 1, [earlier]), /has no evals.jsonl/);
+    await importResults(earlier, "fit");
+    const report = await writeJobs(later, "fit", 1, [earlier]);
+    assert.deepEqual([report.groups, report.jobs, report.a, report.b, report.reused],
+      [4, 2, { ids: "1-1", jobs: 1 }, { ids: "4-4", jobs: 1 }, { from: [earlier], groups: 2 }]);
+    assert.deepEqual((await read("jobs-reused.jsonl")).map(job => [job.id, job.uci, job.from]),
+      [[2, "d7d5", { run: earlier, part: "a", id: 1 }], [3, "g8f6", { run: earlier, part: "b", id: 2 }]]);
+    await write(later, "results-a.jsonl", [session("a"), result(1, "e7e6", "c2c4", "cp 5")]);
+    await write(later, "results-b.jsonl", [session("b", { binarySha256: "y" }), result(4, "c7c5", "c2c4", "cp 30")]);
+    await assert.rejects(importResults(later, "fit"), /2 different Stockfish binaries/);
+    await write(later, "results-b.jsonl", [session("b"), result(4, "c7c5", "c2c4", "cp 30")]);
+    const imported = await importResults(later, "fit");
+    assert.deepEqual([imported.groups, imported.reused], [4, { groups: 2, games: 4 }]);
+    assert.deepEqual((await read("evals.jsonl")).map(row => [row.id, row.uci, row.part, row.cpWhite, row.from]), [
+      [1, "e7e6", "a", -5, undefined], [2, "d7d5", "a", 15, { run: earlier, part: "a", id: 1 }],
+      [3, "g8f6", "b", -20, { run: earlier, part: "b", id: 2 }], [4, "c7c5", "b", -30, undefined]]);
+  } finally { for (const name of [earlier, later]) await rm(runPath(name), { recursive: true }); }
 });
 test("the curve fit finds the chances it was given, and the spline is straight beyond its outer knots", () => {
   const knots = [-6, -2, 0, 2, 6];
@@ -312,6 +346,10 @@ test("each game gets its group's eval, and a game without one is refused", async
     await writeFile(path.join(run, "evals.jsonl"), JSON.stringify(group) + "\n");
     const [game] = await sampledMoves(name);
     assert.deepEqual([game.gameId, game.groupId, game.results, game.cpWhite, game.mateWhite, game.outcome], [row.gameId, 7, "b", -35, null, "wins"]);
+    // A reused search lies in the earlier run, under its id there.
+    await writeFile(path.join(run, "evals.jsonl"), JSON.stringify({ ...group, part: "a", from: { run: "2024-02-3000mb", part: "a", id: 3 } }) + "\n");
+    const [reused] = await sampledMoves(name);
+    assert.deepEqual([reused.groupId, reused.results, reused.searchRun], [3, "a", "2024-02-3000mb"]);
     await writeFile(path.join(run, "evals.jsonl"), JSON.stringify({ ...group, uci: "a7a6" }) + "\n");
     await assert.rejects(sampledMoves(name), /has no eval/);
   } finally { await rm(run, { recursive: true }); }

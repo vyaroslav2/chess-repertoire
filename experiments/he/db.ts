@@ -60,8 +60,9 @@ export const SAMPLED_MOVES_TABLE = `CREATE TABLE IF NOT EXISTS sampled_moves (
   san         VARCHAR(10) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   uci         VARCHAR(5) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   fen         VARCHAR(100) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,  -- the position before the move
-  group_id    INT NOT NULL,                                 -- the group's job id in jobs-a/b and results-a/b
+  group_id    INT NOT NULL,                                 -- the search's id in results-a/b
   results     ENUM('a','b') NOT NULL,                       -- which results file holds the search
+  search_run  VARCHAR(80),                                  -- the earlier run that made the search; NULL: this run
   group_games INT NOT NULL,                                 -- games in the group (same position and move)
   cp_white    SMALLINT,                                     -- Stockfish 19, 2M nodes, White's view
   mate_white  SMALLINT,                                     -- + White mates, − Black mates
@@ -76,14 +77,17 @@ export async function loadSampledMoves(run: string) {
   const connection = await connect();
   try {
     await connection.query(SAMPLED_MOVES_TABLE);
+    // Tables made before searches were reused lack search_run.
+    const [columns] = await connection.query("SHOW COLUMNS FROM sampled_moves LIKE 'search_run'");
+    if (!(columns as unknown[]).length) await connection.query("ALTER TABLE sampled_moves ADD COLUMN search_run VARCHAR(80) AFTER results");
     const rows = await sampledMoves(run);
     for (let start = 0; start < rows.length; start += 1000)
       await connection.query(`INSERT INTO sampled_moves (game_id, run, move_number, san, uci, fen, group_id, results,
-        group_games, cp_white, mate_white, depth) VALUES ? AS new ON DUPLICATE KEY UPDATE run = new.run,
+        search_run, group_games, cp_white, mate_white, depth) VALUES ? AS new ON DUPLICATE KEY UPDATE run = new.run,
         move_number = new.move_number, san = new.san, uci = new.uci, fen = new.fen, group_id = new.group_id,
-        results = new.results, group_games = new.group_games, cp_white = new.cp_white, mate_white = new.mate_white, depth = new.depth`,
+        results = new.results, search_run = new.search_run, group_games = new.group_games, cp_white = new.cp_white, mate_white = new.mate_white, depth = new.depth`,
         [rows.slice(start, start + 1000).map(row => [row.gameId, run, row.moveNumber, row.san, row.uci, row.fen,
-          row.groupId, row.results, row.groupGames, row.cpWhite, row.mateWhite, row.depth])]);
+          row.groupId, row.results, row.searchRun ?? null, row.groupGames, row.cpWhite, row.mateWhite, row.depth])]);
     const [counts] = await connection.query(`SELECT COUNT(*) AS rows_in_table,
       SUM(game_id NOT IN (SELECT game_id FROM games)) AS without_game FROM sampled_moves WHERE run = ?`, [run]);
     return { run, loaded: rows.length, ...(counts as { rows_in_table: number; without_game: number }[])[0] };

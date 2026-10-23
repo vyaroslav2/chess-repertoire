@@ -5,7 +5,8 @@ import type { GroupEval } from "./results";
 import type { Observation } from "./types";
 
 // One game's sampled move with its group's eval: observations.jsonl joined to evals.jsonl.
-export type SampledMove = Observation & { groupId: number; results: "a" | "b"; groupGames: number;
+// groupId and results say where the search lies: in searchRun when an earlier run made it.
+export type SampledMove = Observation & { groupId: number; results: "a" | "b"; searchRun?: string; groupGames: number;
   cpWhite: number | null; mateWhite: number | null; depth: number };
 
 export async function sampledMoves(run: string): Promise<SampledMove[]> {
@@ -16,7 +17,8 @@ export async function sampledMoves(run: string): Promise<SampledMove[]> {
   return (await read<Observation>("observations.jsonl")).map(game => {
     const group = groups.get(game.period + " " + game.positionKey + " " + game.uci);
     if (!group) throw new Error("Game " + game.gameId + " has no eval: is evals.jsonl from this run?");
-    return { ...game, groupId: group.id, results: group.part, groupGames: group.games,
+    return { ...game, groupId: group.from?.id ?? group.id, results: group.part,
+      ...(group.from ? { searchRun: group.from.run } : {}), groupGames: group.games,
       cpWhite: group.cpWhite, mateWhite: group.mateWhite, depth: group.depth };
   });
 }
@@ -29,6 +31,8 @@ export async function writeDots(run: string) {
   const all = await sampledMoves(run), games = all.filter(game => game.cpWhite !== null);
   const curve = JSON.parse(await readFile(path.join(directory, "curve.json"), "utf8"));
   const outcome = { losses: 0, draws: 1, wins: 2 } as const;
+  // Runs whose searches were reused; 0 stands for this run.
+  const searchRuns = ["", ...new Set(games.flatMap(g => g.searchRun ?? []))];
   const data = { run, mates: all.length - games.length, curveName: curve.chosen.name,
     // Every 25 cp: eval, Black's score, its 95% range, Black's win and draw chances.
     curve: curve.table.map((row: { cpWhite: number; score: number; scoreRange: number[]; win: number; draw: number }) =>
@@ -40,7 +44,8 @@ export async function writeDots(run: string) {
     opening: games.map(g => g.opening === "caro-kann" ? 1 : 0), speed: games.map(g => g.speed === "classical" ? 1 : 0),
     move: games.map(g => g.moveNumber), san: games.map(g => g.san), uci: games.map(g => g.uci), fen: games.map(g => g.fen),
     cp: games.map(g => g.cpWhite), depth: games.map(g => g.depth), outcome: games.map(g => outcome[g.outcome]),
-    group: games.map(g => g.groupId), results: games.map(g => g.results), groupGames: games.map(g => g.groupGames) };
+    group: games.map(g => g.groupId), results: games.map(g => g.results), groupGames: games.map(g => g.groupGames),
+    searchRuns, searchRun: games.map(g => searchRuns.indexOf(g.searchRun ?? "")) };
   const template = await readFile(path.join(HE_ROOT, "dots-template.html"), "utf8");
   // "<" is escaped so no text in the data can close the script tag.
   const page = template.replace("__DATA__", () => JSON.stringify(data).replace(/</g, "\\u003c"));

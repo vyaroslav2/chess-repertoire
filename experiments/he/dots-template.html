@@ -297,7 +297,7 @@ function show(i) {
   row("Eval after it", pawns(D.cp[i]) + " for White (Stockfish 19, 2M nodes, depth " + D.depth[i] + ")");
   row("Result", RESULT[D.outcome[i]]);
   row("Group", D.groupGames[i] === 1 ? "this game only" : fmt(D.groupGames[i]) + " games with the same position and move");
-  row("Search", "results-" + D.results[i] + ".jsonl, id " + D.group[i]);
+  row("Search", (D.searchRun[i] ? D.searchRuns[D.searchRun[i]] + "/" : "") + "results-" + D.results[i] + ".jsonl, id " + D.group[i]);
   const fen = document.createElement("td"), code = document.createElement("code"); code.textContent = D.fen[i]; fen.append(code);
   row("Position", fen);
   const query = document.createElement("td"), q = document.createElement("code"); q.textContent = sql; query.append(q);

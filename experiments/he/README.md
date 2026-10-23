@@ -127,17 +127,27 @@ run on Colab, split between two people. First write the jobs:
 npm --prefix experiments/he run jobs -- --run 2024-02-3000mb
 ```
 
-This writes `jobs-a.jsonl` (ids 1 to 20,000; `--split` changes it) and `jobs-b.jsonl` (the
+This writes `jobs-a.jsonl` (the first 20,000 jobs; `--split` changes it) and `jobs-b.jsonl` (the
 rest) into the run's folder, one job per line: `id`, `positionKey`, the group's first FEN and
 `uci`. A group's FENs differ only in the clocks, so its first FEN stands for all of them.
+The id is the group's number in `groups.jsonl` order.
+
+A later month need not search again what an earlier one has. With `--reuse`, a group whose
+position and move a finished run's `evals.jsonl` has goes to `jobs-reused.jsonl` instead, with
+where its search lies (`from`: run, results file and id there). Name several runs to reuse them all:
+
+```powershell
+npm --prefix experiments/he run jobs -- --run 2024-03-3000mb --reuse 2024-02-3000mb
+```
 
 Each person puts their jobs file in their Google Drive (e.g. `MyDrive/he/`), mounts Drive in a
 Colab notebook, pastes `colab/he_colab.py` into one cell, sets `JOBS` and `RESULTS`, and runs it.
 The script downloads the Stockfish 19 Linux release, checks its SHA-256 and that `bench`
 searches 2,497,913 nodes (the same as the Windows build), then runs one single-threaded engine
-per core with the settings above. Each finished search is one line in `RESULTS`, written at
-once, so stopping or a dropped session loses only the searches in progress; running the cell
-again carries on. The score is kept as Stockfish gives it, from Black's view; the import
+per core with the settings above. Each finished search is one line in `RESULTS`. Drive gets
+the file only when it is closed (tested on 2026-10-23), so the script closes and reopens it
+every 500 results. A runtime that dies loses at most the last 500; running the cell again
+carries on. The score is kept as Stockfish gives it, from Black's view; the import
 flips it to `cpWhite`. Locally, the script gave the same score and depth as `engine.ts` on the same
 jobs.
 
@@ -151,7 +161,9 @@ npm --prefix experiments/he run recheck -- --run 2024-02-3000mb --engine stockfi
 `results` checks every line against its job and its session (release SHA-256, bench, settings,
 one binary for both files, legal move, exact score, no missing or conflicting ids), joins each
 job to its group and writes `evals.jsonl` (each group with `cpWhite` or `mateWhite`) and
-`evals-manifest.json`. It writes nothing if any check fails, and never overwrites. `recheck`
+`evals-manifest.json`. A group in `jobs-reused.jsonl` takes its eval from the earlier run, whose
+files get the same checks; its row keeps `from`, and all searches must come from one binary.
+`recheck` leaves reused searches to their own run; `recheck --game` finds them there. It writes nothing if any check fails, and never overwrites. `recheck`
 searches 20 fixed random jobs from each file again here; each must give the same line, only faster or slower.
 `recheck --game <id>` instead searches one game's position afresh (never from the cache), prints each
 finished depth live (depth, selective depth, time, nodes, speed, eval for White, the line in SAN), then the
@@ -236,8 +248,8 @@ npm --prefix experiments/he run load -- --run 2024-01-2500mb --limit 100
 ### Sampled moves table
 
 load-moves joins a run's observations.jsonl to its evals.jsonl and copies each game's sampled
-move into `sampled_moves`: move number, SAN, UCI, the FEN before it, its group (job id and
-results file), the group's size and the eval (cp_white or mate_white, exactly one, and depth).
+move into `sampled_moves`: move number, SAN, UCI, the FEN before it, where its group's search
+lies (id, results file and `search_run`, the earlier run when it was reused), the group's size and the eval (cp_white or mate_white, exactly one, and depth).
 It joins `games` by game_id and reports rows with no game. Repeating it is safe.
 
 ```powershell

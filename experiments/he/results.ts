@@ -3,7 +3,7 @@ import { Chess } from "chess.js";
 import { open, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { HeEngine, parseEvaluation, SETTINGS, type Evaluation } from "./engine";
-import type { Job } from "./jobs";
+import type { Job, ReusedJob, Source } from "./jobs";
 import { assertDataDirectory, runPath } from "./paths";
 import type { MoveGroup, Observation, Period } from "./types";
 
@@ -12,11 +12,12 @@ export type ResultLine = { type: "result"; id: number; uci: string; cp: number |
   depth: number; nodes: number | null; info: string; bestmove: string };
 type SessionLine = { type: "session"; startedAt: string; archiveSha256: string; binarySha256: string;
   bench: number; nodes: number; hashMb: number; threads: number; multiPv: number; jobs: string };
-// A group with the eval of the move played, in White's view.
+// A group with the eval of the move played, in White's view. from says where the search
+// lies when an earlier run made it; part is then that run's results file.
 export type GroupEval = MoveGroup & { id: number; part: Part; cpWhite: number | null; mateWhite: number | null;
-  depth: number; nodes: number | null };
+  depth: number; nodes: number | null; from?: Source };
 type Part = "a" | "b";
-type Checked = { job: Job; result: ResultLine; part: Part };
+type Checked = { job: Job; result: ResultLine; part: Part; from?: Source };
 
 const PARTS: Part[] = ["a", "b"];
 // The Stockfish 19 Linux release and its bench, as fixed in colab/he_colab.py.
@@ -35,7 +36,9 @@ const sha256 = (text: string) => createHash("sha256").update(text).digest("hex")
 const found = (info: string) => info.replace(/ (?:nps|time) \d+/g, "");
 
 // Reads both jobs and results files and checks every result against its job and its session.
-async function readResults(directory: string) {
+// Groups in jobs-reused.jsonl take their search from the earlier run, checked the same way.
+async function readResults(directory: string): Promise<{ checked: Map<number, Checked>; binarySha256: string;
+  report: Record<Part, object>; reused?: { groups: number; runs: Record<string, object>; sha256: string } }> {
   const checked = new Map<number, Checked>();
   const binaries = new Set<string>();
   const report = { a: {}, b: {} } as Record<Part, { jobs: number; results: number; sessions: number; repeats: number; sha256: string }>;
@@ -80,8 +83,26 @@ async function readResults(directory: string) {
     if (missing.length) throw new Error(resultsFile + " lacks " + missing.length + " of " + jobs.size + " jobs, e.g. id " + missing.slice(0, 5).join(", ") + ".");
     report[part] = { jobs: jobs.size, results: jobs.size, sessions, repeats, sha256: sha256(text) };
   }
+  const reusedText = await readFile(path.join(directory, "jobs-reused.jsonl"), "utf8")
+    .catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; });
+  let reused;
+  if (reusedText !== null) {
+    const runs = new Map<string, Awaited<ReturnType<typeof readResults>>>();
+    for (const job of lines<ReusedJob>(reusedText, "jobs-reused.jsonl")) {
+      if (checked.has(job.id)) throw new Error("jobs-reused.jsonl: id " + job.id + " is searched in this run too.");
+      const { run, part, id } = job.from;
+      if (!runs.has(run)) runs.set(run, await readResults(runPath(run)));
+      const entry = runs.get(run)!.checked.get(id);
+      if (!entry || entry.from || entry.part !== part || entry.job.positionKey !== job.positionKey || entry.job.uci !== job.uci)
+        throw new Error("jobs-reused.jsonl: id " + job.id + " is not the search in " + run + "'s results-" + part + ".jsonl, id " + id + ".");
+      checked.set(job.id, { ...entry, from: job.from });
+    }
+    for (const run of runs.values()) binaries.add(run.binarySha256);
+    reused = { groups: [...checked.values()].filter(entry => entry.from).length,
+      runs: Object.fromEntries([...runs].map(([run, { report }]) => [run, report])), sha256: sha256(reusedText) };
+  }
   if (binaries.size !== 1) throw new Error("The results come from " + binaries.size + " different Stockfish binaries.");
-  return { checked, report, binarySha256: [...binaries][0] };
+  return { checked, report, reused, binarySha256: [...binaries][0] };
 }
 
 // Joins results-a and results-b to their groups and writes evals.jsonl: one line per group,
@@ -89,25 +110,27 @@ async function readResults(directory: string) {
 export async function importResults(name: string, period: Period) {
   const directory = runPath(name);
   await assertDataDirectory(directory);
-  const { checked, report, binarySha256 } = await readResults(directory);
+  const { checked, report, reused, binarySha256 } = await readResults(directory);
   const groups = lines<MoveGroup>(await readFile(path.join(directory, "groups.jsonl"), "utf8"), "groups.jsonl")
     .filter(group => group.period === period);
   if (groups.length !== checked.size) throw new Error(period + " has " + groups.length + " groups but " + checked.size + " results.");
   const rows: GroupEval[] = groups.map((group, index) => {
     const entry = checked.get(index + 1);
-    if (!entry || entry.job.positionKey !== group.positionKey || entry.job.uci !== group.uci || entry.job.fen !== group.fens[0])
+    // A reused search began from the earlier run's first FEN, which may differ in the clocks.
+    if (!entry || entry.job.positionKey !== group.positionKey || entry.job.uci !== group.uci || (!entry.from && entry.job.fen !== group.fens[0]))
       throw new Error("Job " + (index + 1) + " does not match group " + (index + 1) + " of " + period + ": were the jobs written from this groups.jsonl?");
     // readResults checked these against the engine's parser: the flip to White's view.
     const { cp, mate, depth, nodes } = entry.result;
     return { id: index + 1, ...group, part: entry.part, cpWhite: cp === null ? null : -cp || 0,
-      mateWhite: mate === null ? null : -mate, depth, nodes };
+      mateWhite: mate === null ? null : -mate, depth, nodes, ...(entry.from ? { from: entry.from } : {}) };
   });
   const depths = rows.map(row => row.depth).sort((x, y) => x - y);
-  const mates = rows.filter(row => row.mateWhite !== null);
+  const mates = rows.filter(row => row.mateWhite !== null), reusedRows = rows.filter(row => row.from);
   const summary = { period, groups: rows.length, games: rows.reduce((sum, row) => sum + row.games, 0),
     mates: { groups: mates.length, games: mates.reduce((sum, row) => sum + row.games, 0) },
     depth: { minimum: depths[0], median: depths[Math.floor(depths.length / 2)], maximum: depths.at(-1) },
-    binarySha256, files: report };
+    ...(reused ? { reused: { groups: reusedRows.length, games: reusedRows.reduce((sum, row) => sum + row.games, 0) } } : {}),
+    binarySha256, files: reused ? { ...report, reused } : report };
   const destination = path.join(directory, "evals.jsonl");
   // Exclusive destination protects existing results.
   const reservation = await open(destination, "wx");
@@ -131,8 +154,8 @@ export async function importResults(name: string, period: Period) {
 export async function recheckGame(name: string, binary: string, gameId: string, print: (text: string) => void = console.log) {
   if (!/^[A-Za-z0-9]{8}$/.test(gameId)) throw new Error("A game id is 8 letters or digits, e.g. g8gCaNm4.");
   const directory = runPath(name);
-  const first = async <T>(file: string, hint: string, test: (row: T) => boolean) => {
-    for (const line of (await readFile(path.join(directory, file), "utf8")).split("\n")) {
+  const first = async <T>(file: string, hint: string, test: (row: T) => boolean, folder = directory) => {
+    for (const line of (await readFile(path.join(folder, file), "utf8")).split("\n")) {
       if (!line.includes(hint)) continue;
       const row = JSON.parse(line) as T;
       if (test(row)) return row;
@@ -140,7 +163,7 @@ export async function recheckGame(name: string, binary: string, gameId: string, 
   };
   const game = await first<Observation>("observations.jsonl", gameId, row => row.gameId === gameId);
   if (!game) throw new Error("Game " + gameId + " is not in run " + name + ".");
-  let hit: { job: Job; part: Part; result: ResultLine } | undefined;
+  let hit: { job: Job; part: Part; result: ResultLine; run?: string } | undefined;
   for (const part of PARTS) {
     const job = await first<Job>("jobs-" + part + ".jsonl", game.uci, row => row.positionKey === game.positionKey && row.uci === game.uci);
     if (!job) continue;
@@ -148,8 +171,19 @@ export async function recheckGame(name: string, binary: string, gameId: string, 
     if (!result) throw new Error("results-" + part + ".jsonl has no result for id " + job.id + ".");
     hit = { job, part, result };
   }
+  // A group an earlier run searched: its search lies in that run's files.
+  const reused = hit ? undefined : await first<ReusedJob>("jobs-reused.jsonl", game.uci,
+    row => row.positionKey === game.positionKey && row.uci === game.uci)
+    .catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; });
+  if (reused) {
+    const { run, part, id } = reused.from, folder = runPath(run);
+    const job = await first<Job>("jobs-" + part + ".jsonl", '"id":' + id + ",", row => row.id === id, folder);
+    const result = await first<ResultLine>("results-" + part + ".jsonl", '"id": ' + id + ",", row => row.type === "result" && row.id === id, folder);
+    if (!job || !result) throw new Error(run + " has no search for id " + id + " in results-" + part + ".jsonl.");
+    hit = { job, part, result, run };
+  }
   if (!hit) throw new Error("No search job for game " + gameId + "'s move.");
-  const { job, part, result } = hit;
+  const { job, part, result, run } = hit;
   const colab = parseEvaluation([result.info, result.bestmove], job.fen, job.uci);
   const evalText = (e: Evaluation) => e.mateWhite !== null ? "mate " + e.mateWhite :
     (e.cpWhite! > 0 ? "+" : "") + (e.cpWhite! / 100).toFixed(2);
@@ -158,7 +192,7 @@ export async function recheckGame(name: string, binary: string, gameId: string, 
     "Game " + gameId + ": https://lichess.org/" + gameId + "/black#" + 2 * game.moveNumber,
     "Black's move " + game.moveNumber + "... " + game.san + " (" + game.uci + "), result " + outcome,
     "Position: " + job.fen + (job.fen === game.fen ? "" : " (the group's first position; this game's differs only in the clocks)"),
-    "Search: results-" + part + ".jsonl, id " + job.id,
+    "Search: " + (run ? run + "/" : "") + "results-" + part + ".jsonl, id " + job.id,
     "",
     "Stockfish 19 here, searching only " + game.san + ", up to " + (SETTINGS.nodes / 1e6) + "M nodes. Each row is one finished depth:",
     "",
@@ -223,7 +257,8 @@ function sanLine(fen: string, uci: string[], max: number): string {
 export async function recheckResults(name: string, binary: string, count: number) {
   if (!Number.isInteger(count) || count < 1) throw new Error("Count must be a positive integer.");
   const { checked } = await readResults(runPath(name));
-  const chosen = PARTS.flatMap(part => [...checked.values()].filter(entry => entry.part === part)
+  // Searches reused from an earlier run are that run's to recheck.
+  const chosen = PARTS.flatMap(part => [...checked.values()].filter(entry => entry.part === part && !entry.from)
     .sort((x, y) => sha256("recheck:" + x.job.id).localeCompare(sha256("recheck:" + y.job.id))).slice(0, count));
   const engine = await HeEngine.start(binary);
   const mismatches: { id: number; part: Part; colab: string; local: string }[] = [];
