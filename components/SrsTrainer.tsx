@@ -860,7 +860,7 @@ export default function SrsTrainer({
             className="demo-status-hover"
             style={{
               position: "absolute",
-              right: "calc(100% + 40px)",
+              right: "calc(100% + 60px)",
               top: 0,
               display: "grid",
               gridTemplateColumns: "auto auto",
@@ -885,7 +885,7 @@ export default function SrsTrainer({
             className="demo-status-hover"
             style={{
               position: "absolute",
-              right: "calc(100% + 40px)",
+              right: "calc(100% + 60px)",
               top: 0,
               width: "280px",
               textAlign: "right",

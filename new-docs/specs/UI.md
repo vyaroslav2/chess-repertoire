@@ -32,7 +32,7 @@ Ctrl + Alt + Shift + C + U switches the coordinates to a large style and back. A
 - In the app since 2026-10-13.
 
 UI.22 **Status line (temporary).**
-Inter, 16px (20), weight 400, line height 24px, letter spacing -0.011em (-0.175px), `#787674`. It sits in the free space left of the board, level with the board's top, its right edge 40px left of the board. It will be redone.
+Inter, 16px (20), weight 400, line height 24px, letter spacing -0.011em (-0.175px), `#787674`. It sits in the free space left of the board, level with the board's top, its right edge 60px left of the board, for breathing room. It will be redone.
 - `S` turns the status line on and off. Off, it shows only while the pointer is over it. The choice is kept in the browser and survives a reload. `S` with Ctrl, Alt or Meta held does nothing, so `Ctrl + S` stays the browser's.
   - A plain key, read as `e.key`, like `F` and `E` (UI.34). Off by default. Holding `S` down toggles once.
   - Kept in localStorage (`status-line`). A script in `<head>` reads it before the first paint and marks `<html>` (`data-status-line="on"`), as for the board and pieces (SM.08, SM.09), so a saved "on" never shows late.
@@ -46,7 +46,7 @@ Inter, 16px (20), weight 400, line height 24px, letter spacing -0.011em (-0.175p
   - Chosen on `/status` (UI.29).
 - On `/demo`: one line, 280px wide, right-aligned.
 
-**Was:** Segoe UI, above the board.
+**Was:** Segoe UI, above the board. 40px left of the board, until 2026-10-24.
 
 ### Move list
 UI.23 **Panel.** The panel is 220 × 691.2px (275 screen px wide), background `#262421`, attached to the board's right edge. Rows are 26px. The move-number column is 44px; the two move columns share the rest: (220 − 44 − 10px scrollbar) ÷ 2 = 83px when the list scrolls, 88px when it doesn't. The longest moves (7 characters, 71.6px with padding) have about 11px to spare.

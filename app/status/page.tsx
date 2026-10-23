@@ -92,7 +92,7 @@ export default function StatusPage() {
   const [weight, setWeight] = useState(400);
   const [lineHeight, setLineHeight] = useState(24);
   const [columnGap, setColumnGap] = useState(16);
-  const [gapToBoard, setGapToBoard] = useState(40);
+  const [gapToBoard, setGapToBoard] = useState(60);
   const [top, setTop] = useState(0);
   const [numbersRight, setNumbersRight] = useState(true);
   const [palette, setPalette] = useState<PaletteName>("night");
