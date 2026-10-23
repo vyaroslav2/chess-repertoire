@@ -453,8 +453,8 @@ html.coords-large .cg-wrap coords coord {
   font-weight: 600;
 }
 
-/* UI.37, /capture only, on trial: a wrong move's row under its move. Smaller
-   than a move, on a dark red shade across both move cells; not clickable. */
+/* UI.37: a wrong move's row under its move. Smaller than a move, on a dark
+   red shade across both move cells; not clickable. */
 .move-mistake {
   font-family: var(--font-roboto), sans-serif;
   font-size: 14px;

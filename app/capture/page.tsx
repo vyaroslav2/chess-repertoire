@@ -30,7 +30,7 @@ export default function Capture() {
     gap: "20px",
     // As /demo (UI.01, UI.18).
     padding: "max(24px, round(calc((100vh - var(--board-size)) / 2), 0.8px)) 20px 0" }}>
-      <SrsTrainer dueStats={cards} demoMode mistakeRows />
+      <SrsTrainer dueStats={cards} demoMode />
     </div>
   );
 }

@@ -22,8 +22,6 @@ import {
 interface SrsTrainerProps {
   dueStats: any[];
   demoMode?: boolean;
-  // On trial, /capture only: your wrong moves listed, a row each under their move.
-  mistakeRows?: boolean;
   // AK.07: Anki runs the session; set on / only.
   anki?: AnkiSession;
 }
@@ -84,7 +82,6 @@ interface UndoStep {
 export default function SrsTrainer({
   dueStats,
   demoMode = false,
-  mistakeRows = false,
   anki,
 }: SrsTrainerProps) {
   const [stats, setStats] = useState(dueStats);
@@ -462,26 +459,23 @@ export default function SrsTrainer({
         return;
       }
 
-      // X: clear the latest mark, for a misclick (GR.07)
+      // X: undo the latest event, for a misclick (GR.07, UI.37): a reveal, which
+      // comes after any wrong moves on its move, else the latest wrong move's row.
+      // The mark stays red while a row is left.
       if ((e.key === "x" || e.key === "X") && plainKey) {
         if (e.repeat || latestMarkPly < 0) return;
         logFlightBox("ACTION_CLEAR_MARK", { ply: latestMarkPly, mark: marks[latestMarkPly] });
-        // With mistake rows, the latest event instead (UI.37): a reveal, which comes
-        // after any wrong moves on its move, else the latest wrong move's row.
-        // The mark stays red while a row is left.
         const rowsLeft = mistakes[latestMarkPly] ?? [];
         const nextRows = marks[latestMarkPly] === "wrong" ? rowsLeft.slice(0, -1) : rowsLeft;
-        if (mistakeRows && nextRows.length > 0) {
+        if (nextRows.length > 0) {
           setMarks((previous) => ({ ...previous, [latestMarkPly]: "wrong" }));
         } else {
           setMarks(({ [latestMarkPly]: _, ...rest }) => rest);
         }
         // No empty list left behind: the move list counts its plies as rows.
-        if (mistakeRows) {
-          setMistakes(({ [latestMarkPly]: _, ...rest }) =>
-            nextRows.length > 0 ? { ...rest, [latestMarkPly]: nextRows } : rest,
-          );
-        }
+        setMistakes(({ [latestMarkPly]: _, ...rest }) =>
+          nextRows.length > 0 ? { ...rest, [latestMarkPly]: nextRows } : rest,
+        );
         return;
       }
 
@@ -1001,7 +995,7 @@ export default function SrsTrainer({
             )}
             evals={evalsShown ? moveEvals : undefined}
             marks={marks}
-            mistakes={mistakeRows ? mistakes : undefined}
+            mistakes={mistakes}
             currentPlyIndex={currentPlyIndex - 1}
             onMoveClick={(index) => {
               logFlightBox("ACTION_CLICK_MOVE_LIST", {

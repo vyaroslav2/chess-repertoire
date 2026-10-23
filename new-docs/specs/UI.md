@@ -95,7 +95,7 @@ Your move's number cell, filled when the move is marked ([[GR|GR.07]]), in the s
 - The whole 44 × 26px cell is filled; two marked rows in a row touch.
 - A wrong White move goes back at once and isn't listed. Its row still shows, with just its number, so you see the mark.
 
-UI.37 **Mistake rows (on trial, `/capture` only).**
+UI.37 **Mistake rows.**
 Each wrong move gets its own row under the move it was meant to be, in the mover's column. Lichess lists them under the whole move list instead.
 - The right move goes in its own place, next to White's move. That cell stays blank until it's played. So the line reads as one pair ("4 dxc6 Nxc6"), and the main line never moves.
 - The number shows once, on the main row. Mistake rows leave it blank: the column scans 1, 2, 3 with no repeats, and the shade already groups the rows.
@@ -105,8 +105,9 @@ Each wrong move gets its own row under the move it was meant to be, in the mover
 - No ✗ after the move, since 2026-10-23: the shade alone is cleaner. Kept as a comment in the code; it may come back.
 %% Was, 2026-10-23: a red ✗ (`#e05252`) 0.4em after each wrong move, as on Lichess. %%
 - `X` ([[GR|GR.07]]) undoes the latest event: a reveal first, then the wrong moves, one row per press, newest first. The number stays red while a row is left; the last row takes the red with it. After a reveal is undone, the number goes back to red if the move has rows. Each press changes something you can see.
-- Pages without rows keep `X` as in GR.07, one press per mark: there, a press that removes an unseen row would seem to do nothing. Once the rows are on every page, the same rule everywhere.
-- In the app since 2026-10-23: `mistakes` in `components/SrsTrainer.tsx`, by ply, set by `mistakeRows`.
+- In the app since 2026-10-23: `mistakes` in `components/SrsTrainer.tsx`, by ply. Tried on `/capture` first, then on every page (`/`, `/demo`, `/capture`) the same day.
+
+**Was:** on `/capture` only, earlier on 2026-10-23. Other pages kept `X` at one press per mark, since a press removing a row you can't see would seem to do nothing.
 
 ## Layout
 
