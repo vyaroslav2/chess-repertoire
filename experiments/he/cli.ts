@@ -109,7 +109,6 @@ async function main() {
       throw new Error("Recheck takes only --run, --engine, and --count or --game.");
     if (values.game) {
       const check = await recheckGame(values.run, resolveInputPath(values.engine), values.game);
-      console.log(check.text);
       if (!check.same) process.exitCode = 1;
     } else console.log(JSON.stringify(await recheckResults(values.run, resolveInputPath(values.engine), Number(values.count ?? 20)), null, 2));
   } else if (command === "evaluate") {

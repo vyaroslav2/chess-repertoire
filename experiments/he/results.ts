@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { Chess } from "chess.js";
 import { open, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { HeEngine, parseEvaluation, SETTINGS, type Evaluation } from "./engine";
@@ -127,7 +128,7 @@ export async function importResults(name: string, period: Period) {
 
 // Searches one chosen game's position again here, always afresh, and sets the Colab line above
 // the local one. Reads only what that game needs, so it answers in seconds.
-export async function recheckGame(name: string, binary: string, gameId: string) {
+export async function recheckGame(name: string, binary: string, gameId: string, print: (text: string) => void = console.log) {
   if (!/^[A-Za-z0-9]{8}$/.test(gameId)) throw new Error("A game id is 8 letters or digits, e.g. g8gCaNm4.");
   const directory = runPath(name);
   const first = async <T>(file: string, hint: string, test: (row: T) => boolean) => {
@@ -150,25 +151,49 @@ export async function recheckGame(name: string, binary: string, gameId: string) 
   if (!hit) throw new Error("No search job for game " + gameId + "'s move.");
   const { job, part, result } = hit;
   const colab = parseEvaluation([result.info, result.bestmove], job.fen, job.uci);
-  const engine = await HeEngine.start(binary);
-  const started = Date.now();
-  let rawLines: string[];
-  try { rawLines = (await engine.search(job.fen, job.uci, true)).rawLines; } finally { engine.close(); }
-  const seconds = (Date.now() - started) / 1000;
-  const local = parseEvaluation(rawLines, job.fen, job.uci);
-  // The line the score was read from: the last exact one, as parseEvaluation reads it.
-  const localInfo = [...rawLines].reverse().find(line => line.startsWith("info ") && / pv /.test(line) &&
-    !/\b(?:lowerbound|upperbound)\b/.test(line) && / score (?:cp|mate) /.test(line)) ?? "";
-  const same = found(localInfo) === found(result.info) && rawLines.at(-1) === result.bestmove &&
-    JSON.stringify(local) === JSON.stringify(colab);
   const evalText = (e: Evaluation) => e.mateWhite !== null ? "mate " + e.mateWhite :
     (e.cpWhite! > 0 ? "+" : "") + (e.cpWhite! / 100).toFixed(2);
   const outcome = { wins: "0-1, Black won", draws: "1/2-1/2, a draw", losses: "1-0, Black lost" }[game.outcome];
-  return { same, text: [
+  print([
     "Game " + gameId + ": https://lichess.org/" + gameId + "/black#" + 2 * game.moveNumber,
     "Black's move " + game.moveNumber + "... " + game.san + " (" + game.uci + "), result " + outcome,
     "Position: " + job.fen + (job.fen === game.fen ? "" : " (the group's first position; this game's differs only in the clocks)"),
     "Search: results-" + part + ".jsonl, id " + job.id,
+    "",
+    "Stockfish 19 here, searching only " + game.san + ", up to " + (SETTINGS.nodes / 1e6) + "M nodes. Each row is one finished depth:",
+    "",
+    table(["Depth", "Sel", "Time", "Nodes", "Speed", "Eval", "Line"]),
+  ].join("\n"));
+  // One row per finished depth: a depth's last exact line is printed once a deeper one arrives.
+  let current: string | undefined;
+  const row = (info: string, star: boolean) => {
+    const field = (name: string) => /\b(\d+)\b/.exec(info.split(" " + name + " ")[1] ?? "")?.[1];
+    const evaluation = parseEvaluation([info, "bestmove " + job.uci], job.fen, job.uci);
+    print(table([(star ? "*" : " ") + field("depth"), field("seldepth") ?? "-", (Number(field("time")) / 1000).toFixed(1) + " s",
+      count(Number(field("nodes"))), count(Number(field("nps"))) + "/s", evalText(evaluation),
+      sanLine(job.fen, info.split(" pv ")[1]?.split(" ") ?? [], 8)]));
+  };
+  const onLine = (line: string) => {
+    if (!line.startsWith("info ") || !/ score (?:cp|mate) /.test(line) || !/ pv /.test(line) ||
+        /\b(?:lowerbound|upperbound)\b/.test(line)) return;
+    const depth = (info: string) => Number(/\bdepth (\d+)\b/.exec(info)?.[1]);
+    if (current && depth(line) > depth(current)) row(current, false);
+    current = line;
+  };
+  const engine = await HeEngine.start(binary);
+  const started = Date.now();
+  let rawLines: string[];
+  try { rawLines = (await engine.search(job.fen, job.uci, true, onLine)).rawLines; } finally { engine.close(); }
+  const seconds = (Date.now() - started) / 1000;
+  // The deepest finished depth is the result, as parseEvaluation reads it.
+  if (current) row(current, true);
+  const local = parseEvaluation(rawLines, job.fen, job.uci);
+  const localInfo = current ?? "";
+  const same = found(localInfo) === found(result.info) && rawLines.at(-1) === result.bestmove &&
+    JSON.stringify(local) === JSON.stringify(colab);
+  print([
+    "",
+    "* = the result: the last exact line Stockfish gave before the node limit stopped it.",
     "",
     "Colab: " + found(result.info),
     "Here:  " + found(localInfo),
@@ -176,7 +201,21 @@ export async function recheckGame(name: string, binary: string, gameId: string) 
     "Eval for White: " + evalText(colab) + " on Colab, " + evalText(local) + " here (searched now, " + seconds.toFixed(1) + " s)",
     same ? "SAME: depth, score, nodes and every move of the line match. Only the speed differs."
       : "DIFFERENT: compare the two lines above.",
-  ].join("\n") };
+  ].join("\n"));
+  return { same };
+}
+const WIDTHS = [6, 4, 7, 7, 8, 7];
+const table = (cells: string[]) => cells.map((cell, i) => i < WIDTHS.length ? (i ? cell.padStart(WIDTHS[i]) : cell.padEnd(WIDTHS[i])) : cell).join("  ");
+const count = (n: number) => n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : String(n);
+// The first moves of a line in SAN, numbered: "5... Nc6 6. Ng3 Bg6".
+function sanLine(fen: string, uci: string[], max: number): string {
+  const chess = new Chess(fen), parts: string[] = [];
+  for (const move of uci.slice(0, max)) {
+    const number = chess.moveNumber();
+    const san = chess.move({ from: move.slice(0, 2), to: move.slice(2, 4), promotion: move[4] }).san;
+    parts.push(chess.turn() === "b" ? number + ". " + san : (parts.length ? "" : number + "... ") + san);
+  }
+  return parts.join(" ") + (uci.length > max ? " …" : "");
 }
 
 // Searches a fixed random choice of jobs from each file again on this machine. Each must give

@@ -38,7 +38,7 @@ export function parseEvaluation(lines: string[], fen: string, expectedUci?: stri
 class UciProcess {
   private readonly process: ChildProcessWithoutNullStreams;
   private pending: { lines: string[]; until: (line: string) => boolean; resolve: (lines: string[]) => void;
-    reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | null = null;
+    reject: (error: Error) => void; timer: ReturnType<typeof setTimeout>; onLine?: (line: string) => void } | null = null;
   private dead: Error | null = null;
   constructor(binary: string, private readonly timeoutMs: number) {
     this.process = spawn(binary, [], { windowsHide: true, stdio: "pipe" });
@@ -47,6 +47,7 @@ class UciProcess {
       const request = this.pending;
       if (!request) return;
       request.lines.push(line);
+      request.onLine?.(line);
       if (request.until(line)) {
         clearTimeout(request.timer); this.pending = null; request.resolve(request.lines);
       }
@@ -62,14 +63,14 @@ class UciProcess {
       clearTimeout(this.pending.timer); this.pending.reject(error); this.pending = null;
     }
   }
-  command(command: string, until: (line: string) => boolean): Promise<string[]> {
+  command(command: string, until: (line: string) => boolean, onLine?: (line: string) => void): Promise<string[]> {
     if (this.dead) return Promise.reject(this.dead);
     if (this.pending) return Promise.reject(new Error("Overlapping UCI commands are not supported."));
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.fail(new Error("Stockfish command timed out.")); this.process.kill();
       }, this.timeoutMs);
-      this.pending = { lines: [], until, resolve, reject, timer };
+      this.pending = { lines: [], until, resolve, reject, timer, onLine };
       this.process.stdin.write(command + "\n");
     });
   }
@@ -100,8 +101,8 @@ export class HeEngine {
     return (await this.search(fen, candidate)).evaluation;
   }
   // The evaluation with Stockfish's raw lines, cached or new. `fresh` always searches,
-  // so a live check never just reads back an earlier result.
-  async search(fen: string, candidate?: string, fresh = false): Promise<{ evaluation: Evaluation; rawLines: string[] }> {
+  // so a live check never just reads back an earlier result; `onLine` sees each line as it comes.
+  async search(fen: string, candidate?: string, fresh = false, onLine?: (line: string) => void): Promise<{ evaluation: Evaluation; rawLines: string[] }> {
     const chess = new Chess(fen);
     if (chess.turn() !== "b") throw new Error("HE evaluates Black decisions only.");
     if (candidate && !chess.moves({ verbose: true }).some(move => move.lan === candidate)) throw new Error("Illegal HE candidate.");
@@ -121,7 +122,7 @@ export class HeEngine {
     // Clear search history between requests so results don't depend on import order.
     await this.uci.command("ucinewgame\nsetoption name Clear Hash\nisready", line => line === "readyok");
     const rawLines = await this.uci.command("position fen " + fen + "\ngo nodes " + SETTINGS.nodes +
-      (candidate ? " searchmoves " + candidate : ""), line => line.startsWith("bestmove "));
+      (candidate ? " searchmoves " + candidate : ""), line => line.startsWith("bestmove "), onLine);
     const evaluation = parseEvaluation(rawLines, fen, candidate);
     const temporary = cachePath + "." + process.pid + "." + Date.now() + ".tmp";
     await writeFile(temporary, JSON.stringify({ request, profile: this.profile, rawLines, evaluation }), { flag: "wx" });
