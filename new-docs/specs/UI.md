@@ -67,6 +67,7 @@ UI.25 **Moves (SAN).**
 Roboto, 16.59px (20.7), weight 400, `#bababa`. Hover: background `#363431`. Current move: weight 600, `#ffffff` on `#3692e7`.
 - Roboto was chosen over Arial and Inter on `/moves`, with 7-character moves covering every SAN character.
 - Sizes from the Lichess analysis board at a 1536px window: numbers 14px, moves 16.59px, a ratio of 0.84. Lichess derives the move size from the window width, hence the odd number.
+- While a wrong move is on the board (its 300ms, [[GR|GR.02]]), the move before it stays current. It isn't listed, so before, the blue went off for those 300ms and came back: a blink. Lichess moves the blue to the wrong move and back, still a blink, too short to follow. The board, the mistake row (UI.37), the red number and the light already show the wrong move. Since 2026-10-23, on every page.
 
 **Was:** JetBrains Mono, 14.5px.
 

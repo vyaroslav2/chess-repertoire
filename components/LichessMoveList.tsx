@@ -64,6 +64,10 @@ export default function LichessMoveList({ moves, evals, marks = {}, mistakes = {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [currentPlyIndex, moves.length, onMoveClick]);
 
+  // UI.25: past the last listed move (a wrong move, for its 300ms on the board),
+  // the last listed move stays current, so the blue doesn't blink off and on.
+  const activeIndex = Math.min(currentPlyIndex, moves.length - 1);
+
   // Only one side is yours, so a row holds at most one marked move.
   const markClass = (...plies: number[]) => {
     const mark = plies.map((ply) => marks[ply]).find(Boolean);
@@ -122,8 +126,8 @@ export default function LichessMoveList({ moves, evals, marks = {}, mistakes = {
             {/* Column 2: White's Move; a blank cell keeps the columns when rows follow */}
             {turn.whiteMove === undefined ? <div /> : (
               <div
-                ref={currentPlyIndex === turn.whiteIndex ? activeMoveRef : null}
-                className={`move-san ${currentPlyIndex === turn.whiteIndex ? 'active' : ''}`}
+                ref={activeIndex === turn.whiteIndex ? activeMoveRef : null}
+                className={`move-san ${activeIndex === turn.whiteIndex ? 'active' : ''}`}
                 onClick={() => onMoveClick(turn.whiteIndex)}
               >
                 {turn.whiteMove}
@@ -134,8 +138,8 @@ export default function LichessMoveList({ moves, evals, marks = {}, mistakes = {
             {/* Column 3: Black's Move */}
             {turn.blackMove === undefined ? <div /> : (
               <div 
-                ref={currentPlyIndex === turn.blackIndex ? activeMoveRef : null}
-                className={`move-san ${currentPlyIndex === turn.blackIndex ? 'active' : ''}`}
+                ref={activeIndex === turn.blackIndex ? activeMoveRef : null}
+                className={`move-san ${activeIndex === turn.blackIndex ? 'active' : ''}`}
                 onClick={() => onMoveClick(turn.blackIndex)}
               >
                 {turn.blackMove}
