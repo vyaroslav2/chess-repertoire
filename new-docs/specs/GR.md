@@ -58,7 +58,7 @@ A misclick turns the light red. `X` takes it back.
 - A wrong move tints its move number red in the move list; a reveal tints it amber ([[UI|UI.36]]). Right moves are not marked.
 - One mark per move. A wrong move then a reveal on the same move leaves amber, as on the light (GR.06).
 - The light shows the latest mark left. With none, it's green once one of your moves is on the board, and off before that.
-- `X` clears the latest mark. The light updates to match.
+- `X` clears the latest mark. The light updates to match. With mistake rows (on trial, [[UI|UI.37]]), it undoes the latest reveal or wrong move instead, one row per press.
 - Press again to clear the one before it. Each press changes a number you can see, so you know what it did.
 - No marks: nothing happens. Holding `X` down clears one.
 - A plain key, read as `e.key`, like `E` and `F` ([[UI|UI.34]]). With Ctrl, Alt or Meta held it does nothing, so `Ctrl + X` stays the browser's.

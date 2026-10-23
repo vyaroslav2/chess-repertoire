@@ -94,6 +94,19 @@ Your move's number cell, filled when the move is marked ([[GR|GR.07]]), in the s
 - The whole 44 × 26px cell is filled; two marked rows in a row touch.
 - A wrong White move goes back at once and isn't listed. Its row still shows, with just its number, so you see the mark.
 
+UI.37 **Mistake rows (on trial, `/capture` only).**
+Each wrong move gets its own row under the move it was meant to be, in the mover's column. Lichess lists them under the whole move list instead.
+- The right move goes in its own place, next to White's move. That cell stays blank until it's played. So the line reads as one pair ("4 dxc6 Nxc6"), and the main line never moves.
+- The number shows once, on the main row. Mistake rows leave it blank: the column scans 1, 2, 3 with no repeats, and the shade already groups the rows.
+- Shaded `#3a2424` across both move cells. Moves 14px against 16.59px (UI.25), rows 22px against 26px, in the muted text colour. Smaller is a first guess; same size is still to try.
+- Every wrong move is listed, repeats too. Clutter, but a move you play must show up somewhere. Otherwise you'd look at the list, not see it, and wonder what went wrong. Repeats also show a mistake you keep making.
+- Not clickable: you can't browse into a wrong move.
+- No ✗ after the move, since 2026-10-23: the shade alone is cleaner. Kept as a comment in the code; it may come back.
+%% Was, 2026-10-23: a red ✗ (`#e05252`) 0.4em after each wrong move, as on Lichess. %%
+- `X` ([[GR|GR.07]]) undoes the latest event: a reveal first, then the wrong moves, one row per press, newest first. The number stays red while a row is left; the last row takes the red with it. After a reveal is undone, the number goes back to red if the move has rows. Each press changes something you can see.
+- Pages without rows keep `X` as in GR.07, one press per mark: there, a press that removes an unseen row would seem to do nothing. Once the rows are on every page, the same rule everywhere.
+- In the app since 2026-10-23: `mistakes` in `components/SrsTrainer.tsx`, by ply, set by `mistakeRows`.
+
 ## Layout
 
 UI.27 **Centring.** The board is centred across and down; only the board counts. The gap above it is half the free height, rounded to the nearest 0.8px (1 screen px), so the board stays on whole screen pixels and is at most 0.4px off centre. In a 779px-high window: 44px above, 43.8px below.

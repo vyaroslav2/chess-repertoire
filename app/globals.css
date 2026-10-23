@@ -453,6 +453,27 @@ html.coords-large .cg-wrap coords coord {
   font-weight: 600;
 }
 
+/* UI.37, /capture only, on trial: a wrong move's row under its move. Smaller
+   than a move, on a dark red shade across both move cells; not clickable. */
+.move-mistake {
+  font-family: var(--font-roboto), sans-serif;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--lichess-text-muted);
+  background-color: #3a2424;
+  display: flex;
+  align-items: center;
+  padding: 0 0.3em 0 0.5em; /* As .move-san */
+  user-select: none;
+}
+
+/* Dropped for now, with its ✗ in LichessMoveList.tsx (UI.37); may come back.
+.mistake-cross {
+  margin-left: 0.4em;
+  color: #e05252;
+}
+*/
+
 /* UI.26: as on Lichess (0.8 × the move size, weight 300, #949494), but JetBrains
    Mono with two decimals, so the decimal points line up. White on the current move.
    Eval Mono is JetBrains Mono Light with the dot taken out of the zero. */

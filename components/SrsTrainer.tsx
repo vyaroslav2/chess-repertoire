@@ -22,6 +22,8 @@ import {
 interface SrsTrainerProps {
   dueStats: any[];
   demoMode?: boolean;
+  // On trial, /capture only: your wrong moves listed, a row each under their move.
+  mistakeRows?: boolean;
   // AK.07: Anki runs the session; set on / only.
   anki?: AnkiSession;
 }
@@ -82,6 +84,7 @@ interface UndoStep {
 export default function SrsTrainer({
   dueStats,
   demoMode = false,
+  mistakeRows = false,
   anki,
 }: SrsTrainerProps) {
   const [stats, setStats] = useState(dueStats);
@@ -169,6 +172,8 @@ export default function SrsTrainer({
   // GR.07: your moves marked wrong or revealed, by ply; a right move has none.
   // X clears the latest. Empty at each new card.
   const [marks, setMarks] = useState<Record<number, MoveMark>>({});
+  // Your wrong moves, by ply, in the order played. Empty at each new card.
+  const [mistakes, setMistakes] = useState<Record<number, string[]>>({});
   // One of your moves is on the board, played or revealed: with no marks, the light is green.
   const [lineAnswered, setLineAnswered] = useState(false);
   // The status light (GR.06): the latest mark left, else green once a move is on
@@ -266,6 +271,7 @@ export default function SrsTrainer({
     setTestStatus("idle");
     if (lineStep === 0) {
       setMarks({});
+      setMistakes({});
       setLineAnswered(false);
     }
     setCurrentPlyIndex(priorMoves.length);
@@ -460,7 +466,22 @@ export default function SrsTrainer({
       if ((e.key === "x" || e.key === "X") && plainKey) {
         if (e.repeat || latestMarkPly < 0) return;
         logFlightBox("ACTION_CLEAR_MARK", { ply: latestMarkPly, mark: marks[latestMarkPly] });
-        setMarks(({ [latestMarkPly]: _, ...rest }) => rest);
+        // With mistake rows, the latest event instead (UI.37): a reveal, which comes
+        // after any wrong moves on its move, else the latest wrong move's row.
+        // The mark stays red while a row is left.
+        const rowsLeft = mistakes[latestMarkPly] ?? [];
+        const nextRows = marks[latestMarkPly] === "wrong" ? rowsLeft.slice(0, -1) : rowsLeft;
+        if (mistakeRows && nextRows.length > 0) {
+          setMarks((previous) => ({ ...previous, [latestMarkPly]: "wrong" }));
+        } else {
+          setMarks(({ [latestMarkPly]: _, ...rest }) => rest);
+        }
+        // No empty list left behind: the move list counts its plies as rows.
+        if (mistakeRows) {
+          setMistakes(({ [latestMarkPly]: _, ...rest }) =>
+            nextRows.length > 0 ? { ...rest, [latestMarkPly]: nextRows } : rest,
+          );
+        }
         return;
       }
 
@@ -534,7 +555,7 @@ export default function SrsTrainer({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentStat, testStatus, chess, isBrowsing, targetPlyIndex, evalsShown, marks]);
+  }, [currentStat, testStatus, chess, isBrowsing, targetPlyIndex, evalsShown, marks, mistakes]);
 
   if (!currentStat && ankiMode) {
     // AK.14
@@ -660,6 +681,10 @@ export default function SrsTrainer({
           setLastMove([from, to]);
           setTestStatus("wrong");
           setMarks((previous) => ({ ...previous, [targetPlyIndex]: "wrong" }));
+          setMistakes((previous) => ({
+            ...previous,
+            [targetPlyIndex]: [...(previous[targetPlyIndex] ?? []), move.san],
+          }));
           setCurrentPlyIndex(targetPlyIndex + 1);
 
           // Back after 300ms, as on Lichess (GR.02)
@@ -976,6 +1001,7 @@ export default function SrsTrainer({
             )}
             evals={evalsShown ? moveEvals : undefined}
             marks={marks}
+            mistakes={mistakeRows ? mistakes : undefined}
             currentPlyIndex={currentPlyIndex - 1}
             onMoveClick={(index) => {
               logFlightBox("ACTION_CLICK_MOVE_LIST", {
