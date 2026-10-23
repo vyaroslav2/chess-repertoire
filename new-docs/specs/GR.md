@@ -11,6 +11,7 @@ The board shows the position before the opponent's last move. After a 500ms wait
 - The wait and the slide are the intro. The board takes moves only once it has ended.
 - During the intro, only `Enter` acts: it ends the intro and reveals the answer (GR.03). Mid-slide, the opponent's piece lands at once and the answer slides in. In the wait, the answer just appears.
 - During the intro, `1`–`4` and other keys do nothing, and the intro plays on. `Ctrl + Z`, `F`, `E` and `X` (GR.07) work as always.
+- In a whole line (GR.06), each White reply has its own intro. During those, `1` acts at once (GR.04); only the card's first intro ignores it.
 - During the slide of the answer, `1`–`4` or `Enter` grade at once; the next card cuts the slide short.
 - Why `Enter` acts during the intro: one press shows the answer, with no waiting for a slide you've seen before, and `Enter`, `Enter` passes over a card quickly.
 - The 500ms wait is Lichess's: its puzzles play the first move 500ms after loading, or at once with animation off (`ui/puzzle/src/ctrl.ts`).
@@ -30,10 +31,11 @@ GR.03 **Revealing the answer.**
 
 GR.04 **Grading.**
 `1`–`4` are Again, Hard, Good, Easy. `Enter` on an answered card is Good. So `Enter`, `Enter` reveals the answer, then grades it Good.
-- `1` works at any of your moves in a line, even before the first, once the intro (GR.01) has ended. It grades Again at once and goes on to the next card; the rest of the line is skipped. So a mistake early in a line needn't be played out to the end.
+- `1` works at any of your moves in a line, even before the first. It grades Again at once and goes on to the next card; the rest of the line is skipped. So a mistake early in a line needn't be played out to the end.
+- It does nothing during the card's first intro (GR.01). During a White reply mid-line, it acts at once: a press as White's move slides in is not lost.
 - Holding `1` down grades one card, not the next ones too.
 - `2`–`4` work at the line's end (GR.06), once a move has been played, right or wrong, or the answer revealed. Before that, they do nothing.
-- **Was:** until 2026-10-23, `1` worked only as `2`–`4` do.
+- **Was:** until 2026-10-23, `1` worked only as `2`–`4` do. Then, briefly, it did nothing during any White reply.
 - After a wrong move, `1`–`4` grade at once, without the answer being shown. As in Anki, a wrong answer can be graded straight away. `Enter` after a wrong move reveals the answer; it does not grade.
 - The mouse can play the move, but there are no grade buttons.
 

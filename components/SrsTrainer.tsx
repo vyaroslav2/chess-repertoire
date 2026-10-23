@@ -479,6 +479,17 @@ export default function SrsTrainer({
         return;
       }
 
+      // 1 (Again): at any of your moves, even before the first; the rest of the line
+      // is skipped (GR.04). Only the card's first intro ignores it; mid-line it cuts
+      // White's reply short (GR.01). Not on repeat, so holding it can't grade the
+      // next card too.
+      if (e.key === "1" && (lineStep > 0 || !isInitializingRef.current)) {
+        if (e.repeat) return;
+        logFlightBox("ACTION_RATE_KEY", { key: e.key, quality: 0, lineStep });
+        handleRate(0);
+        return;
+      }
+
       // During the intro (the wait, then the opponent's slide), only Enter acts:
       // it ends the intro and reveals the answer below. Other keys leave the slide alone (GR.01).
       if (isInitializingRef.current) {
@@ -536,16 +547,6 @@ export default function SrsTrainer({
           logFlightBox("ACTION_RATE_DEFAULT_ENTER", { quality: 2 });
           handleRate(2);
         }
-      }
-
-      // 1 (Again): at any of your moves, even before the first, once the intro has
-      // ended; the rest of the line is skipped (GR.04). Not on repeat, so holding it
-      // can't grade the next card too.
-      if (e.key === "1") {
-        if (e.repeat) return;
-        logFlightBox("ACTION_RATE_KEY", { key: e.key, quality: 0, lineStep });
-        handleRate(0);
-        return;
       }
 
       // 2, 3, 4 (Grade)
