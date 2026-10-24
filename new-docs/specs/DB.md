@@ -64,13 +64,14 @@ What is measured:
 * One search of the position the move reaches, on its own, under the generator's profile (DB.32). The score is the deepest completed depth's ([[EW|EW.09]]).
 * White move: the position after it, Black to move. This is the search [[EW|EW.09]] runs to pick Black's reply, so it costs nothing extra ([[HM|HM.09]]).
 * Black move: the position after it, White to move. A search of its own ([[EW|EW.11]]). The same for a hardcoded move.
+* Alongside the eval, its `depth`: the deepest completed depth of that search (DB.32). It shows how deep the eval looked, so the UI can compare it with Lichess's depth. #roadmap
 
 What it means:
 * One figure: Stockfish's estimate of that position with best play from there on, in White's point of view (DB.15). It says who is better and by how much.
 * Two figures in a row: the change is what the move cost. After Stockfish's own top move the two should match in principle. They differ a little only because each position is searched on its own; that is search noise, not information. A large swing after a White move means White's move was a mistake. After a hardcoded Black move, the swing is what that choice costs.
 
 Exceptions:
-* A Black move that ends the game by checkmate or stalemate leaves nothing to search. Checkmate: `mate = -1`, the figure EW.09's search gives the mating move. Stalemate: `cp = 0`.
+* A Black move that ends the game by checkmate or stalemate leaves nothing to search. Checkmate: `mate = -1`, the figure EW.09's search gives the mating move. Stalemate: `cp = 0`. Neither has a `depth`.
 * A White move that ends the route — `Too rare`, `Game over`, `Repetition`, `Transposition` (DB.20): no eval. Black does not reply to it, so it is on no card.[^7]
 
 DB.12 **Mate is never zero.** `mate = 0` is invalid: there is always at least one move left in which to deliver the mate. A negative `mate` means Black mates, a positive one means White does.
@@ -96,6 +97,9 @@ DB.30 **Caches survive the wipe.** The tree is rebuilt from scratch on every run
 DB.31 **Explorer data** — one row per position, per [[cache-profile|cache profile]]. Only the Amateur dataset is fetched ([[EX]]). The dataset is part of the profile, so the key is `positionKey` + profile and nothing else ([[EX|EX.01]]). A position that was fetched and genuinely has no games is stored as an empty result, so it is never asked for twice ([[EX|EX.01]], State B). Each row also holds the `eco` and `openingName` Explorer returned with it.
 
 DB.32 **Engine evaluations** — held in `EngineCache`, stored against the local Stockfish profile and against the exact `fullFen`, not against `positionKey`. Only local Stockfish 19 writes it. The profile is `localStockfishVersion`, `localStockfishNodes`, `localStockfishThreads`, `localStockfishHashMb` and `localStockfishMultiPv` ([[generation-config]]). A change to any of them makes a new profile, so an eval from another version or setting is never reused.
+* Each eval also stores `depth`: the deepest depth its search completed before the node limit stopped it ([[EW|EW.09]]). The unfinished depth never counts. #roadmap
+* Evals cached before this have no depth, and nothing searches them again until the profile changes. The UI shows their depth as unknown.
+* #question Where the UI shows the depth: next to the eval (e.g. `+0.15 · d35`), or only on hover.
 
 DB.33 **Opening metadata** — the result of [[DB|DB.06]], stored per route: repertoire + `history`. A rebuilt tree gets its names back without asking Explorer again.
 
