@@ -3,27 +3,27 @@ tags:
   - reviewed
 ---
 
-| Setting                       | Value                                                             | Notes                                                         |
-| ----------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------- |
-| `timestampFormat`[^1]         | Always UTC (`2026-09-03T08:15:23.000Z`)                           |                                                               |
-| `lockfileName`                | `lockfile-never-remove-by-yourself-unless-stale`                  |                                                               |
-| `lockfileRetryLimit`          | 5                                                                 | [[lockfile-retry-limit]]                                      |
-| `probabilityTolerance`        | 0.0001% (0.000001 as a fraction)                                  | [[probability-tolerance]]                                     |
-| `tinyThreshold`               | 0.00001% (0.0000001 as a fraction)                                | [[tiny-threshold]]                                            |
-| `nodeTouchCountCap`[^2]       | 500                                                               | [[node-touch-count-cap]]                                      |
-| `minCumProb`[^3]              | 0.1% (0.001 as a fraction)                                        | [[min-cum-prob]]                                              |
-| `depthCap`                    | 15                                                                | full moves counted from the root; a ceiling for every route   |
-| `explorerSpeeds`              | classical, rapid                                                  | related to amateur cache profile                              |
-| `explorerRatings`             | 1600, 1800, 2000                                                  | related to amateur cache profile                              |
-| `apiRetryDelayMs`             | 120 000                                                           |                                                               |
-| `apiRequestGapMs`             | 2 000                                                             |                                                               |
-| `apiRequestTimeoutMs`         | 30 000                                                            |                                                               |
-| `localStockfishVersion`       | 19                                                                | related to local Stockfish  cache profile                     |
-| `localStockfishNodes`         | 200 000 000 nodes; no depth or time limit                         | related to local Stockfish  cache profile                     |
-| `localStockfishThreads`       | 1; one search at a time                                           | related to local Stockfish  cache profile                     |
-| `localStockfishHashMb`        | 1024                                                              | related to local Stockfish  cache profile                     |
-| `localStockfishMultiPv`       | 1                                                                 | related to local Stockfish  cache profile                     |
-| `hardcodedBlackResponses`[^4] | 1. e4 c6,  1. d4 d5                                               |                                                               |
+| Setting                       | Value                                            | Notes                                                       |
+| ----------------------------- | ------------------------------------------------ | ----------------------------------------------------------- |
+| `timestampFormat`[^1]         | Always UTC (`2026-09-03T08:15:23.000Z`)          |                                                             |
+| `lockfileName`                | `lockfile-never-remove-by-yourself-unless-stale` |                                                             |
+| `lockfileRetryLimit`          | 5                                                | [[lockfile-retry-limit]]                                    |
+| `probabilityTolerance`        | 0.0001% (0.000001 as a fraction)                 | [[probability-tolerance]]                                   |
+| `tinyThreshold`               | 0.00001% (0.0000001 as a fraction)               | [[tiny-threshold]]                                          |
+| `nodeTouchCountCap`[^2]       | 500                                              | [[node-touch-count-cap]]                                    |
+| `minCumProb`[^3]              | 0.1% (0.001 as a fraction)                       | [[min-cum-prob]]                                            |
+| `depthCap`                    | 15                                               | full moves counted from the root; a ceiling for every route |
+| `explorerSpeeds`              | classical, rapid                                 | related to amateur cache profile                            |
+| `explorerRatings`             | 1600, 1800, 2000                                 | related to amateur cache profile                            |
+| `apiRetryDelayMs`             | 120 000                                          |                                                             |
+| `apiRequestGapMs`             | 2 000                                            |                                                             |
+| `apiRequestTimeoutMs`         | 30 000                                           |                                                             |
+| `localStockfishVersion`       | 19                                               | related to local Stockfish  cache profile                   |
+| `localStockfishNodes`         | 200 000 000 nodes; no depth or time limit        | related to local Stockfish  cache profile                   |
+| `localStockfishThreads`       | 1; one search at a time                          | related to local Stockfish  cache profile                   |
+| `localStockfishHashMb`        | 1024                                             | related to local Stockfish  cache profile                   |
+| `localStockfishMultiPv`       | 1                                                | related to local Stockfish  cache profile                   |
+| `hardcodedBlackResponses`[^4] | 1. e4 c6,  1. d4 d5                              |                                                             |
 
 
 
