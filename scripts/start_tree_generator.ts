@@ -58,8 +58,7 @@ type LauncherDependencies = {
 };
 
 export function depthHeaderLine(config: Config = defaultConfig): string {
-  const { deep, medium, shallow } = config.depthBudget;
-  return `Depth: depthBudget deep=${deep}, medium=${medium}, shallow=${shallow}; depthCap=${config.depthCap} (full moves)`;
+  return `Depth: minCumProb=${config.minCumProb * 100}%; depthCap=${config.depthCap} (full moves)`;
 }
 
 function errorReason(error: unknown): string {

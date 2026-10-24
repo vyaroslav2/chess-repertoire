@@ -107,7 +107,7 @@ test("TGL: log file is named treegen-[timestamp].md and its header shows the con
       now: () => new Date("2026-08-30T11:15:23.456Z")
     });
     const log = fs.readFileSync(path.join(fixtureRoot, "new-docs", "logs", "treegen-2026-08-30T111523Z.md"), "utf8");
-    assert.match(log, /^Depth: depthBudget deep=15, medium=8, shallow=5; depthCap=5 \(full moves\)$/m);
+    assert.match(log, /^Depth: minCumProb=0\.1%; depthCap=15 \(full moves\)$/m);
     assert.doesNotMatch(log, /3 full moves/);
   } finally {
     fs.rmSync(fixtureRoot, { recursive: true, force: true });

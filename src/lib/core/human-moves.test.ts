@@ -33,13 +33,13 @@ async function captureLog<T>(run: () => Promise<T>): Promise<{ result: T; lines:
 }
 
 describe("HM.04 HM.05 candidates", () => {
-  it("HM.04: every returned move is listed; a move below its threshold is marked dropped", () => {
-    const selected = selectWhiteCandidates(1, [amateurMove("e4", 95), amateurMove("b3", 4), amateurMove("g3", 1)], 100);
-    assert.deepEqual(selected.map(move => [move.san, move.include]), [["e4", true], ["b3", false], ["g3", false]]);
+  it("HM.04: every returned move is listed, however rare", () => {
+    const selected = selectWhiteCandidates([amateurMove("e4", 9_990), amateurMove("b3", 9), amateurMove("g3", 1)], 10_000);
+    assert.deepEqual(selected.map(move => move.san), ["e4", "b3", "g3"]);
   });
 
   it("HM.05: most popular first, ties alphabetically by SAN", () => {
-    const selected = selectWhiteCandidates(1, [amateurMove("d4", 30), amateurMove("e4", 40), amateurMove("c4", 30)], 100);
+    const selected = selectWhiteCandidates([amateurMove("d4", 30), amateurMove("e4", 40), amateurMove("c4", 30)], 100);
     assert.deepEqual(selected.map(move => move.san), ["e4", "c4", "d4"]);
   });
 
@@ -49,37 +49,28 @@ describe("HM.04 HM.05 candidates", () => {
       sourcePgn: "",
       sourceRouteProb: 0.5,
       sourceCumProb: 0.8,
-      candidates: [{ san: "e4", probability: 0.6 }, { san: "d4", probability: 0.4, dropped: true }]
+      candidates: [{ san: "e4", probability: 0.6 }, { san: "d4", probability: 0.4 }]
     });
     assert.deepEqual([e4.siblingIndex, d4.siblingIndex], [1, 2]);
-    assert.deepEqual([e4.dropped, d4.dropped], [false, true]);
     assert.ok(near(e4.routeProb, 0.3));
     assert.ok(near(d4.routeProb, 0.2));
   });
 });
 
-describe("RE.08 depth budget", () => {
+describe("RE.08 depth cap", () => {
   // White to move at fullmove n means Black has played n - 1 full moves.
   const atMove = (fullmove: number) => `rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 ${fullmove}`;
-  const ending = (fullmove: number, cumProb: number, depthCap = defaultConfig.depthCap) =>
-    responseEnding({ fullFen: atMove(fullmove), cumProb, config: { ...defaultConfig, depthCap } });
+  const ending = (fullmove: number, depthCap = defaultConfig.depthCap) =>
+    responseEnding({ fullFen: atMove(fullmove), config: { depthCap } });
 
-  it("RE.08: the band comes from cumProb (shallow=5, medium=8, deep=15 full moves)", () => {
-    assert.equal(ending(5, 0.004, 99), null);
-    assert.equal(ending(6, 0.004, 99), "Depth budget reached on Black's move");
-    assert.equal(ending(8, 0.01, 99), null);
-    assert.equal(ending(9, 0.01, 99), "Depth budget reached on Black's move");
-    assert.equal(ending(15, 0.02, 99), null);
-    assert.equal(ending(16, 0.02, 99), "Depth budget reached on Black's move");
+  it("RE.08: at depthCap = 15, the route ends straight after Black's 15th move", () => {
+    assert.equal(ending(15), null);
+    assert.equal(ending(16), "Depth cap reached on Black's move");
   });
 
-  it("RE.08: depthCap caps every band; at 5, every band stops after Black's 5th move", () => {
-    for (const cumProb of [0.004, 0.01, 0.02]) {
-      assert.equal(ending(5, cumProb), null);
-      assert.equal(ending(6, cumProb), "Depth budget reached on Black's move");
-    }
-    assert.equal(ending(2, 1, 2), null);
-    assert.equal(ending(3, 1, 2), "Depth budget reached on Black's move");
+  it("RE.08: a lower depthCap stops every route sooner", () => {
+    assert.equal(ending(2, 2), null);
+    assert.equal(ending(3, 2), "Depth cap reached on Black's move");
   });
 });
 
@@ -105,9 +96,10 @@ describe("HM generator", () => {
     wait: async () => undefined
   };
   const empty = { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0, opening: null };
-  const amateurAt = (moves: ReturnType<typeof amateurMove>[]) => ({
-    moves, totalGames: 100, positionTotalGames: 100, unaccountedShare: 0, opening: null
-  });
+  const amateurAt = (moves: ReturnType<typeof amateurMove>[]) => {
+    const totalGames = moves.reduce((sum, move) => sum + move.games, 0);
+    return { moves, totalGames, positionTotalGames: totalGames, unaccountedShare: 0, opening: null };
+  };
   const fenAfter = (san: string) => { const chess = new Chess(); chess.move(san); return chess.fen(); };
 
   function evaluator(calls: string[], replies: Record<string, string> = {}) {
@@ -131,20 +123,24 @@ describe("HM generator", () => {
     }));
   }
 
+  // 10,000 games: g3 and b3 reach 0.09% each, below minCumProb (0.1%).
   const rootMoves = () => [
-    amateurMove("e4", 40), amateurMove("d4", 27), amateurMove("c4", 27), amateurMove("g3", 3), amateurMove("b3", 3)
+    amateurMove("e4", 4_000), amateurMove("d4", 2_991), amateurMove("c4", 2_991), amateurMove("g3", 9), amateurMove("b3", 9)
   ];
 
-  it("HM.04 HM.21 HM.23 HM.24: a dropped move gets a node with cumProb 0, its arriving probability in rareDropped, and a [TOO RARE] log", async () => {
+  it("HM.04 HM.21 HM.23 HM.24: a move below minCumProb gets a node with cumProb 0, its arriving probability in rareDropped, and a [TOO RARE] log", async () => {
     const calls: string[] = [];
     const { lines } = await runRoot(rootMoves(), calls);
-    assert.ok(lines.includes("[TOO RARE] route=b3; rareDropped=3.000%"));
-    assert.ok(lines.includes("[TOO RARE] route=g3; rareDropped=3.000%"));
+    assert.ok(lines.includes("[TOO RARE] route=b3; rareDropped=0.090%"));
+    assert.ok(lines.includes("[TOO RARE] route=g3; rareDropped=0.090%"));
     for (const san of ["b3", "g3"]) {
       const node = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, displayPgn: san } });
       assert.equal(node.cumProb, 0);
-      assert.ok(near(node.rareDropped, 0.03));
-      assert.ok(near(node.routeProb, 0.03));
+      assert.ok(near(node.rareDropped, 0.0009));
+      assert.ok(near(node.routeProb, 0.0009));
+      // HM.N.05: a too-rare node owns its position.
+      const owner = await prisma.position.findUniqueOrThrow({ where: { repertoireId_positionKey: { repertoireId, positionKey: node.positionKey } } });
+      assert.equal(owner.nodeId, node.id);
       assert.ok(node.openingMetadataStatus !== null);
       const edge = await prisma.repertoireMove.findFirstOrThrow({ where: { toNodeId: node.id } });
       assert.equal(edge.stopReason, "Too rare");
@@ -224,17 +220,26 @@ describe("HM generator", () => {
     })), /must carry exactly one of cp or mate/);
   });
 
-  it("HM.08: all returned moves dropped logs the warning and ends the route", async () => {
+  it("HM.21: a move at exactly minCumProb is not too rare", async () => {
     const calls: string[] = [];
-    // Both moves fall below the 5% threshold; the other 93 games have no move (EX.05).
-    const { lines: warned } = await captureLog(() => generateRepertoire(START_FEN, {
+    await runRoot([amateurMove("e4", 999), amateurMove("a3", 1)], calls);
+    const edge = await prisma.repertoireMove.findFirstOrThrow({ where: { repertoireId, san: "a3" } });
+    assert.equal(edge.stopReason, null);
+    assert.ok(calls.includes(fenAfter("a3")));
+  });
+
+  it("HM.08: all returned moves too rare logs it and ends the route", async () => {
+    const calls: string[] = [];
+    // Both moves fall below minCumProb; the other 9,993 games have no move (EX.05).
+    const { lines } = await captureLog(() => generateRepertoire(START_FEN, {
       repertoireId, ...common,
       responseEvaluator: evaluator(calls) as any,
       fetchDatabases: (async (fen: string) => fen === START_FEN
-        ? { moves: [amateurMove("e4", 4), amateurMove("d4", 3)], totalGames: 7, positionTotalGames: 100, unaccountedShare: 0.93, opening: null }
+        ? { moves: [amateurMove("e4", 4), amateurMove("d4", 3)], totalGames: 7, positionTotalGames: 10_000, unaccountedShare: 0.9993, opening: null }
         : empty) as any
     }));
-    assert.ok(warned.includes("[WARNING] All opponent moves were filtered away."));
+    assert.ok(lines.includes("All opponent moves are too rare."));
+    assert.ok(!lines.some(line => line.startsWith("[WARNING]")));
     assert.deepEqual(calls, []);
     const edges = await prisma.repertoireMove.findMany({ where: { repertoireId } });
     assert.deepEqual(edges.map(edge => edge.stopReason), ["Too rare", "Too rare"]);
@@ -248,11 +253,12 @@ describe("HM generator", () => {
     await runCascade({ repertoireId, pointerId: pointer.id, ownerId: owner.id, run: { cascadeCount: 0, tinyDroppedTotal: 0 }, config: defaultConfig });
   }
 
-  it("HM.04 TR.48 TR.45: a cascade that reaches a dropped move adds to its rareDropped, not its cumProb", async () => {
+  it("HM.04 TR.48 TR.45: a cascade that reaches a too-rare move adds to its rareDropped, not its cumProb", async () => {
     const source = await createRepertoireNode(repertoireId, START_FEN, "", 0.5);
+    // 50% x 0.1% = 0.05%, below minCumProb.
     const [dropped] = canonicalizeOpponentCandidates({
       sourceFullFen: source.fullFen, sourcePgn: "", sourceRouteProb: source.routeProb, sourceCumProb: source.cumProb,
-      candidates: [{ san: "b3", probability: 0.02, dropped: true }]
+      candidates: [{ san: "b3", probability: 0.001 }]
     });
     const result = await reconcileOpponentBranches({
       repertoireId,
@@ -261,16 +267,41 @@ describe("HM generator", () => {
         displayPgn: source.displayPgn, routeProb: source.routeProb, cumProb: source.cumProb
       },
       expectedStoredEdges: await readExpectedOpponentEdges(source.id),
-      recomputedCandidates: [dropped]
+      recomputedCandidates: [dropped],
+      minCumProb: defaultConfig.minCumProb
     });
+    assert.equal(result.branches[0].ending, "Too rare");
     const nodeId = result.branches[0].destinationNodeId!;
-    assert.ok(near((await prisma.repertoireNode.findUniqueOrThrow({ where: { id: nodeId } })).rareDropped, 0.01));
+    assert.ok(near((await prisma.repertoireNode.findUniqueOrThrow({ where: { id: nodeId } })).rareDropped, 0.0005));
 
     await captureLog(() => cascadeInto(source, 0.3));
     const after = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: nodeId } });
     assert.equal(after.cumProb, 0);
-    assert.ok(near(after.rareDropped, 0.016));
-    assert.ok(near(after.routeProb, 0.01));
+    assert.ok(near(after.rareDropped, 0.0008));
+    assert.ok(near(after.routeProb, 0.0005));
+  });
+
+  it("HM.07 HM.N.05: a rare move into a too-rare node's position is a pointer, and its cascade adds to the owner's rareDropped", async () => {
+    // 1.e4 d6 2.Nf3 and 1.Nf3 d6 2.e4 reach the same position. Each White move is 50% x 0.1% = 0.05%.
+    const fenOf = (sans: string[]) => { const chess = new Chess(); for (const san of sans) chess.move(san); return chess.fen(); };
+    const first = await createRepertoireNode(repertoireId, fenOf(["e4", "d6"]), "e2e4 d7d6", 0.5, { displayPgn: "e4 d6" });
+    const [owner] = (await reconcileFrom(first, [{ san: "Nf3", probability: 0.001 }])).branches;
+    assert.equal(owner.ending, "Too rare");
+
+    const second = await createRepertoireNode(repertoireId, fenOf(["Nf3", "d6"]), "g1f3 d7d6", 0.5, { displayPgn: "Nf3 d6" });
+    const [pointer] = (await reconcileFrom(second, [{ san: "e4", probability: 0.001 }])).branches;
+    // HM.07: transposition comes before too rare.
+    assert.equal(pointer.ending, null);
+    assert.equal(pointer.isTransposition, true);
+    assert.equal(pointer.ownerNodeId, owner.destinationNodeId);
+
+    await captureLog(() => runCascade({
+      repertoireId, pointerId: pointer.destinationNodeId!, ownerId: owner.destinationNodeId!,
+      run: { cascadeCount: 0, tinyDroppedTotal: 0 }, config: defaultConfig
+    }));
+    const after = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: owner.destinationNodeId! } });
+    assert.equal(after.cumProb, 0);
+    assert.ok(near(after.rareDropped, 0.001));
   });
 
   async function reconcileFrom(
@@ -287,7 +318,8 @@ describe("HM generator", () => {
       recomputedCandidates: canonicalizeOpponentCandidates({
         sourceFullFen: source.fullFen, sourcePgn: source.displayPgn, sourceHistory: source.history,
         sourceRouteProb: source.routeProb, sourceCumProb: source.cumProb, candidates: rows
-      })
+      }),
+      minCumProb: defaultConfig.minCumProb
     });
   }
 
@@ -359,11 +391,15 @@ describe("HM generator", () => {
 
   const play = (sans: string[]) => { const chess = new Chess(); for (const san of sans) chess.move(san); return boardAndTurn(chess.fen()); };
 
-  async function runScripted(whiteMoves: Record<string, Array<[string, number]>>, replies: Record<string, string>) {
+  async function runScripted(
+    whiteMoves: Record<string, Array<[string, number]>>,
+    replies: Record<string, string>,
+    config = defaultConfig
+  ) {
     const calls: string[] = [];
     const fetched: string[] = [];
     const { lines } = await captureLog(() => generateRepertoire(START_FEN, {
-      repertoireId, ...common,
+      repertoireId, ...common, config,
       responseEvaluator: evaluator(calls, replies) as any,
       fetchDatabases: (async (fen: string) => {
         fetched.push(boardAndTurn(fen));
@@ -433,7 +469,7 @@ describe("HM generator", () => {
     assert.notEqual(node.openingMetadataStatus, null);
   });
 
-  it("RE.07 RE.08 RE.10: Black's move that uses up the depth budget ends the route and logs [DEPTH BUDGET REACHED]", async () => {
+  it("RE.07 RE.08 RE.10: Black's move that reaches depthCap ends the route and logs [DEPTH CAP REACHED]", async () => {
     // depthCap = 5: the route ends straight after Black's 5th move.
     const route = ["e4", "e5", "Nf3", "Nc6", "Bc4", "Bc5", "c3", "Nf6", "d3", "d6"];
     const whiteMoves: Record<string, Array<[string, number]>> = {};
@@ -442,12 +478,12 @@ describe("HM generator", () => {
       whiteMoves[play(route.slice(0, ply))] = [[route[ply], 100]];
       replies[play(route.slice(0, ply + 1))] = route[ply + 1];
     }
-    const { fetched, lines } = await runScripted(whiteMoves, replies);
+    const { fetched, lines } = await runScripted(whiteMoves, replies, { ...defaultConfig, depthCap: 5 });
     const node = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, displayPgn: route.join(" ") } });
     const reply = await prisma.repertoireMove.findFirstOrThrow({ where: { toNodeId: node.id } });
-    assert.equal(reply.stopReason, "Depth budget reached on Black's move");
-    assert.ok(lines.includes(`[DEPTH BUDGET REACHED] route=${route.join(" ")}; cumProb=100.000%`));
-    // Black's 4th move is still within the budget.
+    assert.equal(reply.stopReason, "Depth cap reached on Black's move");
+    assert.ok(lines.includes(`[DEPTH CAP REACHED] route=${route.join(" ")}; cumProb=100.000%`));
+    // Black's 4th move is still within the cap.
     const earlier = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, displayPgn: route.slice(0, 8).join(" ") } });
     assert.ok(fetched.includes(boardAndTurn(earlier.fullFen)));
     assert.ok(!fetched.includes(boardAndTurn(node.fullFen)));
@@ -456,7 +492,7 @@ describe("HM generator", () => {
     assert.notEqual(node.openingMetadataStatus, null);
   });
 
-  it("RE.09: Black's move within the budget is pushed, with no stopReason", async () => {
+  it("RE.09: Black's move within the cap is pushed, with no stopReason", async () => {
     const { fetched } = await runScripted({ [play([])]: [["e4", 100]] }, { [play(["e4"])]: "e5" });
     const node = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, displayPgn: "e4 e5" } });
     const reply = await prisma.repertoireMove.findFirstOrThrow({ where: { toNodeId: node.id } });

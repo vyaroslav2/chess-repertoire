@@ -15,7 +15,6 @@ export type OpponentCandidateInput = {
   san: string;
   uci?: string;
   probability: number;
-  dropped?: boolean;
 };
 
 export type CanonicalOpponentCandidate = {
@@ -24,7 +23,6 @@ export type CanonicalOpponentCandidate = {
   moveProb: number;
   routeProb: number;
   siblingIndex: number;
-  dropped: boolean;
   destinationFullFen: string;
   destinationPositionKey: string;
   destinationPgn: string;
@@ -164,7 +162,6 @@ export function canonicalizeOpponentCandidates(input: {
       routeProb: input.sourceRouteProb * candidate.probability,
       // HM.05 / DB.16: candidates arrive most popular first; the index starts at 1.
       siblingIndex: siblingIndex + 1,
-      dropped: candidate.dropped ?? false,
       destinationFullFen,
       destinationPositionKey: positionKeyFromFen(destinationFullFen),
       destinationPgn: `${input.sourcePgn ? `${input.sourcePgn} ` : ""}${move.san}`,
@@ -257,6 +254,8 @@ export async function reconcileOpponentBranches(input: {
   expectedSource: ExpectedOpponentSource;
   expectedStoredEdges: ExpectedOpponentEdge[];
   recomputedCandidates: CanonicalOpponentCandidate[];
+  /** HM.21: a node whose cumProb is below this is too rare. */
+  minCumProb: number;
 }): Promise<ReconcileOpponentBranchesResult> {
   if (input.expectedSource.repertoireId !== input.repertoireId) {
     throw new Error("OPPONENT source repertoire does not match reconciliation repertoire");
@@ -330,12 +329,10 @@ export async function reconcileOpponentBranches(input: {
     const branches: ReconciledOpponentBranch[] = [];
     for (const candidate of [...input.recomputedCandidates].sort((a, b) => a.uci.localeCompare(b.uci))) {
       const stored = storedByUci.get(candidate.uci);
-      // HM.20: the checks run in a fixed order: too rare, game over, repetition, then transposition.
+      // HM.07: the checks run in a fixed order: game over, repetition, transposition, then too rare.
       let ending: WhiteMoveEnding | null = null;
       let repeatedPgn: string | null = null;
-      if (candidate.dropped) {
-        ending = "Too rare"; // HM.21
-      } else if (isGameOverPosition(candidate.destinationFullFen)) {
+      if (isGameOverPosition(candidate.destinationFullFen)) {
         ending = "Game over"; // HM.26
       } else {
         // HM.30: the position already appears earlier on this route.
@@ -349,19 +346,20 @@ export async function reconcileOpponentBranches(input: {
           repeatedPgn = repeated.displayPgn;
         }
       }
-      const storedEnding = WHITE_MOVE_ENDINGS.find(reason => reason === stored?.stopReason) ?? null;
+      // Too rare comes after the transposition check, so it is compared further down.
+      const storedEnding = WHITE_MOVE_ENDINGS.find(reason => reason !== "Too rare" && reason === stored?.stopReason) ?? null;
       if (stored && storedEnding !== ending) {
         throw new Error(`Stored OPPONENT ${candidate.uci} changed how its route ends and requires branch rebuild`);
       }
+      // HM.25: cumProb = parent.cumProb * moveProb. Until a cascade reaches the parent, this equals routeProb.
+      const arrivingProb = source.cumProb * candidate.moveProb;
+      // HM.21, HM.23: a too-rare move's cumProb is held at 0 and what arrives goes to rareDropped.
+      const tooRare = arrivingProb < input.minCumProb;
+      const tooRareProbability = { cumProb: 0, rareDropped: arrivingProb };
       if (ending) {
-        // HM.25: the move still gets its own node, with cumProb = parent.cumProb * moveProb.
-        // HM.23: a dropped move's cumProb is held at 0 and what arrives goes to rareDropped.
         // HM.28, HM.32: a game-over or repetition node is an ending and keeps its cumProb.
-        // None of them owns a position, and a repetition points nowhere (HM.N.04).
-        const arrivingProb = source.cumProb * candidate.moveProb;
-        const probability = ending === "Too rare"
-          ? { cumProb: 0, rareDropped: arrivingProb }
-          : { cumProb: arrivingProb };
+        // Neither owns a position, and a repetition points nowhere (HM.N.04).
+        const probability = { cumProb: arrivingProb };
         let edge;
         let node;
         if (stored) {
@@ -418,26 +416,32 @@ export async function reconcileOpponentBranches(input: {
           throw new Error("Retained OPPONENT destination was removed with an obsolete canonical owner");
         }
         const isTransposition = retainedDestination.transposesTo !== null;
+        const retainedTooRare = !isTransposition && tooRare;
+        if ((stored.stopReason === "Too rare") !== retainedTooRare) {
+          throw new Error(`Stored OPPONENT ${candidate.uci} changed how its route ends and requires branch rebuild`);
+        }
         const updated = await tx.repertoireMove.update({
           where: { id: stored.id },
           data: {
             san: candidate.san,
             moveProb: candidate.moveProb,
-            stopReason: isTransposition ? "Transposition" : null
+            stopReason: isTransposition ? "Transposition" : retainedTooRare ? "Too rare" : null
           }
         });
-        const effectiveCumProb = retainedDestination.cumProb;
+        const retainedNode = retainedTooRare
+          ? await tx.repertoireNode.update({ where: { id: retainedDestination.id }, data: tooRareProbability })
+          : retainedDestination;
         branches.push({
           ...candidate,
           action: "RETAINED",
           edgeId: updated.id,
-          destinationNodeId: retainedDestination.id,
-          destinationCanonicalPgn: retainedDestination.displayPgn,
-          destinationCanonicalFullFen: retainedDestination.fullFen,
-          effectiveCumProb,
+          destinationNodeId: retainedNode.id,
+          destinationCanonicalPgn: retainedNode.displayPgn,
+          destinationCanonicalFullFen: retainedNode.fullFen,
+          effectiveCumProb: retainedNode.cumProb,
           isTransposition,
-          ownerNodeId: retainedDestination.transposesTo,
-          ending: null,
+          ownerNodeId: retainedNode.transposesTo,
+          ending: retainedTooRare ? "Too rare" : null,
           repeatedPgn: null
         });
         continue;
@@ -452,8 +456,7 @@ export async function reconcileOpponentBranches(input: {
           history: candidate.destinationHistory,
           displayPgn: candidate.destinationPgn,
           routeProb: candidate.routeProb,
-          // HM.25: until a cascade reaches the parent, this equals routeProb.
-          cumProb: source.cumProb * candidate.moveProb,
+          cumProb: arrivingProb,
           siblingIndex: candidate.siblingIndex
         }
       });
@@ -461,9 +464,13 @@ export async function reconcileOpponentBranches(input: {
       // TR.06, TR.07: if not, this node takes the row and keeps transposesTo = null.
       const ownerNodeId = await claimPosition(tx, input.repertoireId, candidate.destinationPositionKey, destination.id);
       const isTransposition = ownerNodeId !== destination.id;
+      // HM.21: only an owner can be too rare. It keeps the position, so later routes point to it (HM.N.05).
+      const newTooRare = !isTransposition && tooRare;
       if (isTransposition) {
         // TR.08: this node is now a pointer; its route stops here.
         destination = await tx.repertoireNode.update({ where: { id: destination.id }, data: { transposesTo: ownerNodeId } });
+      } else if (newTooRare) {
+        destination = await tx.repertoireNode.update({ where: { id: destination.id }, data: tooRareProbability });
       }
       const created = await tx.repertoireMove.create({
         data: {
@@ -474,7 +481,7 @@ export async function reconcileOpponentBranches(input: {
           san: candidate.san,
           playerTurn: "OPPONENT",
           moveProb: candidate.moveProb,
-          stopReason: isTransposition ? "Transposition" : null
+          stopReason: isTransposition ? "Transposition" : newTooRare ? "Too rare" : null
         }
       });
       branches.push({
@@ -487,7 +494,7 @@ export async function reconcileOpponentBranches(input: {
         effectiveCumProb: destination.cumProb,
         isTransposition,
         ownerNodeId: isTransposition ? ownerNodeId : null,
-        ending: null,
+        ending: newTooRare ? "Too rare" : null,
         repeatedPgn: null
       });
     }

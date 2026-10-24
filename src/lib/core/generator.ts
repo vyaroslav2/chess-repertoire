@@ -12,7 +12,7 @@ import {
 } from "../db/operations";
 import { parseFullFen, positionKeyFromFen } from "./fen";
 import { fetchExplorer, fetchOpeningMetadata as fetchAmateurOpeningMetadata, type ExplorerOpening } from "../api/lichess";
-import { defaultConfig, createRuntimeConfig, getProbabilityBand, type Config } from "../core/config";
+import { defaultConfig, createRuntimeConfig, type Config } from "../core/config";
 import { selectWhiteCandidates, evaluateBlackMove } from "./evaluator";
 import { runCascade, probabilityBalance, type CascadeRunState } from "./cascade";
 import { delay } from "../api/retry";
@@ -40,6 +40,8 @@ export type GenerateRepertoireDependencies = {
   ensureNodeWikibooks?: typeof ensureRepertoireNodeWikibooks;
   wait?: typeof delay;
   shouldStop?: () => boolean;
+  /** Tests only; a run uses defaultConfig. */
+  config?: Config;
 };
 
 export async function attemptCanonicalNodeWikibooks(
@@ -250,13 +252,11 @@ export async function evaluateCanonicalResponse(input: {
  */
 export function responseEnding(input: {
   fullFen: string;
-  cumProb: number;
-  config: Config;
+  config: Pick<Config, "depthCap">;
 }): ResponseEnding | null {
   if (new Chess(input.fullFen).isGameOver()) return "Game over on Black's move";
-  const depthBudget = input.config.depthBudget[getProbabilityBand(input.cumProb, input.config)];
-  if (fullmoveNumberFromFullFen(input.fullFen) > Math.min(depthBudget, input.config.depthCap)) {
-    return "Depth budget reached on Black's move";
+  if (fullmoveNumberFromFullFen(input.fullFen) > input.config.depthCap) {
+    return "Depth cap reached on Black's move";
   }
   return null;
 }
@@ -458,7 +458,7 @@ export async function generateRepertoire(
     }
   }
 
-  const runtime = createRuntimeConfig(defaultConfig);
+  const runtime = createRuntimeConfig(dependencies.config ?? defaultConfig);
   const rebuildWikibooksCache = await captureRebuildWikibooksCache(repertoire.id);
   const rebuildOpeningMetadataCache = await captureRebuildOpeningMetadataCache(repertoire.id);
 
@@ -562,9 +562,8 @@ export async function generateRepertoire(
     await ensureNodeOpeningMetadata(canonicalSourceNode.id, rebuildOpeningMetadataCache, amateur.opening, fetchOpeningMetadata);
     
     // EX.05: moveProb is a share of the position's total, so the games with no move are not handed to the children.
-    // HM.04 / HM.05: every returned move, most popular first; a dropped move has include = false.
+    // HM.04 / HM.05: every returned move, most popular first. Too rare is decided per move (HM.21).
     const whiteCandidates = selectWhiteCandidates(
-      node.currentMoveNumber,
       amateur.moves || [],
       amateur.positionTotalGames || 0
     );
@@ -578,8 +577,7 @@ export async function generateRepertoire(
       sourceCumProb: canonicalSourceNode.cumProb,
       candidates: whiteCandidates.map(candidate => ({
         san: candidate.san,
-        probability: candidate.probability,
-        dropped: !candidate.include
+        probability: candidate.probability
       }))
     });
     const expectedOpponentSource: ExpectedOpponentSource = {
@@ -596,7 +594,8 @@ export async function generateRepertoire(
       repertoireId: repertoire.id,
       expectedSource: expectedOpponentSource,
       expectedStoredEdges: expectedStoredOpponentEdges,
-      recomputedCandidates: canonicalOpponentCandidates
+      recomputedCandidates: canonicalOpponentCandidates,
+      minCumProb: runtime.config.minCumProb
     });
     removeDeletedCanonicalQueueWork({
       queue,
@@ -629,7 +628,7 @@ export async function generateRepertoire(
       });
     }
 
-    const passedWhiteMoveCount = whiteCandidates.filter(candidate => candidate.include).length;
+    const passedWhiteMoveCount = opponentReconciliation.branches.filter(branch => branch.ending !== "Too rare").length;
     if (passedWhiteMoveCount === 0) {
         const tempChess = new Chess(node.fen);
         if (!tempChess.isGameOver() && rawAmateurMoveCount === 0) {
@@ -641,7 +640,7 @@ export async function generateRepertoire(
             });
             totalMissingWhiteMoves++;
         } else if (!tempChess.isGameOver()) {
-            console.warn("[WARNING] All opponent moves were filtered away."); // HM.08
+            console.log("All opponent moves are too rare."); // HM.08
         }
     } else {
         console.log(`Found ${passedWhiteMoveCount} White moves to process.`);
@@ -683,11 +682,8 @@ export async function generateRepertoire(
         await runCascade({ repertoireId: repertoire.id, pointerId: pointer.id, ownerId: owner.id, run: cascadeRun, config: runtime.config });
         continue;
       }
-      console.log(`\nEvaluating White Move: ${whiteMove.san} (Reason: ${whiteMove.reason}, Prob: ${whiteMove.probability ? (whiteMove.probability*100).toFixed(1) : 0}%)`);
-      const resultingProbability = canonicalWhiteMove.routeProb;
-      const resultingBand = getProbabilityBand(resultingProbability, runtime.config);
-      const resultingBudget = runtime.config.depthBudget[resultingBand];
-      console.log(`[BRANCH PROBABILITY] route probability before White move=${(canonicalSourceNode.cumProb * 100).toFixed(3)}%; White move share at this position=${(whiteMove.probability * 100).toFixed(3)}%; resulting route probability=${(resultingProbability * 100).toFixed(3)}%; band=${resultingBand}; dynamic budget=${resultingBudget} full moves; depthCap=${runtime.config.depthCap}; effective depth limit=${Math.min(resultingBudget, runtime.config.depthCap)}.`);
+      console.log(`\nEvaluating White Move: ${whiteMove.san} (Prob: ${whiteMove.probability ? (whiteMove.probability*100).toFixed(1) : 0}%)`);
+      console.log(`[BRANCH PROBABILITY] cumProb before White move=${(canonicalSourceNode.cumProb * 100).toFixed(3)}%; White move share at this position=${(whiteMove.probability * 100).toFixed(3)}%; resulting cumProb=${(reconciledOpponent.effectiveCumProb * 100).toFixed(3)}%; minCumProb=${(runtime.config.minCumProb * 100).toFixed(3)}%; depthCap=${runtime.config.depthCap} full moves.`);
       const newPgn = canonicalWhiteMove.destinationPgn;
       if (reconciledOpponent.destinationNodeId === null) {
         throw new Error("OPPONENT branch is missing its destination");
@@ -805,16 +801,15 @@ export async function generateRepertoire(
       // RE.02 - RE.10: the position after Black's move. RE.05: its cumProb stays as it is.
       const ending = responseEnding({
           fullFen: resultingDestinationFen,
-          cumProb: effectiveCanonicalProb,
           config: runtime.config
       });
       if (ending) {
           await prisma.repertoireMove.update({ where: { id: responseId }, data: { stopReason: ending } });
           // DB.06 rule 4: the node is never dequeued, so it is named here.
           await ensureNodeOpeningMetadata(resultingDestinationId, rebuildOpeningMetadataCache, "NOT_FETCHED", fetchOpeningMetadata);
-          const tag = ending === "Game over on Black's move" ? "[GAME OVER]" : "[DEPTH BUDGET REACHED]";
+          const tag = ending === "Game over on Black's move" ? "[GAME OVER]" : "[DEPTH CAP REACHED]";
           console.log(`${tag} route=${resultingDestinationPgn}; cumProb=${(effectiveCanonicalProb * 100).toFixed(3)}%`);
-          if (ending === "Depth budget reached on Black's move") totalBranchesAborted++;
+          if (ending === "Depth cap reached on Black's move") totalBranchesAborted++;
           continue;
       }
 
@@ -844,7 +839,7 @@ export async function generateRepertoire(
     // --- TEMPORARY DETAILED SUMMARY PER NODE ---
     const runningElapsed = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(`\n--- [CHECKPOINT] Node Finished ---`);
-    console.log(`Time: ${runningElapsed}s | Work Items Examined: ${totalPositionsProcessed} | Positions Expanded: ${totalPositionsExpanded} | Depth-Limited Stops: ${totalBranchesAborted}`);
+    console.log(`Time: ${runningElapsed}s | Work Items Examined: ${totalPositionsProcessed} | Positions Expanded: ${totalPositionsExpanded} | Depth Cap Stops: ${totalBranchesAborted}`);
     console.log(`White Moves Found: ${totalWhiteMovesFound}`);
     console.log(`Transpositions: ${totalTranspositions} | Repetition Stops: ${totalRepetitionStops}`);
     console.log(`Missing White Moves: ${totalMissingWhiteMoves}`);
@@ -861,7 +856,7 @@ export async function generateRepertoire(
   console.log(`Time Elapsed:             ${timeElapsed} seconds`);
   console.log(`Work Items Examined:      ${totalPositionsProcessed}`);
   console.log(`Positions Expanded:       ${totalPositionsExpanded}`);
-  console.log(`Depth-Limited Stops:      ${totalBranchesAborted}`);
+  console.log(`Depth Cap Stops:          ${totalBranchesAborted}`);
   console.log(`White Moves Found:        ${totalWhiteMovesFound}`);
   console.log(`Total Black Responses:    ${totalBlackMovesEvaluated}`);
   console.log(`Transpositions:           ${totalTranspositions}`);

@@ -5,20 +5,16 @@ import {
   type LocalSearchRunner
 } from "./local-engine";
 import { parseFullFen } from "./fen";
-import { defaultConfig, getMoveBand } from "./config";
+import { defaultConfig } from "./config";
 import type { ResponseEvaluationSource, ResponseMoveOrigin, ResponseSelectionMethod } from "../db/operations";
 
-export function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: number, amateurList: any[], totalAmateurGames: number) {
+/** HM.03: a move's share of the position's games, and its Amateur results. */
+export function whiteMoveStats(moveSan: string, amateurList: any[], totalAmateurGames: number) {
     const amateurData = amateurList.find(m => m.san === moveSan) || { games: 0, white: 0, draws: 0, black: 0 };
     const amateurGames = amateurData.games ?? (amateurData.white + amateurData.draws + amateurData.black);
     const probability = totalAmateurGames > 0 ? amateurGames / totalAmateurGames : 0;
-    const band = getMoveBand(currentMoveNumber, defaultConfig);
-    const requiredProbability = defaultConfig.popularityThresholds[band];
-    const include = totalAmateurGames > 0 && probability >= requiredProbability;
 
     return {
-      include,
-      reason: include ? "Amateur popularity" : "",
       probability,
       amateurGames,
       amateurWhiteWins: amateurData.white,
@@ -27,13 +23,13 @@ export function shouldIncludeWhiteMove(moveSan: string, currentMoveNumber: numbe
     };
 }
 
-// HM.04: every returned move is kept in the list; `include` false marks a dropped move.
+// HM.04: every returned move is kept, however rare; too rare is decided per move, after transposition (HM.21).
 // HM.05: most popular first, ties alphabetically by SAN.
-export function selectWhiteCandidates(currentMoveNumber: number, amateurList: any[], totalAmateurGames: number) {
+export function selectWhiteCandidates(amateurList: any[], totalAmateurGames: number) {
   return amateurList
     .map(move => ({
       san: move.san,
-      ...shouldIncludeWhiteMove(move.san, currentMoveNumber, amateurList, totalAmateurGames)
+      ...whiteMoveStats(move.san, amateurList, totalAmateurGames)
     }))
     .sort((a, b) => b.probability - a.probability || a.san.localeCompare(b.san));
 }

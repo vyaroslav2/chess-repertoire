@@ -1,8 +1,5 @@
 import { createHash } from "crypto";
 
-export type MoveBand = "early" | "middle" | "late";
-export type ProbabilityBand = "deep" | "medium" | "shallow";
-
 // Names and values follow new-docs/generation-config.md.
 export interface Config {
   lockfileName: string;
@@ -10,18 +7,8 @@ export interface Config {
   probabilityTolerance: number;
   tinyThreshold: number;
   nodeTouchCountCap: number;
-  // Last full move of each band, inclusive. Later moves use the late band.
-  moveNumberBands: {
-    early: number;
-    middle: number;
-  };
-  popularityThresholds: Record<MoveBand, number>;
-  // Lowest cumProb of each band, inclusive. Anything lower is shallow.
-  probabilityBands: {
-    deep: number;
-    medium: number;
-  };
-  depthBudget: Record<ProbabilityBand, number>;
+  // HM.21: a White move whose node's cumProb is below this is too rare.
+  minCumProb: number;
   depthCap: number;
   explorerSpeeds: string[];
   explorerRatings: number[];
@@ -49,25 +36,8 @@ export const defaultConfig: Config = {
   probabilityTolerance: 0.000001,
   tinyThreshold: 0.0000001,
   nodeTouchCountCap: 500,
-  moveNumberBands: {
-    early: 4,
-    middle: 8,
-  },
-  popularityThresholds: {
-    early: 0.05,
-    middle: 0.1,
-    late: 0.15,
-  },
-  probabilityBands: {
-    deep: 0.02,
-    medium: 0.005,
-  },
-  depthBudget: {
-    deep: 15,
-    medium: 8,
-    shallow: 5,
-  },
-  depthCap: 4,
+  minCumProb: 0.001,
+  depthCap: 15,
   explorerSpeeds: ["classical", "rapid"],
   explorerRatings: [1600, 1800, 2000],
   apiRetryDelayMs: 120_000,
@@ -88,9 +58,6 @@ export const defaultConfig: Config = {
     },
   },
 };
-
-const MOVE_BANDS = ["early", "middle", "late"] as const;
-const PROBABILITY_BANDS = ["deep", "medium", "shallow"] as const;
 
 function isFraction(value: unknown): boolean {
   return (
@@ -142,30 +109,7 @@ export function validateConfig(config: Config) {
   if (!isPositiveInteger(config.nodeTouchCountCap))
     throw new Error("Invalid nodeTouchCountCap");
 
-  if (!isPositiveInteger(config.moveNumberBands?.early))
-    throw new Error("Invalid moveNumberBands.early");
-  if (
-    !Number.isInteger(config.moveNumberBands?.middle) ||
-    config.moveNumberBands.middle <= config.moveNumberBands.early
-  )
-    throw new Error("Invalid moveNumberBands.middle");
-
-  for (const key of MOVE_BANDS) {
-    if (!isFraction(config.popularityThresholds?.[key]))
-      throw new Error(`Invalid popularityThresholds.${key}`);
-  }
-
-  if (!isFraction(config.probabilityBands?.deep))
-    throw new Error("Invalid probabilityBands.deep");
-  if (
-    !isFraction(config.probabilityBands?.medium) ||
-    config.probabilityBands.medium >= config.probabilityBands.deep
-  )
-    throw new Error("Invalid probabilityBands.medium");
-  for (const key of PROBABILITY_BANDS) {
-    if (!isPositiveInteger(config.depthBudget?.[key]))
-      throw new Error(`Invalid depthBudget.${key}`);
-  }
+  if (!isFraction(config.minCumProb)) throw new Error("Invalid minCumProb");
   if (!isPositiveInteger(config.depthCap)) throw new Error("Invalid depthCap");
 
   if (!isNonEmptyStringList(config.explorerSpeeds))
@@ -296,19 +240,4 @@ export function createRuntimeConfig(configSource: Config) {
     config: frozenConfig,
     configHash,
   };
-}
-
-export function getMoveBand(moveNumber: number, config: Config): MoveBand {
-  if (moveNumber <= config.moveNumberBands.early) return "early";
-  if (moveNumber <= config.moveNumberBands.middle) return "middle";
-  return "late";
-}
-
-export function getProbabilityBand(
-  cumProb: number,
-  config: Config,
-): ProbabilityBand {
-  if (cumProb >= config.probabilityBands.deep) return "deep";
-  if (cumProb >= config.probabilityBands.medium) return "medium";
-  return "shallow";
 }

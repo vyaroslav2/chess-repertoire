@@ -108,8 +108,8 @@ describe("S3 main queue loop", () => {
       wait: async () => undefined
     };
     const empty = { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0, opening: null };
-    // 1.e4 (98 games) is kept, 1.a4 (2 games) is too rare; after 1.e4 e5 Explorer has no games.
-    const whiteMoves: Record<string, Array<[string, number]>> = { [play([])]: [["e4", 98], ["a4", 2]] };
+    // 1.e4 (9,995 games) is kept, 1.a4 (5 games, 0.05%) is too rare; after 1.e4 e5 Explorer has no games.
+    const whiteMoves: Record<string, Array<[string, number]>> = { [play([])]: [["e4", 9_995], ["a4", 5]] };
     const fetchDatabases = (async (fen: string) => {
       const moves = whiteMoves[boardAndTurn(fen)];
       if (!moves) return empty;
@@ -118,7 +118,7 @@ describe("S3 main queue loop", () => {
           const played = new Chess(fen).move(san);
           return { san, uci: played.lan, games, white: games, draws: 0, black: 0 };
         }),
-        totalGames: 100, positionTotalGames: 100, unaccountedShare: 0, opening: null
+        totalGames: 10_000, positionTotalGames: 10_000, unaccountedShare: 0, opening: null
       };
     }) as any;
 

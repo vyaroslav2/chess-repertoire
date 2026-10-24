@@ -6,8 +6,6 @@ import {
     computeConfigHash,
     computeLocalEngineEvaluationProfile,
     createRuntimeConfig,
-    getMoveBand,
-    getProbabilityBand,
     computeExplorerCacheProfile
 } from './config';
 
@@ -21,11 +19,8 @@ test('generation-config: every setting has the value in the note', () => {
     assert.strictEqual(defaultConfig.probabilityTolerance, 0.000001);
     assert.strictEqual(defaultConfig.tinyThreshold, 0.0000001);
     assert.strictEqual(defaultConfig.nodeTouchCountCap, 500);
-    assert.deepStrictEqual(defaultConfig.moveNumberBands, { early: 4, middle: 8 });
-    assert.deepStrictEqual(defaultConfig.popularityThresholds, { early: 0.05, middle: 0.10, late: 0.15 });
-    assert.deepStrictEqual(defaultConfig.probabilityBands, { deep: 0.02, medium: 0.005 });
-    assert.deepStrictEqual(defaultConfig.depthBudget, { deep: 15, medium: 8, shallow: 5 });
-    assert.strictEqual(defaultConfig.depthCap, 2);
+    assert.strictEqual(defaultConfig.minCumProb, 0.001);
+    assert.strictEqual(defaultConfig.depthCap, 15);
     assert.deepStrictEqual(defaultConfig.explorerSpeeds, ['classical', 'rapid']);
     assert.deepStrictEqual(defaultConfig.explorerRatings, [1600, 1800, 2000]);
     assert.strictEqual(defaultConfig.apiRetryDelayMs, 120_000);
@@ -37,15 +32,6 @@ test('generation-config: every setting has the value in the note', () => {
     assert.strictEqual(defaultConfig.localStockfishHashMb, 1024);
     assert.strictEqual(defaultConfig.localStockfishMultiPv, 1);
     assert.deepStrictEqual(defaultConfig.hardcodedBlackResponses, ['1. e4 c6', '1. d4 d5']);
-});
-
-test('generation-config probabilityBands: deep >= 2%, medium >= 0.5%, shallow below', () => {
-    assert.strictEqual(getProbabilityBand(1, defaultConfig), 'deep');
-    assert.strictEqual(getProbabilityBand(0.02, defaultConfig), 'deep');
-    assert.strictEqual(getProbabilityBand(0.0199, defaultConfig), 'medium');
-    assert.strictEqual(getProbabilityBand(0.005, defaultConfig), 'medium');
-    assert.strictEqual(getProbabilityBand(0.0049, defaultConfig), 'shallow');
-    assert.strictEqual(getProbabilityBand(0, defaultConfig), 'shallow');
 });
 
 const AMATEUR_PROFILE = '315b7b6ed7ee94ad8b15ea57cfa4324700f8c14a4c489d1d0357e14f0faa2ead';
@@ -84,18 +70,18 @@ test('23. Local Deep profile tracks material search settings only', () => {
 });
 
 test('2. required value missing -> hard error', () => {
-    const invalidConfig = { ...defaultConfig, moveNumberBands: undefined as unknown as { early: number; middle: number } };
-    assert.throws(() => validateConfig(invalidConfig), /Invalid moveNumberBands/);
+    const invalidConfig = { ...defaultConfig, minCumProb: undefined as unknown as number };
+    assert.throws(() => validateConfig(invalidConfig), /Invalid minCumProb/);
 });
 
 test('3. invalid probabilities rejected', () => {
     const cfg1 = JSON.parse(JSON.stringify(defaultConfig));
-    cfg1.popularityThresholds.early = 1.5;
-    assert.throws(() => validateConfig(cfg1), /Invalid popularityThresholds.early/);
+    cfg1.minCumProb = 1.5;
+    assert.throws(() => validateConfig(cfg1), /Invalid minCumProb/);
 
     const cfg2 = JSON.parse(JSON.stringify(defaultConfig));
-    cfg2.popularityThresholds.middle = -0.1;
-    assert.throws(() => validateConfig(cfg2), /Invalid popularityThresholds.middle/);
+    cfg2.minCumProb = -0.1;
+    assert.throws(() => validateConfig(cfg2), /Invalid minCumProb/);
 });
 
 test('4. invalid counts rejected', () => {
@@ -135,8 +121,8 @@ test('6. invalid engine nodes/threads/hash/MultiPV rejected', () => {
 
 test('6a. finite numbers validated', () => {
     const cfg1 = JSON.parse(JSON.stringify(defaultConfig));
-    cfg1.popularityThresholds.early = NaN;
-    assert.throws(() => validateConfig(cfg1), /Invalid popularityThresholds.early/);
+    cfg1.minCumProb = NaN;
+    assert.throws(() => validateConfig(cfg1), /Invalid minCumProb/);
 
     assert.throws(() => validateConfig({ ...defaultConfig, apiRequestGapMs: Infinity }), /Invalid apiRequestGapMs/);
 });
@@ -152,30 +138,14 @@ test('6c. AR: retry settings not in generation-config are gone', () => {
     assert.deepStrictEqual(Object.keys(defaultConfig.api.wikibooks).sort(), ['maxLagSeconds', 'userAgent']);
 });
 
-test('7. shared move bands: 1/4 early, 5/8 middle, 9+ late', () => {
-    assert.strictEqual(getMoveBand(1, defaultConfig), 'early');
-    assert.strictEqual(getMoveBand(4, defaultConfig), 'early');
-    assert.strictEqual(getMoveBand(5, defaultConfig), 'middle');
-    assert.strictEqual(getMoveBand(8, defaultConfig), 'middle');
-    assert.strictEqual(getMoveBand(9, defaultConfig), 'late');
-    assert.strictEqual(getMoveBand(20, defaultConfig), 'late');
-});
-
-test('8. White popularity lookup -> .05/.10/.15', () => {
-    assert.strictEqual(defaultConfig.popularityThresholds[getMoveBand(4, defaultConfig)], 0.05);
-    assert.strictEqual(defaultConfig.popularityThresholds[getMoveBand(5, defaultConfig)], 0.10);
-    assert.strictEqual(defaultConfig.popularityThresholds[getMoveBand(9, defaultConfig)], 0.15);
-});
-
 test('11. semantically identical objects with different property order -> same configHash', () => {
     const cfgA = JSON.parse(JSON.stringify(defaultConfig));
     const cfgB = JSON.parse(JSON.stringify(defaultConfig));
 
     // Scramble order of keys
-    cfgB.depthBudget = {
-        shallow: cfgB.depthBudget.shallow,
-        medium: cfgB.depthBudget.medium,
-        deep: cfgB.depthBudget.deep
+    cfgB.api.wikibooks = {
+        userAgent: cfgB.api.wikibooks.userAgent,
+        maxLagSeconds: cfgB.api.wikibooks.maxLagSeconds
     };
 
     const hashA = computeConfigHash(cfgA);
@@ -202,7 +172,7 @@ test('13. runtime config is deeply immutable', () => {
     }, TypeError);
 
     assert.throws(() => {
-        (config as unknown as { moveNumberBands: { early: number } }).moveNumberBands.early = 5;
+        (config as unknown as { api: { wikibooks: { maxLagSeconds: number } } }).api.wikibooks.maxLagSeconds = 6;
     }, TypeError);
 });
 
@@ -214,7 +184,7 @@ test('14. mutating a source object after snapshot creation cannot alter snapshot
     source.depthCap = 100;
 
     // Snapshot should remain unchanged
-    assert.strictEqual(config.depthCap, 2);
+    assert.strictEqual(config.depthCap, 15);
 
     // Hash should remain unchanged
     assert.strictEqual(computeConfigHash(config), configHash);

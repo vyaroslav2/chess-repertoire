@@ -514,7 +514,7 @@ export const WHITE_MOVE_ENDINGS = ["Too rare", "Game over", "Repetition"] as con
 export type WhiteMoveEnding = typeof WHITE_MOVE_ENDINGS[number];
 
 /** RE.03, RE.07: the Black moves that end the route at the node they reach. */
-export const RESPONSE_ENDINGS = ["Game over on Black's move", "Depth budget reached on Black's move"] as const;
+export const RESPONSE_ENDINGS = ["Game over on Black's move", "Depth cap reached on Black's move"] as const;
 export type ResponseEnding = typeof RESPONSE_ENDINGS[number];
 
 /** A node whose White move ended the route is only an ending, never a route owner or ancestor. */

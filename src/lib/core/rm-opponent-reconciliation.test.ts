@@ -8,6 +8,7 @@ import {
   prisma
 } from "../db/operations";
 import { parseFullFen, positionKeyFromFen } from "./fen";
+import { defaultConfig } from "./config";
 import {
   canonicalizeOpponentCandidates,
   readExpectedOpponentEdges,
@@ -108,7 +109,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
       repertoireId,
       expectedSource: expectedSource(source),
       expectedStoredEdges: await readExpectedOpponentEdges(source.id),
-      recomputedCandidates: current
+      recomputedCandidates: current, minCumProb: defaultConfig.minCumProb
     });
   }
 
@@ -298,7 +299,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
       repertoireId,
       expectedSource: expectedSource(source),
       expectedStoredEdges: expected,
-      recomputedCandidates: []
+      recomputedCandidates: [], minCumProb: defaultConfig.minCumProb
     }), /Invalid OPPONENT stored moveProb/);
     assert.ok(await prisma.repertoireMove.findUnique({ where: { id: e4.edge.id } }));
     assert.ok(await prisma.repertoireNode.findUnique({ where: { id: e4.destination.id } }));
@@ -313,7 +314,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
 
     await prisma.repertoireMove.update({ where: { id: d4.edge.id }, data: { uci: "c2c4" } });
     await assert.rejects(reconcileOpponentBranches({
-      repertoireId, expectedSource: expectedSource(source), expectedStoredEdges: expected, recomputedCandidates: current
+      repertoireId, expectedSource: expectedSource(source), expectedStoredEdges: expected, recomputedCandidates: current, minCumProb: defaultConfig.minCumProb
     }), /edge .* changed/);
     assert.equal((await prisma.repertoireMove.findUniqueOrThrow({ where: { id: e4.edge.id } })).moveProb, 0.4);
     assert.ok(await prisma.repertoireNode.findUnique({ where: { id: d4.destination.id } }));
@@ -321,7 +322,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     await prisma.repertoireMove.update({ where: { id: d4.edge.id }, data: { uci: "d2d4" } });
     await prisma.repertoireMove.delete({ where: { id: d4.edge.id } });
     await assert.rejects(reconcileOpponentBranches({
-      repertoireId, expectedSource: expectedSource(source), expectedStoredEdges: expected, recomputedCandidates: current
+      repertoireId, expectedSource: expectedSource(source), expectedStoredEdges: expected, recomputedCandidates: current, minCumProb: defaultConfig.minCumProb
     }), /edge count changed/);
     assert.equal((await prisma.repertoireMove.findUniqueOrThrow({ where: { id: e4.edge.id } })).moveProb, 0.4);
   });
@@ -336,7 +337,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
 
     await prisma.repertoireMove.update({ where: { id: e4.edge.id }, data: { toNodeId: d4Node.id } });
     await assert.rejects(reconcileOpponentBranches({
-      repertoireId, expectedSource: expectedSource(source), expectedStoredEdges: expected, recomputedCandidates: current
+      repertoireId, expectedSource: expectedSource(source), expectedStoredEdges: expected, recomputedCandidates: current, minCumProb: defaultConfig.minCumProb
     }), /edge .* changed/);
     await prisma.repertoireMove.update({ where: { id: e4.edge.id }, data: { toNodeId: e4.destination.id } });
 
@@ -344,7 +345,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
       repertoireId, fromNodeId: source.id, toNodeId: d4Node.id, uci: "d2d4", san: "d4", moveProb: 0.3
     });
     await assert.rejects(reconcileOpponentBranches({
-      repertoireId, expectedSource: expectedSource(source), expectedStoredEdges: expected, recomputedCandidates: current
+      repertoireId, expectedSource: expectedSource(source), expectedStoredEdges: expected, recomputedCandidates: current, minCumProb: defaultConfig.minCumProb
     }), /edge count changed/);
     await prisma.repertoireMove.delete({ where: { id: extra.id } });
 
@@ -354,7 +355,7 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
     const changedKey = positionKeyFromFen(changedFen);
     await prisma.repertoireNode.update({ where: { id: source.id }, data: { fullFen: changedFen, positionKey: changedKey } });
     await assert.rejects(reconcileOpponentBranches({
-      repertoireId, expectedSource: expectedSource(source), expectedStoredEdges: expected, recomputedCandidates: current
+      repertoireId, expectedSource: expectedSource(source), expectedStoredEdges: expected, recomputedCandidates: current, minCumProb: defaultConfig.minCumProb
     }), /canonical state changed/);
     assert.equal((await prisma.repertoireMove.findUniqueOrThrow({ where: { id: e4.edge.id } })).moveProb, 0.4);
   });
@@ -370,7 +371,8 @@ describe("Slice 17 OPPONENT set reconciliation", () => {
       repertoireId,
       expectedSource: expectedSource(source),
       expectedStoredEdges: expected,
-      recomputedCandidates: candidates(expectedSource(source), [{ san: "e4", probability: 0.6 }])
+      recomputedCandidates: candidates(expectedSource(source), [{ san: "e4", probability: 0.6 }]),
+      minCumProb: defaultConfig.minCumProb
     }), /edge .* changed/);
     assert.equal((await prisma.repertoireMove.findUniqueOrThrow({ where: { id: e4.edge.id } })).moveProb, 0.4);
     assert.ok(await prisma.repertoireNode.findUnique({ where: { id: d4.destination.id } }));
