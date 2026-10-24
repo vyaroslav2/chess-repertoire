@@ -1,6 +1,6 @@
 ---
 tags:
-  - "#processed"
+  - reviewed
 ---
 # HM — Human Moves
 
@@ -14,10 +14,10 @@ HM.02 Query the Explorer dataset (local cache or Lichess API) for all legal cand
 
 HM.03 Calculate move probabilities ([[move-probability|moveProb]]) for each move.
 
-HM.04 Filter returned moves by popularity:
-* A move that meets the `popularityThresholds`[^1] percentage for its move-number band goes on to the next check.
-* Drop the rest — each dropped move still gets a node, whose `cumProb` is held at 0 and whose arriving probability accumulates in `rareDropped` instead ([[HM.excalidraw|HM.23]]).
-* Log how many moves were dropped at this position: `rareDroppedMoves`, counted from the nodes with `stopReason = Too rare`.
+HM.04 Every returned move is kept, however rare. No move is filtered at this point. A move is too rare when its node's `cumProb` (parent.cumProb × moveProb) is below `minCumProb`[^1]. That check runs per move, after the transposition check ([[HM.excalidraw|HM.21]]):
+* A move at or above `minCumProb` goes on to the next check.
+* A move below it is dropped. It still gets a node, whose `cumProb` is held at 0 and whose arriving probability accumulates in `rareDropped` instead ([[HM.excalidraw|HM.23]]).
+* Once every move at this position is checked, log how many were dropped: `rareDroppedMoves`, counted from the nodes with `stopReason = Too rare`.
 
 HM.05 Assign an explicit `siblingIndex` (1, 2, 3...) to every returned move's node, dropped moves included, based on descending popularity, ensuring UI decks can sort cards reliably regardless of queue traversal order. UI cards are ordered from most popular White moves to least popular. Ties are resolved alphabetically by SAN. 
 
@@ -28,12 +28,12 @@ HM.06 For each returned move, generate a new child node:
 * Compute its route probability: `routeProb = parent.routeProb * moveProb`.
 * Only a move that passes every check in HM.07 is expanded and reaches [[EW]].
 
-HM.07 Each returned move is then checked one at a time. The order is fixed and all of it is in [[HM.excalidraw|HM]]: record the move and create the node (HM.25), too rare (HM.21), game over (HM.26), repetition (HM.30), transposition (HM.34), then expansion (HM.36). Only a move that passes all four checks is expanded: it goes to [[EW]] for Black's reply.
+HM.07 Each returned move is then checked one at a time. The order is fixed and all of it is in [[HM.excalidraw|HM]]: record the move and create the node (HM.25), game over (HM.26), repetition (HM.30), transposition (HM.34), too rare (HM.21), then expansion (HM.36). Transposition comes before too rare: a rare move that reaches a position the tree already owns still passes its probability on to the owner. Only a move that passes all four checks is expanded: it goes to [[EW]] for Black's reply.
 
-HM.08 If Explorer returned moves but all of them were filtered away `-->` end the route, log the stop reason `"[WARNING] All opponent moves were filtered away."`, and go to [[S3|S3.01]].
+HM.08 If Explorer returned moves but all of them are too rare `-->` the route ends, log `"All opponent moves are too rare."`, and go to [[S3|S3.01]]. This is how most lines end, so it is not a warning.
 
 HM.09 **An expanded move gets an eval** ([[DB|DB.11]]): the eval of [[EW|EW.09]]'s search of the position it reaches — Stockfish's baseline, even when a hardcoded reply is played. No second search. A move stopped by any check in HM.07 gets no eval.
 
-[^1]: see [[generation-config]] and [[popularity-thresholds|popularityThresholds]]
+[^1]: see [[generation-config]] and [[min-cum-prob|minCumProb]]
 
 

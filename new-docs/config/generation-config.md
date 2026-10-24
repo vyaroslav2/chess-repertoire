@@ -11,11 +11,8 @@ tags:
 | `probabilityTolerance`        | 0.0001% (0.000001 as a fraction)                                  | [[probability-tolerance]]                                     |
 | `tinyThreshold`               | 0.00001% (0.0000001 as a fraction)                                | [[tiny-threshold]]                                            |
 | `nodeTouchCountCap`[^2]       | 500                                                               | [[node-touch-count-cap]]                                      |
-| `moveNumberBands`             | `early` through 4; `middle` through 8; later moves use the `late` |                                                               |
-| `popularityThresholds`        | early=5.00%, middle=10.00%, late=15.00%                           |                                                               |
-| `probabilityBands`[^3]        | deep >= 2.00%; medium >= 0.50% and < 2.00%; shallow < 0.50%       |                                                               |
-| `depthBudget`                 | deep=15, medium=8, shallow=5                                      | full moves counted from the root                              |
-| `depthCap`                    | 3                                                                 | full moves counted from the root; caps every depthBudget band |
+| `minCumProb`[^3]              | 0.1% (0.001 as a fraction)                                        | [[min-cum-prob]]                                              |
+| `depthCap`                    | 15                                                                | full moves counted from the root; a ceiling for every route   |
 | `explorerSpeeds`              | classical, rapid                                                  | related to amateur cache profile                              |
 | `explorerRatings`             | 1600, 1800, 2000                                                  | related to amateur cache profile                              |
 | `apiRetryDelayMs`             | 120 000                                                           |                                                               |
@@ -36,7 +33,7 @@ tags:
 	For log file naming see [[file-naming]].
 
 [^2]: The most times one node may be touched in one cascade before the run stops with a hard error. Catches loops that tinyThreshold cannot end. See [[node-touch-count-cap]].
-[^3]: Positions are put into search-budget bands by their `cumProb`. A higher `cumProb` gets a deeper search budget.
+[^3]: A White move whose node's `cumProb` is below this is too rare: Black does not reply, so it is on no card. Every card is at least 1 in 1000. Lower it for more cards. See [[min-cum-prob]].
 
 [^4]: Paste PGNs. Moves for repertoire side are considered hardcoded responses. If a resulting generated tree doesn't contain White moves from this PGNs it should not trigger an error.  
 

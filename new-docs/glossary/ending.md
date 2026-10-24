@@ -9,7 +9,7 @@ aliases:
 **Ending** — a [[node]] with no children at this moment.
 
 That includes:
-* nodes whose route has stopped: game over, repetition, depth budget reached, no games in Explorer;
+* nodes whose route has stopped: game over, repetition, depth cap reached, no games in Explorer;
 * nodes still on the [[S3]] queue, not yet expanded;
 * pointer nodes (transposesTo set); their cumProb is 0;
 * dropped (too rare) nodes; their cumProb is 0, and what reaches them is in rareDropped.

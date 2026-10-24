@@ -1,6 +1,6 @@
 ---
 tags:
-  - processed
+  - reviewed
 ---
 # DB — What We Store
 
@@ -28,7 +28,7 @@ DB.03 **Identity.**
 DB.04 **Probability.** Every node carries both.
 * `routeProb` — what arrives down this one route ([[route-probability]]).
 * `cumProb`[^3] — what arrives by every route. At the start of a run the two are equal; a cascade raises `cumProb` only ([[TR.excalidraw|TR]]).
-* `rareDropped` — for a node whose move was filtered out, the probability that arrives and stops here. `cumProb` is held at 0 for such a node ([[HM|HM.04]], [[HM.excalidraw|HM.23]]).
+* `rareDropped` — for a node whose move was too rare, the probability that arrives and stops here. `cumProb` is held at 0 for such a node ([[HM|HM.04]], [[HM.excalidraw|HM.23]]).
 * `unaccountedDropped` — the share of probability lost because Lichess Explorer's move counts do not add up to the position's total games (e.g. moves 2 + 2 + 1, total 6: 1/6 is lost). Treated like `rareDropped`, but kept apart so Lichess gaps can be told from our own filtering. Stored on this node, since the missing games have no move and so no child node ([[EX|EX.05]]).
 * The root's is 100% ([[root-probability]], [[S2|S2.06]]).
 
@@ -86,8 +86,8 @@ DB.15 **`cp` is always from White's point of view.**[^5] A negative `cp` is good
 
 DB.20 **A move that ends a route carries a `stopReason`.** The root is the only ending without one, since no move reaches it ([[S3|S3.14]]).
 * On a White move: `Too rare`, `Game over`, `Repetition` ([[HM.excalidraw|HM]]); `Transposition` ([[TR.excalidraw|TR]]).
-* On a Black move: `Game over on Black's move`, `Depth budget reached on Black's move` ([[RE.excalidraw|RE]]); `No opponent moves found` ([[EX|EX.06]]).
-* A route reopened by a sweep loses its `stopReason` ([[DRS|DRS.04]]). It gets a new one when it stops again. 
+* On a Black move: `Game over on Black's move`, `Depth cap reached on Black's move` ([[RE.excalidraw|RE]]); `No opponent moves found` ([[EX|EX.06]]).
+* A too-rare move reopened by a sweep loses its `stopReason` ([[DRS|DRS.04]]). The route gets a new one when it stops again. 
 
 ## The caches
 

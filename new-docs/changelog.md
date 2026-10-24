@@ -28,3 +28,6 @@ tags:
 - Trainer: wrong and revealed moves mark their move number red or amber; X clears the latest mark, for a misclick ([[GR|GR.07]], [[UI|UI.36]]).
 
 
+## 2026-10-24
+
+- Specs: a line now stops when its cumProb falls below `minCumProb` (0.1%), at any depth. Removed `popularityThresholds`, `moveNumberBands`, `probabilityBands` and `depthBudget`; `depthCap` (15) stays as a ceiling ([[HM]], [[DRS]], [[generation-config]]).

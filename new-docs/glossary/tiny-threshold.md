@@ -16,7 +16,7 @@ The gain is not lost. It is counted in `tinyDroppedTotal`, which is part of the 
 
 Why it exists:
 * **Loops.** A cascade can go round a loop of transpositions. Each time round, the gain is multiplied by move probabilities, so it shrinks. Without a floor, it would shrink for ever and never stop. `tinyThreshold` ends it.
-* **Wasted work.** A gain this small changes no card and no depth band, so there is no point spreading it down a subtree.
+* **Wasted work.** A gain this small changes no card, so there is no point spreading it down a subtree.
 
 If a loop does not shrink, [[node-touch-count-cap|nodeTouchCountCap]] stops it ([[TR.excalidraw|TR.36]]).
 

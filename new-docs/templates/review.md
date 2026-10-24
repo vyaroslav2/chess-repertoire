@@ -19,11 +19,11 @@ You are helping me review a set of design notes in `new-docs/` (Obsidian vault).
 - Follow the rules in `conventions/file-naming.md` and `conventions/tag-vocabulary.md`.
 
 # Out of scope (left unspecified on purpose)
-1. SRS logic.
-2. TGL: what the run log shows. Postponed. Reuse the existing log code for now.
-3. Reconciliation: abandoned. Wipe and rebuild is the only strategy.
-4. Cache expiry: none. A cache row plus its cache profile is permanent truth until the profile's settings change (e.g. speeds or ratings in generation-config).
-5. Reopening a route when a transposition raises its depth budget. Example: a position stops at depth 5 while in the `shallow` band. Later, a cascade raises its `cumProb` into the `deep` band, which allows depth 15. Should it be reopened, and how does that interact with `visitedNodes`? 
+
+1. TGL: what the run log shows. Postponed. Reuse the existing log code for now.
+2. Reconciliation: abandoned. Wipe and rebuild is the only strategy.
+3. Cache expiry: none. A cache row plus its cache profile is permanent truth until the profile's settings change (e.g. speeds or ratings in generation-config).
+
 
 # Settled design (do not question these)
 - Local Stockfish deep verification runs after every Black response.
