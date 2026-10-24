@@ -646,7 +646,7 @@ html.coords-large .cg-wrap coords coord {
   100% { opacity: 0; }
 }
 
-/* An eval's depth on hover: centred over the eval, 4px above it, at once. */
+/* UI.38: an eval's depth on hover: centred over the eval, 4px above it, at once. */
 .eval-tooltip {
   transform: translate(-50%, calc(-100% - 4px));
 }

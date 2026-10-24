@@ -1,6 +1,6 @@
 "use client";
 
-// Temporary: try the depth tooltip on the move list's evals, without the database.
+// Temporary: try the depth tooltip (UI.38) on the move list's evals, without the database.
 // Delete this page before deploying (UI.29).
 import { useState } from "react";
 import LichessMoveList, { type MoveEval } from "../../components/LichessMoveList";

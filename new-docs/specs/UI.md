@@ -109,13 +109,27 @@ Each wrong move gets its own row under the move it was meant to be, in the mover
 
 **Was:** on `/capture` only, earlier on 2026-10-23. Other pages kept `X` at one press per mark, since a press removing a row you can't see would seem to do nothing.
 
+UI.38 **Depth tooltip.**
+With the pointer on a move's eval (UI.26), a tooltip shows the depth of the search behind it ([[DB|DB.11]], [[DB|DB.32]]): "Depth 42". On the eval's text only, not the empty space in its cell.
+- On hover, not in the list: depth is nice to know now and then, not needed on every move. Inline (`+0.15 · d35`) would almost double each eval's width.
+- A forced mate the engine found (`#-2`) has a depth. A checkmate or stalemate already on the board has no search, so no depth and no tooltip. Every other eval has one once the evals are re-run; evals stored before [[DB|DB.32]] have none, so no tooltip.
+- When: at once, as soon as the pointer is on the eval, even while it moves. It goes when the pointer leaves, and when the list scrolls (the eval moves away from it). No delay; add one (about 150ms) if sweeping across the list flickers.
+- Where: centred on the eval, its bottom edge 4px (5) above the eval's top. Above, so it covers the row above, never the row below. Fixed to the window, so the list's edge doesn't clip it: over the first row it shows above the list.
+- Look: the same as [[MS|MS.02]]. Inter, 14px (17.5), line height 20px, `#dad6d0` (`--menu-text`) on `#262421` (`--lichess-panel-bg`), 10.70 : 1. 1px border `#363431` (`--lichess-border`), 1px corners (`--settings-menu-radius`). Padding 4px 8px. One line.
+- The border: the fill is the panel's own colour, so without it the tooltip's edge would vanish into the move grid. Obsidian has no border, but its tooltip fill is lighter than the page. Either works; this one matches the app's other messages.
+- Not the browser's tooltip (`title`), tried first on `/depth`, 2026-10-25. It shows only after the pointer rests still for about half a second, often not again until the pointer leaves and comes back, and in the browser's own font, colours, border and corners, none of which can be styled.
+- Not on the eval gauge (UI.31): it has no number to point at.
+- Source: `evalAt` in `components/LichessMoveList.tsx`; `.eval-tooltip` in `app/globals.css`, sharing its look with `.settings-notice` and `.undo-notice`.
+- On `/depth` only, with mock evals (UI.29). The trainer doesn't pass depths to the move list yet.
+
 ## Layout
 
 UI.27 **Centring.** The board is centred across and down; only the board counts. The gap above it is half the free height, rounded to the nearest 0.8px (1 screen px), so the board stays on whole screen pixels and is at most 0.4px off centre. In a 779px-high window: 44px above, 43.8px below.
 
 UI.28 **Opening name position.** The opening name sits 4px above the board, as wide as the board and lined up with its left edge.
 
-UI.29 **Test pages.** Temporary: `/fonts`, `/coords`, `/moves`, `/grid`, `/gauge`, `/settings` and `/status`. Delete them before deploying.
+UI.29 **Test pages.** Temporary: `/fonts`, `/coords`, `/moves`, `/grid`, `/gauge`, `/depth`, `/settings` and `/status`. Delete them before deploying.
+- `/depth` shows the real move list with mock evals and depths (UI.38): the Blackburne Shilling trap, which ends in a checkmate on the board, so one eval has no tooltip.
 - `/status` shows Anki's counts (UI.22, [[AK|AK.12]]) left of a real board, always visible. Sliders set the size, the labels' weight and the numbers' weight (Anki's overview: 700), line height, column gap, the gap to the board and the offset from its top; letter spacing follows the size, by UI.20's formula. Colours: the app's muted grey, or Anki's own for New, Learning and To Review (blue, red, green; night or day). Zeros can be faint, as in Anki's deck list (its overview never fades them). The counts can be typed, or set to 9999 each, 54 · 5 · 0, or 0 · 0 · 0. Above the board, the opening name (UI.20, UI.28), with sliders for its size, weight and gap to the board, and for its grey: the lightness of `#979490`'s warm grey. Its colour can also be picked or typed as hex, with its contrast shown. Weights step by 25; letter spacing and line height follow the size. Three real names to try, from the repertoire's longest (90 characters) to "A40 Queen's Pawn Game". Lines at the bottom sum up the choice, for UI.20 and UI.22.
 - `/settings` shows the settings button (SM.01) at up to 12× and the menu (SM.06) at up to 6×, each with its hover box forced on. Sliders set the rounding of the button, the menu panel and the items' hover box, each on its own. The real button, in its corner, opens the menu.
 - `/gauge` shows the eval gauge (UI.31) at chosen evals, without the database: one gauge you set by typing (`-0.25`, `#-3`) or with buttons, which slides as in the trainer, and every preset side by side, from `#-1` to `#1`, each with White's share.

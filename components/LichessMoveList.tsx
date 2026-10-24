@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useCallback, useState } from 'react';
 
-// depth: the search behind the eval (DB.11); none for a move that ends the game.
+// depth: the search behind the eval (DB.11), shown on hover (UI.38); none for a move that ends the game.
 export type MoveEval = { cp: number | null; mate: number | null; depth?: number | null };
 
 interface LichessMoveListProps {
@@ -75,8 +75,8 @@ export default function LichessMoveList({ moves, evals, marks = {}, mistakes = {
     return mark ? `mark-${mark}` : '';
   };
 
-  // The depth only on hover: nice to know, not needed every time. Our own tooltip, not
-  // `title`: the browser's shows late, only on a still pointer, and can't be styled.
+  // UI.38: the depth only on hover: nice to know, not needed every time. Our own tooltip,
+  // not `title`: the browser's shows late, only on a still pointer, and can't be styled.
   // Fixed to the window, so the list's scrolling doesn't clip it above the first row.
   const [hovered, setHovered] = useState<{ ply: number; x: number; y: number } | null>(null);
   const hoveredDepth = hovered ? evals?.[hovered.ply]?.depth : null;
