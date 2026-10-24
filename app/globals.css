@@ -646,9 +646,15 @@ html.coords-large .cg-wrap coords coord {
   100% { opacity: 0; }
 }
 
-/* The two share one look (MS.02). */
+/* An eval's depth on hover: centred over the eval, 4px above it, at once. */
+.eval-tooltip {
+  transform: translate(-50%, calc(-100% - 4px));
+}
+
+/* The three share one look (MS.02). */
 .settings-notice,
-.undo-notice {
+.undo-notice,
+.eval-tooltip {
   position: fixed;
   z-index: 200;
   padding: 4px 8px;

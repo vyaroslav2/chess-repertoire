@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useState } from 'react';
 
-export type MoveEval = { cp: number | null; mate: number | null };
+// depth: the search behind the eval (DB.11); none for a move that ends the game.
+export type MoveEval = { cp: number | null; mate: number | null; depth?: number | null };
 
 interface LichessMoveListProps {
   moves: string[]; // e.g. ['d4', 'd5', 'c4', 'dxc4']
@@ -74,9 +75,27 @@ export default function LichessMoveList({ moves, evals, marks = {}, mistakes = {
     return mark ? `mark-${mark}` : '';
   };
 
+  // The depth only on hover: nice to know, not needed every time. Our own tooltip, not
+  // `title`: the browser's shows late, only on a still pointer, and can't be styled.
+  // Fixed to the window, so the list's scrolling doesn't clip it above the first row.
+  const [hovered, setHovered] = useState<{ ply: number; x: number; y: number } | null>(null);
+  const hoveredDepth = hovered ? evals?.[hovered.ply]?.depth : null;
+
   const evalAt = (index: number) => {
     const moveEval = evals?.[index];
-    return moveEval ? <span className="move-eval">{formatEval(moveEval)}</span> : null;
+    if (!moveEval) return null;
+    return (
+      <span
+        className="move-eval"
+        onMouseEnter={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          setHovered({ ply: index, x: rect.left + rect.width / 2, y: rect.top });
+        }}
+        onMouseLeave={() => setHovered(null)}
+      >
+        {formatEval(moveEval)}
+      </span>
+    );
   };
 
   // A marked move not yet listed (a wrong White move, back at once) still shows its number (GR.07).
@@ -112,9 +131,11 @@ export default function LichessMoveList({ moves, evals, marks = {}, mistakes = {
   }
 
   return (
-    <div 
-      className="lichess-move-list-container" 
+    <>
+    <div
+      className="lichess-move-list-container"
       ref={containerRef}
+      onScroll={() => setHovered(null)} // the eval moves away from its tooltip
     >
       <div className="lichess-move-grid">
         {turns.map((turn) => (
@@ -152,5 +173,9 @@ export default function LichessMoveList({ moves, evals, marks = {}, mistakes = {
         ))}
       </div>
     </div>
+    {hovered && hoveredDepth != null && (
+      <div className="eval-tooltip" style={{ left: hovered.x, top: hovered.y }}>Depth {hoveredDepth}</div>
+    )}
+    </>
   );
 }
