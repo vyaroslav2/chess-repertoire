@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { Chess } from "chess.js";
 import { prisma } from "../db/operations";
 import { defaultConfig } from "./config";
-import { endOfRunFailures, generateRepertoire, NO_OPPONENT_MOVES_ENDING } from "./generator";
+import { probabilityBalance } from "./cascade";
+import { endOfRunFailures, generateRepertoire, NO_OPPONENT_MOVES_ENDING, reopenDroppedMoves } from "./generator";
 
 const START_FEN = new Chess().fen();
 const boardAndTurn = (fen: string) => fen.split(" ").slice(0, 2).join(" ");
@@ -71,6 +72,34 @@ describe("S3 main queue loop", () => {
     }
 
     const failures = () => endOfRunFailures({ repertoireId, tinyDroppedTotal: 0, config: defaultConfig });
+
+    it("DRS.02 DRS.03 DRS.04: the sweep walks children in siblingIndex order and reopens only moves at minCumProb or above", async () => {
+      const root = await node("", 1);
+      const a = await node("a", 0, 0.003);
+      const b = await node("b", 0, 0.002);
+      const c = await node("c", 0, 0.0005);
+      await prisma.repertoireNode.update({ where: { id: a.id }, data: { siblingIndex: 1 } });
+      await prisma.repertoireNode.update({ where: { id: b.id }, data: { siblingIndex: 2 } });
+      await prisma.repertoireNode.update({ where: { id: c.id }, data: { siblingIndex: 3 } });
+      // Created out of order, so the walk cannot lean on insertion order.
+      const moveC = await move(root, c, "c", { stopReason: "Too rare" });
+      const moveB = await move(root, b, "b", { stopReason: "Too rare" });
+      const moveA = await move(root, a, "a", { stopReason: "Too rare" });
+
+      const log = await captureLog(() => reopenDroppedMoves({ repertoireId, minCumProb: defaultConfig.minCumProb }));
+      if (log.error) throw log.error;
+      assert.deepEqual(log.result, [{ moveId: moveA.id, nodeId: a.id }, { moveId: moveB.id, nodeId: b.id }]);
+      assert.deepEqual(log.lines, ["[REOPENED] a: cumProb 0.300%.", "[REOPENED] b: cumProb 0.200%."]);
+      const after = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: a.id } });
+      assert.equal(after.cumProb, 0.003);
+      assert.equal(after.rareDropped, 0);
+      assert.equal((await prisma.repertoireMove.findUniqueOrThrow({ where: { id: moveA.id } })).stopReason, null);
+      // DRS.04: c stays as it is.
+      assert.equal((await prisma.repertoireNode.findUniqueOrThrow({ where: { id: c.id } })).rareDropped, 0.0005);
+      assert.equal((await prisma.repertoireMove.findUniqueOrThrow({ where: { id: moveC.id } })).stopReason, "Too rare");
+      // DRS.09: the balance is unchanged.
+      assert.ok(Math.abs(await probabilityBalance(repertoireId, 0) - 0.0055) < defaultConfig.probabilityTolerance);
+    });
 
     it("S3.11 S3.13 S3.14: a sound tree passes every check", async () => {
       await sound();
@@ -169,6 +198,70 @@ describe("S3 main queue loop", () => {
       assert.ok(log.lines.includes("Rare Dropped Moves Total: 1"));
       const repertoire = await prisma.repertoire.findUniqueOrThrow({ where: { id: repertoireId } });
       assert.equal(repertoire.generationStatus, "FAILED");
+    });
+
+    it("S3.16 DRS.06: a sweep that reopens nothing ends the run", async () => {
+      const log = await captureLog(() => generateRepertoire(START_FEN, {
+        repertoireId, ...common, fetchDatabases, responseEvaluator: evaluator() as any
+      }));
+      if (log.error) throw log.error;
+      // 1.a4 holds 0.05%, still below minCumProb.
+      assert.ok(log.lines.includes("[SWEEP 1] Reopened 0 routes."));
+      assert.ok(log.lines.includes("Sweeps:                   1"));
+      assert.ok(log.lines.includes("Reopened Routes:          0"));
+      assert.equal(log.result!.totalSweeps, 1);
+      assert.equal(log.result!.rareDroppedMovesTotal, 1);
+    });
+
+    it("DRS.04 DRS.05 DRS.06 DRS.09: a too-rare move lifted by a transposition is reopened and expanded", async () => {
+      // 1.e4 e5 2.Nf3 is 90% x 0.01%, too rare. 1.Nf3 e5 2.e4 (10%) transposes into it, and its cascade lifts it.
+      const moves: Record<string, Array<[string, number]>> = {
+        [play([])]: [["e4", 9_000], ["Nf3", 1_000]],
+        [play(["e4", "e5"])]: [["Bc4", 9_999], ["Nf3", 1]],
+        [play(["Nf3", "e5"])]: [["e4", 10_000]]
+      };
+      const transposing = (async (fen: string) => {
+        const rows = moves[boardAndTurn(fen)];
+        if (!rows) return empty;
+        const total = rows.reduce((sum, [, games]) => sum + games, 0);
+        return {
+          moves: rows.map(([san, games]) => ({ san, uci: new Chess(fen).move(san).lan, games, white: games, draws: 0, black: 0 })),
+          totalGames: total, positionTotalGames: total, unaccountedShare: 0, opening: null
+        };
+      }) as any;
+      const firstOrE5 = async (fen: string, chess: Chess) => {
+        const legal = chess.moves({ verbose: true });
+        const reply = legal.find(move => move.san === "e5") ?? legal[0];
+        return {
+          selectedUci: reply.lan, selectedMoveSan: reply.san, cp: -10, mate: null,
+          source: "Local Stockfish 19" as const, selectionMethod: "Baseline" as const, moveOrigin: "Engine Move" as const,
+          engineRank: 1, baselineCp: -10, baselineMate: null
+        };
+      };
+      const log = await captureLog(() => generateRepertoire(START_FEN, {
+        repertoireId, ...common, fetchDatabases: transposing, responseEvaluator: firstOrE5 as any
+      }));
+      if (log.error) throw log.error;
+
+      assert.ok(log.lines.includes("[REOPENED] e4 e5 Nf3: cumProb 10.009%."));
+      const sweeps = log.lines.filter(line => line.startsWith("[SWEEP "));
+      assert.deepEqual(sweeps, ["[SWEEP 1] Reopened 1 routes.", "[SWEEP 2] Reopened 0 routes."]);
+      assert.equal(log.result!.totalSweeps, 2);
+      assert.equal(log.result!.totalReopenedRoutes, 1);
+      assert.equal(log.result!.rareDroppedMovesTotal, 0);
+
+      const reopened = await prisma.repertoireNode.findFirstOrThrow({
+        where: { repertoireId, displayPgn: "e4 e5 Nf3" },
+        include: { incomingMoves: true, outgoingMoves: true }
+      });
+      assert.ok(Math.abs(reopened.cumProb - 0.10009) < defaultConfig.probabilityTolerance);
+      assert.equal(reopened.rareDropped, 0);
+      assert.equal(reopened.incomingMoves[0].stopReason, null);
+      // DRS.05: Black replied, and the next position went through the queue.
+      assert.equal(reopened.outgoingMoves.length, 1);
+      assert.equal(reopened.outgoingMoves[0].playerTurn, "RESPONSE");
+      const dequeued = log.lines.filter(line => line.startsWith("[QUEUE] Dequeued: "));
+      assert.ok(dequeued.at(-1)!.startsWith("[QUEUE] Dequeued: e4 e5 Nf3 "));
     });
 
     it("S3.03: each node is processed once, marked when it is taken off the queue", async () => {

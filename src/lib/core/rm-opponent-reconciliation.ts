@@ -249,6 +249,11 @@ export async function readExpectedOpponentEdges(sourceNodeId: string): Promise<E
     }));
 }
 
+/** HM.21: a White move is too rare when the probability that reaches its node is below minCumProb. DRS.04 calls it too. */
+export function isTooRare(probability: number, minCumProb: number) {
+  return probability < minCumProb;
+}
+
 export async function reconcileOpponentBranches(input: {
   repertoireId: string;
   expectedSource: ExpectedOpponentSource;
@@ -354,7 +359,7 @@ export async function reconcileOpponentBranches(input: {
       // HM.25: cumProb = parent.cumProb * moveProb. Until a cascade reaches the parent, this equals routeProb.
       const arrivingProb = source.cumProb * candidate.moveProb;
       // HM.21, HM.23: a too-rare move's cumProb is held at 0 and what arrives goes to rareDropped.
-      const tooRare = arrivingProb < input.minCumProb;
+      const tooRare = isTooRare(arrivingProb, input.minCumProb);
       const tooRareProbability = { cumProb: 0, rareDropped: arrivingProb };
       if (ending) {
         // HM.28, HM.32: a game-over or repetition node is an ending and keeps its cumProb.

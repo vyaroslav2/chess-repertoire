@@ -1,10 +1,10 @@
 ---
 tags:
-  - reviewed
+  - processed
 ---
 # DRS — Dropped Recheck Sweep
 
-A White move that is too rare ([[HM.excalidraw|HM.21]]) is never checked again. But it still owns its position ([[HM.excalidraw|HM.N.05]]). A later route can reach the same position and point to it, and a cascade can reach it from above. What arrives adds to its `rareDropped` ([[TR.excalidraw|TR.48]]). That can lift it to `minCumProb` ([[generation-config]]) or above. The sweep finds such moves when the queue is empty and expands them. Cascades do not change: they move probability and nothing else. #roadmap
+A White move that is too rare ([[HM.excalidraw|HM.21]]) is never checked again. But it still owns its position ([[HM.excalidraw|HM.N.05]]). A later route can reach the same position and point to it, and a cascade can reach it from above. What arrives adds to its `rareDropped` ([[TR.excalidraw|TR.48]]). That can lift it to `minCumProb` ([[generation-config]]) or above. The sweep finds such moves when the queue is empty and expands them. Cascades do not change: they move probability and nothing else.
 
 DRS.01 **When.** The queue is empty at [[S3|S3.02]]. Run a sweep before the end of run ([[S3|S3.10]]). 
 
