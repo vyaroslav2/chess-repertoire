@@ -135,14 +135,20 @@ class SearchProgress {
   }
 }
 
-/** One `info` line in the shape node-uci gives: depth, score { unit, value }, pv. Bound scores are skipped. */
-export function parseInfoLine(line: string): { depth: number; score: { unit: string; value: number }; pv: string } | null {
+/** One `info` line in the shape node-uci gives: depth, score { unit, value }, pv, and nodes when given. Bound scores are skipped. */
+export function parseInfoLine(line: string): { depth: number; score: { unit: string; value: number }; pv: string; nodes?: number } | null {
   if (!line.startsWith('info ') || /\b(?:lowerbound|upperbound)\b/.test(line)) return null;
   const depth = /\bdepth (\d+)/.exec(line);
   const score = /\bscore (cp|mate) (-?\d+)/.exec(line);
   const pv = / pv (.+)$/.exec(line);
+  const nodes = /\bnodes (\d+)/.exec(line);
   if (!depth || !score || !pv) return null;
-  return { depth: Number(depth[1]), score: { unit: score[1], value: Number(score[2]) }, pv: pv[1].trim() };
+  return {
+    depth: Number(depth[1]),
+    score: { unit: score[1], value: Number(score[2]) },
+    pv: pv[1].trim(),
+    ...(nodes ? { nodes: Number(nodes[1]) } : {})
+  };
 }
 
 export type TrustedLocalEvaluation = LocalEngineEvaluation & {
@@ -249,8 +255,17 @@ export function collectLocalSearchUpdates(
 }
 
 /**
- * EW.09: the node limit nearly always stops the search part-way through a depth. Bound scores
- * are already dropped, so the deepest exact score left is the deepest completed depth's. As in HE.
+ * EW.09: when the node limit stops the search part-way through a depth, Stockfish prints one last
+ * line for that unfinished depth, with no bound mark. It is the only line at or past the limit.
+ */
+function dropStopLine(rawInfo: unknown, nodeLimit: number): unknown {
+  if (!Array.isArray(rawInfo)) return rawInfo;
+  return rawInfo.filter(info => !(typeof info?.nodes === 'number' && info.nodes >= nodeLimit));
+}
+
+/**
+ * EW.09: bound scores and the stop line are already dropped, so the deepest exact score left is
+ * the deepest completed depth's.
  */
 function selectFinalUnrestrictedUpdate(evaluations: CollectedEvaluation[]): CollectedEvaluation {
   const hasReliableDepths = evaluations.every(evaluation => evaluation.depth !== null);
@@ -284,7 +299,9 @@ export async function runTrustedLocalSearch(
     await engine.setoption('MultiPV', settings.multiPv.toString());
     await engine.position(fullFen);
     const result = await engine.go({ nodes: settings.nodes });
-    const best = selectFinalUnrestrictedUpdate(collectLocalSearchUpdates(fullFen, result?.info));
+    const best = selectFinalUnrestrictedUpdate(
+      collectLocalSearchUpdates(fullFen, dropStopLine(result?.info, settings.nodes))
+    );
     return { uci: best.uci, san: best.san, cp: best.cp, mate: best.mate };
   } catch (error) {
     primaryError = error;

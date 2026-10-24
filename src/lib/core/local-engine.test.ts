@@ -258,7 +258,7 @@ test('EW.09: only the configured Stockfish version is accepted', () => {
 test('EW.09: an info line is read in the shape node-uci gives; a bound is dropped', () => {
   assert.deepEqual(
     parseInfoLine('info depth 12 seldepth 18 multipv 1 score cp -41 nodes 90000 nps 900000 time 100 pv c7c6 d2d4 d7d5'),
-    { depth: 12, score: { unit: 'cp', value: -41 }, pv: 'c7c6 d2d4 d7d5' }
+    { depth: 12, score: { unit: 'cp', value: -41 }, pv: 'c7c6 d2d4 d7d5', nodes: 90000 }
   );
   assert.deepEqual(parseInfoLine('info depth 30 score mate -3 pv h4e1'), { depth: 30, score: { unit: 'mate', value: -3 }, pv: 'h4e1' });
   assert.equal(parseInfoLine('info depth 12 score cp -41 lowerbound pv c7c6'), null, 'a bound is not an exact score');
@@ -280,6 +280,21 @@ test('EW.09: a search stopped part-way through a depth takes the deepest complet
     async go() { return { info: lines.map(parseInfoLine).filter(info => info !== null) }; }
   }));
   assert.deepEqual(result, cpEval('e7e5', 'e5', -28), 'not bestmove, not a bound');
+});
+
+test('EW.09: the line Stockfish prints at the node-limit stop is not a completed depth', async () => {
+  // As SF19 printed after 1.e4 at 10M nodes: depth 35 finished, then the stop line, labelled
+  // depth 36 with no bound mark. Here the stop line carries a different move and score.
+  const lines = [
+    'info depth 35 seldepth 53 multipv 1 score cp -15 nodes 9275708 nps 402818 pv e7e5 g1f3',
+    'info depth 36 seldepth 53 multipv 1 score cp -22 nodes 10000571 nps 403395 pv c7c5 g1f3',
+    'bestmove c7c5 ponder g1f3'
+  ];
+  const result = await runTrustedLocalSearch(blackFen, { ...SETTINGS, nodes: 10_000_000 }, () => ({
+    async init() {}, async setoption() {}, async position() {}, async quit() {},
+    async go() { return { info: lines.map(parseInfoLine).filter(info => info !== null) }; }
+  }));
+  assert.deepEqual(result, cpEval('e7e5', 'e5', 15), "depth 35's move and score");
 });
 
 // Needs bin/stockfish.exe to be Stockfish 19.

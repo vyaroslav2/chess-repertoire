@@ -18,6 +18,9 @@ EW.09 **Local Stockfish**:
 * Check `EngineCache` first, for this `fullFen` under the local Stockfish cache profile ([[DB|DB.32]]). A hit is used as-is; only a miss is run.
 * Run local Stockfish 19 on the position: `localStockfishNodes`, `localStockfishThreads`, `localStockfishHashMb`, `localStockfishMultiPv`[^1]. No depth or time limit.
 * The node limit nearly always stops the search part-way through a depth. That unfinished depth has looked at only some moves, and its scores are often only bounds. Ignore it, and ignore Stockfish's `bestmove`. Take the score and the top move of the deepest completed depth, so the move and its eval come from one complete search. HE uses the same rule ([[HE]]).
+	* #fixed 2026-10-24. The code didn't follow this rule. When the node limit stops the search, Stockfish prints one last line. It carries the unfinished depth's number and no bound mark. Usually it repeats the previous depth's result. Sometimes it holds the first move's score from the unfinished depth, before the other moves are checked. `selectFinalUnrestrictedUpdate` (`local-engine.ts`) took it as the deepest line. Example (2026-10-24, 10M nodes): after 1.e4 the code stored depth 36, −15 cp, which was depth 35's result; `go depth 36` gives −17 cp.
+	* Fix: `dropStopLine` (`local-engine.ts`) ignores a line whose `nodes` are at or above the limit. Then the result is the last finished depth's, and `go depth D` (D = that depth) gives the same move and eval. Evals already in `EngineCache` were made the old way.
+	* #note HE's search (`experiments/he/engine.ts`) still takes the stop line.
 * Store the result in the local `EngineCache` table with its corresponding local engine cache profile.
 * Its top move is the baseline. Its score is the eval of White's move ([[HM|HM.09]]).
 * Unless EW.13 chose a hardcoded move, the baseline is Black's repertoire move. Record `moveOrigin = Engine Move`.
