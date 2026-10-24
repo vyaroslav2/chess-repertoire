@@ -59,6 +59,8 @@ export type SelectedResponseResult = {
   selectedMoveSan: string;
   cp: number | null;
   mate: number | null;
+  /** DB.11: the depth of the search behind cp or mate; null for checkmate, stalemate or an old cached eval. */
+  depth: number | null;
   source: ResponseEvaluationSource;
   selectionMethod: ResponseSelectionMethod;
   moveOrigin: ResponseMoveOrigin;
@@ -67,6 +69,7 @@ export type SelectedResponseResult = {
   /** DB.11, HM.09: EW.09's eval of this position, which is the eval of the White move that reached it. */
   baselineCp: number | null;
   baselineMate: number | null;
+  baselineDepth: number | null;
 };
 
 function legalSan(chess: Chess, uci: string): string {
@@ -89,16 +92,16 @@ async function evaluateBlackMoveResult(
   chess: Chess,
   uci: string,
   runner: LocalSearchRunner
-): Promise<{ cp: number | null; mate: number | null }> {
+): Promise<{ cp: number | null; mate: number | null; depth: number | null }> {
   chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci.length === 5 ? uci[4] : undefined });
   const afterFen = parseFullFen(chess.fen());
   const checkmate = chess.isCheckmate();
   const stalemate = chess.isStalemate();
   chess.undo();
-  if (checkmate) return { cp: null, mate: -1 };
-  if (stalemate) return { cp: 0, mate: null };
-  const { cp, mate } = (await getOrCreateLocalBaseline(afterFen, defaultConfig, runner)).evaluation;
-  return { cp, mate };
+  if (checkmate) return { cp: null, mate: -1, depth: null };
+  if (stalemate) return { cp: 0, mate: null, depth: null };
+  const { cp, mate, depth } = (await getOrCreateLocalBaseline(afterFen, defaultConfig, runner)).evaluation;
+  return { cp, mate, depth };
 }
 
 /** EW: Black's move is local Stockfish's top move (EW.09), unless a hardcoded response applies (EW.13). */
@@ -135,11 +138,13 @@ export async function evaluateBlackMove(
     selectedMoveSan,
     cp: evaluation.cp,
     mate: evaluation.mate,
+    depth: evaluation.depth,
     source: "Local Stockfish 19",
     selectionMethod: hardcodedSan !== null ? "Hardcoded" : "Baseline",
     moveOrigin: hardcodedSan !== null ? "Hardcoded Move" : "Engine Move",
     engineRank: uci === baseline.uci ? 1 : null,
     baselineCp: baseline.cp,
-    baselineMate: baseline.mate
+    baselineMate: baseline.mate,
+    baselineDepth: baseline.depth
   };
 }

@@ -23,8 +23,8 @@ const prisma = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
 const blackFen = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1';
 const blackFenCounters = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 7 9';
 const profile = computeLocalEngineEvaluationProfile(defaultConfig);
-const cpEval = (uci: string, san: string, cp: number): TrustedLocalEvaluation => ({ uci, san, cp, mate: null });
-const mateEval = (uci: string, san: string, mate: number): TrustedLocalEvaluation => ({ uci, san, cp: null, mate });
+const cpEval = (uci: string, san: string, cp: number, depth: number | null = null): TrustedLocalEvaluation => ({ uci, san, cp, mate: null, depth });
+const mateEval = (uci: string, san: string, mate: number, depth: number | null = null): TrustedLocalEvaluation => ({ uci, san, cp: null, mate, depth });
 
 const SETTINGS = { nodes: 200_000_000, threads: 1, hashMb: 1024, multiPv: 1 };
 
@@ -62,7 +62,7 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
       SETTINGS,
       engineFactory([{ depth: 24, score: { unit: 'cp', value: 42 }, pv: 'e7e5' }], calls)
     );
-    assert.deepEqual(result, cpEval('e7e5', 'e5', -42));
+    assert.deepEqual(result, cpEval('e7e5', 'e5', -42, 24));
     assert.deepEqual(calls.find(call => call.kind === 'position')?.value, blackFen);
     assert.deepEqual(calls.filter(call => call.kind === 'setoption').map(call => call.value),
       [['Threads', '1'], ['Hash', '1024'], ['MultiPV', '1']]);
@@ -76,7 +76,7 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
       SETTINGS,
       engineFactory([{ depth: 24, score: { unit: 'mate', value: 3 }, pv: 'e7e5' }], [])
     );
-    assert.deepEqual(mate, mateEval('e7e5', 'e5', -3));
+    assert.deepEqual(mate, mateEval('e7e5', 'e5', -3, 24));
     const zero = collectLocalSearchUpdates(blackFen, [{ depth: 24, score: { unit: 'cp', value: 0 }, pv: 'e7e5' }]);
     assert.equal(zero[0].cp, 0);
     assert.equal(zero[0].mate, null);
@@ -177,6 +177,18 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
     assert.equal(result.evaluation.cp, -25);
     assert.equal(stored?.bestUci, 'e7e5');
     assert.equal(stored?.cp, -25);
+    assert.equal(result.evaluation.depth, 24);
+    assert.equal(stored?.depth, 24, 'DB.32 the deepest completed depth is cached');
+    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
+  });
+
+  await t.test('DB.32 an eval cached without a depth reads back as unknown; a bad depth is refused', async () => {
+    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
+    await saveLocalEngineBaseline(blackFen, profile, { uci: 'e7e5', cp: -20, mate: null });
+    assert.equal((await readLocalEngineBaseline(blackFen, profile))?.depth, null);
+    for (const depth of [-1, 1.5, Number.NaN]) {
+      await assert.rejects(saveLocalEngineBaseline(blackFen, profile, { uci: 'e7e5', cp: -20, mate: null, depth }), /depth/);
+    }
     await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
   });
 
@@ -279,7 +291,7 @@ test('EW.09: a search stopped part-way through a depth takes the deepest complet
     async init() {}, async setoption() {}, async position() {}, async quit() {},
     async go() { return { info: lines.map(parseInfoLine).filter(info => info !== null) }; }
   }));
-  assert.deepEqual(result, cpEval('e7e5', 'e5', -28), 'not bestmove, not a bound');
+  assert.deepEqual(result, cpEval('e7e5', 'e5', -28, 30), 'not bestmove, not a bound');
 });
 
 test('EW.09: the line Stockfish prints at the node-limit stop is not a completed depth', async () => {
@@ -294,7 +306,7 @@ test('EW.09: the line Stockfish prints at the node-limit stop is not a completed
     async init() {}, async setoption() {}, async position() {}, async quit() {},
     async go() { return { info: lines.map(parseInfoLine).filter(info => info !== null) }; }
   }));
-  assert.deepEqual(result, cpEval('e7e5', 'e5', 15), "depth 35's move and score");
+  assert.deepEqual(result, cpEval('e7e5', 'e5', 15, 35), "depth 35's move, score and depth");
 });
 
 // Needs bin/stockfish.exe to be Stockfish 19.

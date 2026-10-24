@@ -180,9 +180,9 @@ describe("HM generator", () => {
     const hardcodedLike = async (_fen: string, chess: Chess) => {
       const reply = chess.moves({ verbose: true })[0];
       return {
-        selectedUci: reply.lan, selectedMoveSan: reply.san, cp: 400, mate: null,
+        selectedUci: reply.lan, selectedMoveSan: reply.san, cp: 400, mate: null, depth: 41,
         source: "Local Stockfish 19" as const, selectionMethod: "Hardcoded" as const, moveOrigin: "Hardcoded Move" as const,
-        engineRank: null, baselineCp: 25, baselineMate: null
+        engineRank: null, baselineCp: 25, baselineMate: null, baselineDepth: 44
       };
     };
     await captureLog(() => generateRepertoire(START_FEN, {
@@ -194,11 +194,11 @@ describe("HM generator", () => {
     const whiteMoves = await prisma.repertoireMove.findMany({ where: { fromNodeId: root.id, playerTurn: "OPPONENT" } });
     for (const move of whiteMoves) {
       if (move.stopReason === null) {
-        assert.deepEqual([move.cp, move.mate, move.source], [25, null, "Local Stockfish 19"], move.san);
+        assert.deepEqual([move.cp, move.mate, move.depth, move.source], [25, null, 44, "Local Stockfish 19"], move.san);
         const reply = await prisma.repertoireMove.findFirstOrThrow({ where: { fromNodeId: move.toNodeId!, playerTurn: "RESPONSE" } });
-        assert.equal(reply.cp, 400);
+        assert.deepEqual([reply.cp, reply.depth], [400, 41]);
       } else {
-        assert.deepEqual([move.cp, move.mate, move.source], [null, null, null], move.san);
+        assert.deepEqual([move.cp, move.mate, move.depth, move.source], [null, null, null, null], move.san);
       }
     }
     assert.equal(whiteMoves.filter(move => move.stopReason === null).length, 3);

@@ -88,6 +88,7 @@ model EngineCacheEvaluation {
   cp      Float?
   mate    Int?
   rank    Int? // 1 for Stockfish's best move, otherwise null
+  depth   Int? // DB.32: the deepest completed depth; null for evals cached before it was stored
 
   cache EngineCache @relation(fields: [cacheId], references: [id], onDelete: Cascade)
 
@@ -200,6 +201,7 @@ model RepertoireMove {
   // DB.11 the eval: every Black move, and every White move Black replies to
   cp              Float?
   mate            Int?
+  depth           Int? // the depth of the search that gave the eval; null for checkmate, stalemate or an old cached eval
   source          String?
 
   // DB.14 Black move fields: the engine evidence

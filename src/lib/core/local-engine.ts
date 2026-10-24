@@ -153,6 +153,8 @@ export function parseInfoLine(line: string): { depth: number; score: { unit: str
 
 export type TrustedLocalEvaluation = LocalEngineEvaluation & {
   san: string;
+  /** DB.32: the deepest completed depth (EW.09); null if Stockfish gave none or the cached eval predates it. */
+  depth: number | null;
 };
 
 export type LocalSearchSettings = {
@@ -194,7 +196,6 @@ function assertLegalRoot(fullFen: string, uci: string): string {
 }
 
 type CollectedEvaluation = TrustedLocalEvaluation & {
-  depth: number | null;
   sequence: number;
 };
 
@@ -302,7 +303,7 @@ export async function runTrustedLocalSearch(
     const best = selectFinalUnrestrictedUpdate(
       collectLocalSearchUpdates(fullFen, dropStopLine(result?.info, settings.nodes))
     );
-    return { uci: best.uci, san: best.san, cp: best.cp, mate: best.mate };
+    return { uci: best.uci, san: best.san, cp: best.cp, mate: best.mate, depth: best.depth };
   } catch (error) {
     primaryError = error;
     throw error;
@@ -334,7 +335,7 @@ export async function getOrCreateLocalBaseline(
   if (cached) {
     return {
       evaluationProfile,
-      evaluation: { uci: cached.uci, san: cached.san, cp: cached.cp, mate: cached.mate },
+      evaluation: { uci: cached.uci, san: cached.san, cp: cached.cp, mate: cached.mate, depth: cached.depth },
       reused: true
     };
   }
@@ -343,7 +344,7 @@ export async function getOrCreateLocalBaseline(
   const saved = await saveLocalEngineBaseline(fullFen, evaluationProfile, evaluation);
   return {
     evaluationProfile,
-    evaluation: { uci: saved.bestUci, san: saved.san!, cp: saved.cp, mate: saved.mate },
+    evaluation: { uci: saved.bestUci, san: saved.san!, cp: saved.cp, mate: saved.mate, depth: saved.depth },
     reused: false
   };
 }

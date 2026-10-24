@@ -13,7 +13,7 @@ const prisma = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
 const ordinaryFen = 'rn1qkb1r/ppp1pppp/5n2/3p4/3P4/5N2/PPP1PPPP/RN1QKB1R b KQkq - 0 3';
 const e4Fen = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1';
 
-const sf = (uci: string, san: string, cp: number | null, mate: number | null = null): TrustedLocalEvaluation => ({ uci, san, cp, mate });
+const sf = (uci: string, san: string, cp: number | null, mate: number | null = null, depth: number | null = 40): TrustedLocalEvaluation => ({ uci, san, cp, mate, depth });
 const after = (fen: string, ...sans: string[]) => { const chess = new Chess(fen); for (const san of sans) chess.move(san); return parseFullFen(chess.fen()); };
 
 /** A fake Stockfish: `positions[fullFen]` for each search. Records every position searched. */
@@ -60,12 +60,12 @@ test('EW engine response', async (t) => {
       moves: [{ uci: 'b8d7', san: 'Nbd7', games: 300, whiteWins: 50, draws: 50, blackWins: 200 }]
     });
     const afterE6 = after(ordinaryFen, 'e6');
-    const engine = stockfish({ [parseFullFen(ordinaryFen)]: sf('e7e6', 'e6', -20), [afterE6]: sf('c2c4', 'c4', -17) });
+    const engine = stockfish({ [parseFullFen(ordinaryFen)]: sf('e7e6', 'e6', -20, null, 44), [afterE6]: sf('c2c4', 'c4', -17, null, 46) });
     const result = await withNoFetch(() => evaluateBlackMove(ordinaryFen, new Chess(ordinaryFen), [], { localSearchRunner: engine.runner }));
     assert.deepEqual(result, {
-      selectedUci: 'e7e6', selectedMoveSan: 'e6', cp: -17, mate: null,
+      selectedUci: 'e7e6', selectedMoveSan: 'e6', cp: -17, mate: null, depth: 46,
       source: 'Local Stockfish 19', selectionMethod: 'Baseline', moveOrigin: 'Engine Move', engineRank: 1,
-      baselineCp: -20, baselineMate: null
+      baselineCp: -20, baselineMate: null, baselineDepth: 44
     });
     assert.deepEqual(engine.searches, [parseFullFen(ordinaryFen), afterE6], 'two searches: before and after Black\'s move');
   });
@@ -77,11 +77,13 @@ test('EW engine response', async (t) => {
     const profile = computeLocalEngineEvaluationProfile(defaultConfig);
     assert.equal((await readLocalEngineBaseline(parseFullFen(ordinaryFen), profile))?.bestUci, 'e7e6');
     assert.equal((await readLocalEngineBaseline(afterE6, profile))?.cp, -17);
+    assert.equal((await readLocalEngineBaseline(afterE6, profile))?.depth, 40, 'DB.32 the depth is cached with the eval');
 
     const second = stockfish({});
     const result = await evaluateBlackMove(ordinaryFen, new Chess(ordinaryFen), [], { localSearchRunner: second.runner });
     assert.equal(result.selectedUci, 'e7e6');
     assert.equal(result.cp, -17);
+    assert.equal(result.depth, 40, 'a cache hit keeps its depth');
     assert.deepEqual(second.searches, [], 'a cache hit is used as-is');
   });
 
@@ -99,14 +101,14 @@ test('EW engine response', async (t) => {
     const fools = after(new Chess().fen(), 'f3', 'e5', 'g4');
     const engine = stockfish({ [fools]: sf('d8h4', 'Qh4#', null, -1) });
     const mated = await evaluateBlackMove(fools, new Chess(fools), ['f3', 'e5', 'g4'], { localSearchRunner: engine.runner });
-    assert.deepEqual([mated.selectedMoveSan, mated.cp, mated.mate], ['Qh4#', null, -1]);
+    assert.deepEqual([mated.selectedMoveSan, mated.cp, mated.mate, mated.depth], ['Qh4#', null, -1, null]);
     assert.deepEqual(engine.searches, [fools], 'no search after checkmate');
 
     // White has a lone king on a1; Qb3 leaves it no move.
     const stale = parseFullFen('7k/8/8/8/8/2q5/8/K7 b - - 0 1');
     const staleEngine = stockfish({ [stale]: sf('c3b3', 'Qb3', 0) });
     const drawn = await evaluateBlackMove(stale, new Chess(stale), [], { localSearchRunner: staleEngine.runner });
-    assert.deepEqual([drawn.selectedMoveSan, drawn.cp, drawn.mate], ['Qb3', 0, null]);
+    assert.deepEqual([drawn.selectedMoveSan, drawn.cp, drawn.mate, drawn.depth], ['Qb3', 0, null, null]);
     assert.deepEqual(staleEngine.searches, [stale], 'no search after stalemate');
   });
 
@@ -115,9 +117,9 @@ test('EW engine response', async (t) => {
     const engine = stockfish({ [parseFullFen(e4Fen)]: sf('e7e5', 'e5', 10), [afterC6]: sf('d2d4', 'd4', 400) });
     const result = await withNoFetch(() => evaluateBlackMove(e4Fen, new Chess(e4Fen), ['e4'], { localSearchRunner: engine.runner }));
     assert.deepEqual(result, {
-      selectedUci: 'c7c6', selectedMoveSan: 'c6', cp: 400, mate: null,
+      selectedUci: 'c7c6', selectedMoveSan: 'c6', cp: 400, mate: null, depth: 40,
       source: 'Local Stockfish 19', selectionMethod: 'Hardcoded', moveOrigin: 'Hardcoded Move', engineRank: null,
-      baselineCp: 10, baselineMate: null
+      baselineCp: 10, baselineMate: null, baselineDepth: 40
     });
     assert.deepEqual(engine.searches, [parseFullFen(e4Fen), afterC6], 'Stockfish searches the position before and after the hardcoded move');
   });

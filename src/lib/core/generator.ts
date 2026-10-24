@@ -705,7 +705,7 @@ export async function generateRepertoire(
       });
       const algoResult = canonicalSelection.result;
       // HM.09: the White move takes the eval of EW.09's search of the position it reaches, even under a hardcoded reply.
-      await recordOpponentMoveEval(reconciledOpponent.edgeId, { cp: algoResult.baselineCp, mate: algoResult.baselineMate });
+      await recordOpponentMoveEval(reconciledOpponent.edgeId, { cp: algoResult.baselineCp, mate: algoResult.baselineMate, depth: algoResult.baselineDepth });
       // DB.06 rule 4: EW does not ask Explorer, so a position with Black to move is fetched for the name only.
       await ensureNodeOpeningMetadata(posAfterWhiteNode.id, rebuildOpeningMetadataCache, "NOT_FETCHED", fetchOpeningMetadata);
       await attemptCanonicalNodeWikibooks(posAfterWhiteNode.id, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
@@ -760,6 +760,7 @@ export async function generateRepertoire(
           san: algoResult.selectedMoveSan,
           cp: algoResult.cp,
           mate: algoResult.mate,
+          depth: algoResult.depth,
           source: algoResult.source,
           selectionMethod: algoResult.selectionMethod,
           moveOrigin: algoResult.moveOrigin,
