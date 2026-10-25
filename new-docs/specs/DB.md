@@ -42,6 +42,10 @@ DB.06 **Opening metadata.** Each node holds `eco`, `openingName`, and a status: 
 
 A node never changes the node above it. Walking a route, the name changes only where Explorer names the new position. In the UI, stepping back and forth through the moves shows each node's own name. `VALID_ABSENCE` shows nothing.
 
+A node is named as soon as it is stored: Black's reply as it is added, every White move as soon as the position's moves are reconciled. Its parent is always named first, so rule 2 can copy. So a run that stops early leaves no node without a name, unless the Explorer request for one failed.
+
+A node with no status is **missing**: never named. That is not `VALID_ABSENCE`, the root's checked "no name" (rule 3), nor a copied name (rule 2). A missing name can be retried: `npm run fill-opening-names` finds every node with no status and names it, parents first, by rules 1–4. The UI never guesses a missing name from another node: it shows nothing, as for `VALID_ABSENCE`.
+
 By the end of a run every node carries a status. A missing status, or a half-filled pair, is an error. Stored per route ([[DB|DB.33]]).
 
 DB.07 **Wikibooks text.** `wikiText`, plus a flag recording that the lookup happened, so "looked up, nothing there" is told apart from "never looked up". #deferred

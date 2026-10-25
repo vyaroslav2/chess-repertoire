@@ -165,6 +165,23 @@ async function ensureNodeOpeningMetadata(
   await persistOpeningMetadata(nodeId, opening === "NOT_FETCHED" ? await fetchOpeningMetadata(node.fullFen) : opening);
 }
 
+/** DB.06: retry every missing name in the repertoire, parents first, so rule 2 can copy. Returns how many were named. */
+export async function fillMissingOpeningMetadata(
+  repertoireId: string,
+  fetchOpeningMetadata: typeof fetchAmateurOpeningMetadata = fetchAmateurOpeningMetadata
+) {
+  const missing = await prisma.repertoireNode.findMany({
+    where: { repertoireId, openingMetadataStatus: null },
+    select: { id: true, history: true }
+  });
+  missing.sort((a, b) => historyFromCanonicalPgn(a.history).length - historyFromCanonicalPgn(b.history).length);
+  const cache = await captureRebuildOpeningMetadataCache(repertoireId);
+  for (const node of missing) {
+    await ensureNodeOpeningMetadata(node.id, cache, "NOT_FETCHED", fetchOpeningMetadata);
+  }
+  return missing.length;
+}
+
 
 export async function captureRebuildWikibooksCache(repertoireId: string): Promise<RebuildWikibooksCache> {
   const checkedNodes = await prisma.repertoireNode.findMany({
@@ -576,8 +593,6 @@ export async function generateRepertoire(
     const algoResult = canonicalSelection.result;
     // HM.09: the White move takes the eval of EW.09's search of the position it reaches, even under a hardcoded reply.
     await recordOpponentMoveEval(whiteMoveId, { cp: algoResult.baselineCp, mate: algoResult.baselineMate, depth: algoResult.baselineDepth });
-    // DB.06 rule 4: EW does not ask Explorer, so a position with Black to move is fetched for the name only.
-    await ensureNodeOpeningMetadata(posAfterWhiteNode.id, rebuildOpeningMetadataCache, "NOT_FETCHED", fetchOpeningMetadata);
     await attemptCanonicalNodeWikibooks(posAfterWhiteNode.id, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
 
     totalBlackMovesEvaluated++;
@@ -617,6 +632,9 @@ export async function generateRepertoire(
             data: { cumProb: Math.max(posAfterBlackNode.cumProb, effectiveCanonicalProb) }
         });
     }
+
+    // DB.06: named as soon as it is stored, so a stopped run leaves it named. Rule 4: fetched for the name only.
+    await ensureNodeOpeningMetadata(posAfterBlackNode.id, rebuildOpeningMetadataCache, "NOT_FETCHED", fetchOpeningMetadata);
 
     resultingDestinationId = posAfterBlackNode.id;
     resultingDestinationFen = posAfterBlackNode.fullFen;
@@ -676,15 +694,13 @@ export async function generateRepertoire(
     });
     if (ending) {
         await prisma.repertoireMove.update({ where: { id: responseId }, data: { stopReason: ending } });
-        // DB.06 rule 4: the node is never dequeued, so it is named here.
-        await ensureNodeOpeningMetadata(resultingDestinationId, rebuildOpeningMetadataCache, "NOT_FETCHED", fetchOpeningMetadata);
         const tag = ending === "Game over on Black's move" ? "[GAME OVER]" : "[DEPTH CAP REACHED]";
         console.log(`${tag} route=${resultingDestinationPgn}; cumProb=${(effectiveCanonicalProb * 100).toFixed(3)}%`);
         if (ending === "Depth cap reached on Black's move") totalBranchesAborted++;
         return;
     }
 
-    // RE.09. Its opening metadata is set when it is dequeued, after the Explorer fetch (DB.06 rule 1).
+    // RE.09.
     const continuationItem = buildCanonicalContinuationQueueItem({
         destinationNode: {
             id: resultingDestinationId,
@@ -834,6 +850,10 @@ export async function generateRepertoire(
     const reconciledOpponentByUci = new Map(
       opponentReconciliation.branches.map(branch => [branch.uci, branch] as const)
     );
+    // DB.06: every White move's node is named as soon as it is stored, so a stopped run leaves none missing.
+    for (const branch of opponentReconciliation.branches) {
+      await ensureNodeOpeningMetadata(branch.destinationNodeId!, rebuildOpeningMetadataCache, "NOT_FETCHED", fetchOpeningMetadata);
+    }
     // EX.05: the Amateur shortfall stays on this node, since the missing games have no child to hold them.
     if (rawAmateurMoveCount > 0) {
       await prisma.repertoireNode.update({
@@ -871,9 +891,8 @@ export async function generateRepertoire(
       const reconciledOpponent = reconciledOpponentByUci.get(canonicalWhiteMove.uci);
       if (!reconciledOpponent) throw new Error(`Reconciled OPPONENT branch ${canonicalWhiteMove.uci} is missing`);
       if (reconciledOpponent.ending) {
-        // HM.24, HM.29, HM.33: the move keeps its node but gets no Black reply. DB.06 rule 4 names it.
+        // HM.24, HM.29, HM.33: the move keeps its node but gets no Black reply.
         const endingNodeId = reconciledOpponent.destinationNodeId!;
-        await ensureNodeOpeningMetadata(endingNodeId, rebuildOpeningMetadataCache, "NOT_FETCHED", fetchOpeningMetadata);
         const endingRoute = canonicalWhiteMove.destinationPgn;
         if (reconciledOpponent.ending === "Too rare") {
           const { rareDropped } = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: endingNodeId } });
@@ -890,7 +909,6 @@ export async function generateRepertoire(
         // TR.08: no Black reply and no card. TR.09 - TR.19: the cascade. TR.50: next White move.
         const pointer = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: reconciledOpponent.destinationNodeId! } });
         const owner = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: reconciledOpponent.ownerNodeId! } });
-        await ensureNodeOpeningMetadata(pointer.id, rebuildOpeningMetadataCache, "NOT_FETCHED", fetchOpeningMetadata);
         totalTranspositions++;
         console.log(`[TRANSPOSITION] route=${canonicalWhiteMove.destinationPgn}; owner=${owner.displayPgn}; cumProb=${(pointer.cumProb * 100).toFixed(3)}%`);
         await runCascade({ repertoireId: repertoire.id, pointerId: pointer.id, ownerId: owner.id, run: cascadeRun, config: runtime.config });
