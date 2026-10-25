@@ -61,7 +61,7 @@ export const SAMPLED_MOVES_TABLE = `CREATE TABLE IF NOT EXISTS sampled_moves (
   uci         VARCHAR(5) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   fen         VARCHAR(100) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,  -- the position before the move
   group_id    INT NOT NULL,                                 -- the search's id in results-a/b
-  results     ENUM('a','b') NOT NULL,                       -- which results file holds the search
+  results     ENUM('a','b','c') NOT NULL,                   -- which results file holds the search
   search_run  VARCHAR(80),                                  -- the earlier run that made the search; NULL: this run
   group_games INT NOT NULL,                                 -- games in the group (same position and move)
   cp_white    SMALLINT,                                     -- Stockfish 19, 2M nodes, White's view
@@ -80,6 +80,10 @@ export async function loadSampledMoves(run: string) {
     // Tables made before searches were reused lack search_run.
     const [columns] = await connection.query("SHOW COLUMNS FROM sampled_moves LIKE 'search_run'");
     if (!(columns as unknown[]).length) await connection.query("ALTER TABLE sampled_moves ADD COLUMN search_run VARCHAR(80) AFTER results");
+    // And those made before a third results file allow only a and b.
+    const [results] = await connection.query("SHOW COLUMNS FROM sampled_moves LIKE 'results'");
+    if (!(results as { Type: string }[])[0].Type.includes("'c'"))
+      await connection.query("ALTER TABLE sampled_moves MODIFY results ENUM('a','b','c') NOT NULL");
     const rows = await sampledMoves(run);
     for (let start = 0; start < rows.length; start += 1000)
       await connection.query(`INSERT INTO sampled_moves (game_id, run, move_number, san, uci, fen, group_id, results,

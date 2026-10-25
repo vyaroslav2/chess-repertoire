@@ -260,6 +260,27 @@ test("results join both files to their groups, flip to White's view and refuse b
     await assert.rejects(importResults(name, "fit"));
   } finally { await rm(run, { recursive: true }); }
 });
+test("results read a third part, c, split off from a", async () => {
+  const name = "test-part-c-" + process.pid, run = runPath(name);
+  await assertDataDirectory(run);
+  const fen = "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1";
+  const group = (uci: string) => JSON.stringify({ period: "fit", positionKey: fen.split(" ").slice(0, 4).join(" "), uci,
+    fens: [fen], games: 1, wins: 1, draws: 0, losses: 0, moveNumbers: { "1": 1 } });
+  const write = (file: string, rows: string[]) => writeFile(path.join(run, file), rows.join("\n") + "\n");
+  try {
+    await write("groups.jsonl", [group("d7d5"), group("g8f6"), group("e7e6")]);
+    await writeJobs(name, "fit", 2);
+    const [first, second] = (await readFile(path.join(run, "jobs-a.jsonl"), "utf8")).trim().split("\n");
+    await write("jobs-a.jsonl", [first]); await write("jobs-c.jsonl", [second]);
+    await write("results-a.jsonl", [session("a"), result(1, "d7d5", "c2c4", "cp -15")]);
+    await write("results-b.jsonl", [session("b"), result(3, "e7e6", "c2c4", "cp 10")]);
+    await assert.rejects(importResults(name, "fit"), /results-c.jsonl/);
+    await write("results-c.jsonl", [session("c"), result(2, "g8f6", "c2c4", "cp 20")]);
+    await importResults(name, "fit");
+    const rows = (await readFile(path.join(run, "evals.jsonl"), "utf8")).trim().split("\n").map(l => JSON.parse(l));
+    assert.deepEqual(rows.map(row => [row.id, row.part, row.cpWhite]), [[1, "a", 15], [2, "c", -20], [3, "b", -10]]);
+  } finally { await rm(run, { recursive: true }); }
+});
 test("jobs skip groups an earlier run searched, and results take those evals from it", async () => {
   const earlier = "test-reuse-feb-" + process.pid, later = "test-reuse-mar-" + process.pid;
   const fen = "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1";

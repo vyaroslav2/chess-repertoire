@@ -1,12 +1,12 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { HE_ROOT, assertDataDirectory, runPath } from "./paths";
-import type { GroupEval } from "./results";
+import type { GroupEval, Part } from "./results";
 import type { Observation } from "./types";
 
 // One game's sampled move with its group's eval: observations.jsonl joined to evals.jsonl.
 // groupId and results say where the search lies: in searchRun when an earlier run made it.
-export type SampledMove = Observation & { groupId: number; results: "a" | "b"; searchRun?: string; groupGames: number;
+export type SampledMove = Observation & { groupId: number; results: Part; searchRun?: string; groupGames: number;
   cpWhite: number | null; mateWhite: number | null; depth: number };
 
 export async function sampledMoves(run: string): Promise<SampledMove[]> {

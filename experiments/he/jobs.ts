@@ -4,13 +4,13 @@ import { open, readFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import { Chess } from "chess.js";
 import { assertDataDirectory, runPath } from "./paths";
-import type { GroupEval } from "./results";
+import type { GroupEval, Part } from "./results";
 import type { MoveGroup, Period } from "./types";
 
 // One search for the curve: the group's position, limited to the move played.
 export type Job = { id: number; positionKey: string; fen: string; uci: string };
 // Where a search lies: its run, results file and id there.
-export type Source = { run: string; part: "a" | "b"; id: number };
+export type Source = { run: string; part: Part; id: number };
 // A group an earlier run has searched already: it is not searched again.
 export type ReusedJob = Job & { from: Source };
 

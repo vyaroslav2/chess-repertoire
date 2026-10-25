@@ -151,7 +151,11 @@ carries on. The score is kept as Stockfish gives it, from Black's view; the impo
 flips it to `cpWhite`. Locally, the script gave the same score and depth as `engine.ts` on the same
 jobs.
 
-Put both people's `results-a.jsonl` and `results-b.jsonl` in the run's folder, then:
+For a third person, part of `jobs-a.jsonl` can be moved by hand into `jobs-c.jsonl` (2024-03-3000mb:
+the last 10,000 of a's 20,000). Each Colab session records its jobs file's name, so the file must
+keep that name on Drive. `results`, `recheck`, the dot page and MySQL read part c wherever it exists.
+
+Put each person's `results-a.jsonl`, `results-b.jsonl` (and `results-c.jsonl`) in the run's folder, then:
 
 ```powershell
 npm --prefix experiments/he run results -- --run 2024-02-3000mb

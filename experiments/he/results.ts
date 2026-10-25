@@ -16,10 +16,11 @@ type SessionLine = { type: "session"; startedAt: string; archiveSha256: string; 
 // lies when an earlier run made it; part is then that run's results file.
 export type GroupEval = MoveGroup & { id: number; part: Part; cpWhite: number | null; mateWhite: number | null;
   depth: number; nodes: number | null; from?: Source };
-type Part = "a" | "b";
+// One pair of jobs and results files. c is optional: part of a's jobs, split off for a third person.
+export type Part = "a" | "b" | "c";
 type Checked = { job: Job; result: ResultLine; part: Part; from?: Source };
 
-const PARTS: Part[] = ["a", "b"];
+const PARTS: Part[] = ["a", "b", "c"];
 // The Stockfish 19 Linux release and its bench, as fixed in colab/he_colab.py.
 const ARCHIVE_SHA256 = "9defc0d4e55d49c65a6d042f3e571a39fcea499ade6dbe741b53b8c65e03611f";
 const BENCH = 2_497_913;
@@ -32,19 +33,24 @@ function lines<T>(text: string, file: string): T[] {
   });
 }
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
+// For readFile(...).catch: a missing file reads as null.
+const absent = (error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; };
 // What a search found, without its speed: nps and time differ between machines.
 const found = (info: string) => info.replace(/ (?:nps|time) \d+/g, "");
 
-// Reads both jobs and results files and checks every result against its job and its session.
+// Reads each part's jobs and results files and checks every result against its job and its session.
+// A part with no jobs file is left out.
 // Groups in jobs-reused.jsonl take their search from the earlier run, checked the same way.
 async function readResults(directory: string): Promise<{ checked: Map<number, Checked>; binarySha256: string;
-  report: Record<Part, object>; reused?: { groups: number; runs: Record<string, object>; sha256: string } }> {
+  report: Partial<Record<Part, object>>; reused?: { groups: number; runs: Record<string, object>; sha256: string } }> {
   const checked = new Map<number, Checked>();
   const binaries = new Set<string>();
-  const report = { a: {}, b: {} } as Record<Part, { jobs: number; results: number; sessions: number; repeats: number; sha256: string }>;
+  const report: Partial<Record<Part, { jobs: number; results: number; sessions: number; repeats: number; sha256: string }>> = {};
   for (const part of PARTS) {
     const jobsFile = "jobs-" + part + ".jsonl", resultsFile = "results-" + part + ".jsonl";
-    const jobs = new Map(lines<Job>(await readFile(path.join(directory, jobsFile), "utf8"), jobsFile).map(job => [job.id, job]));
+    const jobsText = await readFile(path.join(directory, jobsFile), "utf8").catch(absent);
+    if (jobsText === null) continue;
+    const jobs = new Map(lines<Job>(jobsText, jobsFile).map(job => [job.id, job]));
     const text = await readFile(path.join(directory, resultsFile), "utf8");
     const rows = lines<SessionLine | ResultLine>(text, resultsFile);
     if (rows[0]?.type !== "session") throw new Error(resultsFile + " must start with a session line.");
@@ -83,8 +89,7 @@ async function readResults(directory: string): Promise<{ checked: Map<number, Ch
     if (missing.length) throw new Error(resultsFile + " lacks " + missing.length + " of " + jobs.size + " jobs, e.g. id " + missing.slice(0, 5).join(", ") + ".");
     report[part] = { jobs: jobs.size, results: jobs.size, sessions, repeats, sha256: sha256(text) };
   }
-  const reusedText = await readFile(path.join(directory, "jobs-reused.jsonl"), "utf8")
-    .catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; });
+  const reusedText = await readFile(path.join(directory, "jobs-reused.jsonl"), "utf8").catch(absent);
   let reused;
   if (reusedText !== null) {
     const runs = new Map<string, Awaited<ReturnType<typeof readResults>>>();
@@ -165,7 +170,8 @@ export async function recheckGame(name: string, binary: string, gameId: string, 
   if (!game) throw new Error("Game " + gameId + " is not in run " + name + ".");
   let hit: { job: Job; part: Part; result: ResultLine; run?: string } | undefined;
   for (const part of PARTS) {
-    const job = await first<Job>("jobs-" + part + ".jsonl", game.uci, row => row.positionKey === game.positionKey && row.uci === game.uci);
+    const job = await first<Job>("jobs-" + part + ".jsonl", game.uci, row => row.positionKey === game.positionKey && row.uci === game.uci)
+      .catch(absent);
     if (!job) continue;
     const result = await first<ResultLine>("results-" + part + ".jsonl", '"id": ' + job.id + ",", row => row.type === "result" && row.id === job.id);
     if (!result) throw new Error("results-" + part + ".jsonl has no result for id " + job.id + ".");
@@ -173,8 +179,7 @@ export async function recheckGame(name: string, binary: string, gameId: string, 
   }
   // A group an earlier run searched: its search lies in that run's files.
   const reused = hit ? undefined : await first<ReusedJob>("jobs-reused.jsonl", game.uci,
-    row => row.positionKey === game.positionKey && row.uci === game.uci)
-    .catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; });
+    row => row.positionKey === game.positionKey && row.uci === game.uci).catch(absent);
   if (reused) {
     const { run, part, id } = reused.from, folder = runPath(run);
     const job = await first<Job>("jobs-" + part + ".jsonl", '"id":' + id + ",", row => row.id === id, folder);
