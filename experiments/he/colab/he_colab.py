@@ -13,7 +13,7 @@ import hashlib, json, os, queue, re, subprocess, tarfile, threading, time, urlli
 
 JOBS = "/content/drive/MyDrive/he/jobs-a.jsonl"
 RESULTS = "/content/drive/MyDrive/he/results-a.jsonl"
-LIMIT = 50                         # e.g. 50 for a test run: only the first 50 jobs; None for all jobs 
+LIMIT = None                         # e.g. 50 for a test run: only the first 50 jobs; None for all jobs 
 ENGINES = os.cpu_count() or 1        # one single-threaded engine per core
 SAVE_EVERY = 500                     # close RESULTS this often, so Drive gets it
 
