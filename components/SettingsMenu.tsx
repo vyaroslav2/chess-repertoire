@@ -13,7 +13,7 @@ import {
   thumbnailUrl,
 } from "./board-themes";
 
-// The settings button and its menu (SM.01–SM.04, SM.06–SM.09): actions on the line on the
+// The settings button and its menu (SM.01–SM.04, SM.06–SM.09, SM.11): actions on the line on the
 // board, then the board and the piece set.
 
 interface SettingsMenuProps {
@@ -223,8 +223,23 @@ export default function SettingsMenu({ line, ply, fen, orientation }: SettingsMe
     };
   }, [open]);
 
+  const openOnLichess = () => window.open(lichessUrl(line, ply, orientation), "_blank", "noopener");
+
+  // L: Open on Lichess, menu open or not (SM.11). By position, so it works on any
+  // layout (UI.39). Not with Ctrl, Alt or Meta, so Ctrl + L stays the browser's.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.code !== "KeyL" || e.repeat || e.ctrlKey || e.altKey || e.metaKey) return;
+      setOpen(false);
+      window.open(lichessUrl(line, ply, orientation), "_blank", "noopener");
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [line, ply, orientation]);
+
   const run = [
-    () => window.open(lichessUrl(line, ply, orientation), "_blank", "noopener"),
+    openOnLichess,
     () => navigator.clipboard.writeText(movetext(line)).then(() => showNotice("PGN copied")),
     () => navigator.clipboard.writeText(fen).then(() => showNotice("FEN copied")),
   ];

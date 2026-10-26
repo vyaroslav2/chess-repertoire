@@ -34,7 +34,7 @@ Ctrl + Alt + Shift + C + U switches the coordinates to a large style and back. A
 UI.22 **Status line (temporary).**
 Inter, 16px (20), weight 400, line height 24px, letter spacing -0.011em (-0.175px), `#787674`. It sits in the free space left of the board, level with the board's top, its right edge 60px left of the board, for breathing room. It will be redone.
 - `S` turns the status line on and off. Off, it shows only while the pointer is over it. The choice is kept in the browser and survives a reload. `S` with Ctrl, Alt or Meta held does nothing, so `Ctrl + S` stays the browser's.
-  - A plain key, read as `e.key`, like `F` and `E` (UI.34). Off by default. Holding `S` down toggles once.
+  - A plain key, read by position like every letter (UI.39). Off by default. Holding `S` down toggles once.
   - Kept in localStorage (`status-line`). A script in `<head>` reads it before the first paint and marks `<html>` (`data-status-line="on"`), as for the board and pieces (SM.08, SM.09), so a saved "on" never shows late.
   - One setting for `/` and `/demo`. Since 2026-10-22.
 - Letter spacing is Inter's own for 16px, by the formula in UI.20.
@@ -121,6 +121,13 @@ With the pointer on a move's eval (UI.26), a tooltip shows the depth of the sear
 - Not on the eval gauge (UI.31): it has no number to point at.
 - Source: `evalAt` in `components/LichessMoveList.tsx`; `.eval-tooltip` in `app/globals.css`, sharing its look with `.settings-notice` and `.undo-notice`.
 - On `/depth` only, with mock evals (UI.29). The trainer doesn't pass depths to the move list yet.
+
+UI.39 **Letter keys by position.**
+Every letter hotkey is read by position (`e.code`, e.g. `KeyF`), not by the letter typed (`e.key`). So it works on a Russian layout too: the F key types "а" there, but its code is still `KeyF`. Since 2026-10-26.
+- The keys: `S` (UI.22), `F` (flip), `E` (UI.34), `X` ([[GR|GR.07]]), `L` ([[SM|SM.11]]), `Ctrl + Z` ([[UN|UN.05]]) and the large coordinates' shortcut (UI.32).
+- Was: `S`, `F`, `E` and `X` read `e.key`, so they did nothing on a Russian layout.
+- Cost: on layouts that move the Latin letters (French AZERTY, Dvorak), a key may not be labelled with its letter. Russian ЙЦУКЕН sits on the same keys as English QWERTY.
+- Digits and Enter stay `e.key`: they are the same on both layouts.
 
 ## Layout
 

@@ -422,9 +422,11 @@ export default function SrsTrainer({
         return;
       }
 
+      // Letters are read by position (e.code), so they work on any layout, Russian
+      // too (UI.39).
       // S: the status line on or off, kept across reloads (UI.22). Not with
       // Ctrl, Alt or Meta, so Ctrl + S stays the browser's.
-      if ((e.key === "s" || e.key === "S") && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      if (e.code === "KeyS" && !e.ctrlKey && !e.altKey && !e.metaKey) {
         if (!e.repeat) toggleStatusLine();
         return;
       }
@@ -442,14 +444,14 @@ export default function SrsTrainer({
       const plainKey = !e.ctrlKey && !e.altKey && !e.metaKey;
 
       // Flip board (doesn't consume/affect any other state)
-      if ((e.key === "f" || e.key === "F") && plainKey) {
+      if (e.code === "KeyF" && plainKey) {
         setFlipped((prev) => !prev);
         logFlightBox("ACTION_FLIP_BOARD", {});
         return;
       }
 
       // Show or hide the evals and gauge, kept in localStorage (UI.34)
-      if ((e.key === "e" || e.key === "E") && plainKey) {
+      if (e.code === "KeyE" && plainKey) {
         if (e.repeat) return;
         const shown = !evalsShown;
         setEvalsShown(shown);
@@ -462,7 +464,7 @@ export default function SrsTrainer({
       // X: undo the latest event, for a misclick (GR.07, UI.37): a reveal, which
       // comes after any wrong moves on its move, else the latest wrong move's row.
       // The mark stays red while a row is left.
-      if ((e.key === "x" || e.key === "X") && plainKey) {
+      if (e.code === "KeyX" && plainKey) {
         if (e.repeat || latestMarkPly < 0) return;
         logFlightBox("ACTION_CLEAR_MARK", { ply: latestMarkPly, mark: marks[latestMarkPly] });
         const rowsLeft = mistakes[latestMarkPly] ?? [];

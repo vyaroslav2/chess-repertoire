@@ -26,6 +26,12 @@ SM.02 **Open on Lichess.**
 Opens the line on Lichess's analysis board, in a new tab, at the position on the board, from the board's side. Icon: `external-link`.
 - URL: `https://lichess.org/analysis/pgn/<PGN>?color=<white|black>#<ply>`, with the PGN as in SM.03, URL-encoded. Lichess loads the whole line, so its move list shows what came after too. Checked on 2026-10-13.
 - With no moves: `https://lichess.org/analysis?color=…`.
+- Hotkey: `L` (SM.11).
+
+SM.11 **Hotkey for Open on Lichess.**
+`L` does what SM.02 does, with the menu open or closed; an open menu closes. Since 2026-10-26.
+- By position (`e.code` is `KeyL`), so it works on any layout ([[UI|UI.39]]).
+- Not with Ctrl, Alt or Meta, so `Ctrl + L` stays the browser's. Holding `L` down opens one tab.
 
 SM.03 **Copy PGN.**
 Copies the whole line to the clipboard, whatever the position on the board, e.g. `1. d4 d5 2. Bf4 c5`. Moves only: no headers, no result. Icon: `copy`.
