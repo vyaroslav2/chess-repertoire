@@ -62,6 +62,13 @@ Under Board. Icon: `crown`, with `chevron-right`. As SM.08, but Lichess's 42 2D 
 SM.10 **Kept.**
 Both choices are kept in localStorage (`board`, `piece-set`). A script in `<head>` applies them before the first paint, so the defaults never flash. As Lichess, the board and the pieces are CSS variables on `<html>`: `--board`, `--piece-wP` … `--piece-bK`.
 
+## Display
+
+SM.12 **Probability.**
+Under Piece set, after a line. Icon: `percent`. The current format at the right edge, in the dots' colour: `1 in N` or `%`. A click switches to the other and keeps the menu open, to compare. Sets how [[UI|UI.40]] shows. Since 2026-10-27.
+- Default: `1 in N`.
+- Kept in localStorage (`probability`: `odds` or `percent`), read as the evals' choice is ([[UI|UI.34]]).
+
 ## Later
 
 SM.05 **Settings to add.** #roadmap

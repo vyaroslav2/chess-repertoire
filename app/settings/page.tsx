@@ -5,6 +5,7 @@
 import { useState } from "react";
 import SettingsButton from "../../components/SettingsButton";
 import SettingsMenu, { SettingsMenuPanel } from "../../components/SettingsMenu";
+import type { ProbabilityFormat } from "../../lib/probability";
 
 const muted = { color: "var(--lichess-text-muted)", fontSize: "13px" };
 const mono = { fontFamily: "var(--font-jetbrains-mono), monospace", fontSize: "13px" };
@@ -25,6 +26,7 @@ function Slider({ label, value, onChange, min, max, step, unit }: {
 
 export default function SettingsPage() {
   const [buttonRadius, setButtonRadius] = useState(4);
+  const [probabilityFormat, setProbabilityFormat] = useState<ProbabilityFormat>("odds");
   const [panelRadius, setPanelRadius] = useState(1);
   const [itemRadius, setItemRadius] = useState(0);
   const [buttonScale, setButtonScale] = useState(6);
@@ -72,6 +74,8 @@ export default function SettingsPage() {
         ply={2}
         fen="rnbqkbnr/ppp1pppp/8/3p4/3P4/8/PPP1PPPP/RNBQKBNR w KQkq - 0 2"
         orientation="white"
+        probabilityFormat={probabilityFormat}
+        onProbabilityFormatChange={setProbabilityFormat}
       />
     </div>
   );

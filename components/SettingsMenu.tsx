@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import SettingsButton from "./SettingsButton";
+import type { ProbabilityFormat } from "../lib/probability";
 import {
   applyBoard,
   applyPieceSet,
@@ -13,14 +14,16 @@ import {
   thumbnailUrl,
 } from "./board-themes";
 
-// The settings button and its menu (SM.01–SM.04, SM.06–SM.09, SM.11): actions on the line on the
-// board, then the board and the piece set.
+// The settings button and its menu (SM.01–SM.04, SM.06–SM.09, SM.11, SM.12): actions on the line
+// on the board, then the board and the piece set, then how the probability shows.
 
 interface SettingsMenuProps {
   line: string[]; // the moves in the move list, in SAN, from the start position
   ply: number; // the position on the board: 0 is the start, 1 after the first move
   fen: string; // the position on the board
   orientation: "white" | "black";
+  probabilityFormat: ProbabilityFormat;
+  onProbabilityFormatChange: (format: ProbabilityFormat) => void;
 }
 
 // "1. d4 d5 2. Bf4": movetext only, no headers or result (SM.03).
@@ -35,7 +38,7 @@ function lichessUrl(line: string[], ply: number, orientation: string) {
 }
 
 // Lucide icons (ISC licence): "external-link", "copy", "grid-3x3", "crown",
-// "chevron-right" and "chevron-left".
+// "percent", "chevron-right" and "chevron-left".
 const externalLink = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M15 3h6v6" />
@@ -62,6 +65,13 @@ const crown = (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z" />
     <path d="M5 21h14" />
+  </svg>
+);
+const percent = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="19" x2="5" y1="5" y2="19" />
+    <circle cx="6.5" cy="6.5" r="2.5" />
+    <circle cx="17.5" cy="17.5" r="2.5" />
   </svg>
 );
 const chevronRight = (
@@ -101,12 +111,21 @@ function MenuItem({ hover, onClick, children }: { hover?: boolean; onClick?: () 
 interface SettingsMenuPanelProps {
   onSelect?: (index: number) => void;
   onOpenPicker?: (picker: Picker) => void;
+  probabilityFormat?: ProbabilityFormat;
+  onToggleProbability?: () => void;
   hoverIndex?: number; // shows that item's hover box, for the test page
   style?: React.CSSProperties;
 }
 
 // The panel alone, so the test page can show it open (UI.29).
-export function SettingsMenuPanel({ onSelect, onOpenPicker, hoverIndex, style }: SettingsMenuPanelProps) {
+export function SettingsMenuPanel({
+  onSelect,
+  onOpenPicker,
+  probabilityFormat = "odds",
+  onToggleProbability,
+  hoverIndex,
+  style,
+}: SettingsMenuPanelProps) {
   return (
     <div className="settings-menu" role="menu" style={style}>
       {items.map((item, index) => (
@@ -123,6 +142,12 @@ export function SettingsMenuPanel({ onSelect, onOpenPicker, hoverIndex, style }:
           {chevronRight}
         </MenuItem>
       ))}
+      <div className="settings-menu-separator" role="separator" />
+      <MenuItem onClick={onToggleProbability}>
+        {percent}
+        Probability
+        <span className="settings-menu-value">{probabilityFormat === "odds" ? "1 in N" : "%"}</span>
+      </MenuItem>
     </div>
   );
 }
@@ -189,7 +214,14 @@ function PickerPanel({ picker, onBack }: { picker: Picker; onBack: () => void })
   );
 }
 
-export default function SettingsMenu({ line, ply, fen, orientation }: SettingsMenuProps) {
+export default function SettingsMenu({
+  line,
+  ply,
+  fen,
+  orientation,
+  probabilityFormat,
+  onProbabilityFormatChange,
+}: SettingsMenuProps) {
   const [open, setOpen] = useState(false);
   const [picker, setPicker] = useState<Picker | null>(null); // a list in the menu's place
   const rootRef = useRef<HTMLDivElement>(null);
@@ -261,6 +293,9 @@ export default function SettingsMenu({ line, ply, fen, orientation }: SettingsMe
             setOpen(false);
           }}
           onOpenPicker={setPicker}
+          probabilityFormat={probabilityFormat}
+          // Switches in place and keeps the menu open, to compare (SM.12).
+          onToggleProbability={() => onProbabilityFormatChange(probabilityFormat === "odds" ? "percent" : "odds")}
         />
       )}
       {open && picker && <PickerPanel picker={picker} onBack={() => setPicker(null)} />}

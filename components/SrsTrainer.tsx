@@ -8,6 +8,7 @@ import LichessMoveList from "./LichessMoveList";
 import EvalGauge from "./EvalGauge";
 import SettingsMenu from "./SettingsMenu";
 import { toggleStatusLine } from "./status-line";
+import { formatProbability, probabilityFormatKey, type ProbabilityFormat } from "../lib/probability";
 
 // UI.34: whether the evals and gauge show.
 const evalsKey = "evals";
@@ -161,6 +162,20 @@ export default function SrsTrainer({
     } catch {}
   }, []);
 
+  // How the probability shows beside the opening name (UI.40, SM.12); kept across reloads.
+  const [probabilityFormat, setProbabilityFormat] = useState<ProbabilityFormat>("odds");
+  useLayoutEffect(() => {
+    try {
+      if (localStorage.getItem(probabilityFormatKey) === "percent") setProbabilityFormat("percent");
+    } catch {}
+  }, []);
+  const changeProbabilityFormat = (format: ProbabilityFormat) => {
+    setProbabilityFormat(format);
+    try {
+      localStorage.setItem(probabilityFormatKey, format);
+    } catch {}
+  };
+
   // Lichess's sounds: Capture.mp3 for a capture, right or wrong, Move.mp3 for any other move.
   const soundsRef = useRef<{ move: HTMLAudioElement; capture: HTMLAudioElement } | null>(null);
 
@@ -200,6 +215,9 @@ export default function SrsTrainer({
           ? "No opening classification (Lichess Masters)"
           : "";
   const hasPositionOpening = positionOpening !== "";
+  // The share of games reaching the position on the board (UI.40); none at the start.
+  const positionProbability =
+    currentPlyIndex <= 0 ? null : formatProbability(currentOpening?.cumProb, probabilityFormat);
 
   // Derived lock state
   const expectedPlyIndex =
@@ -808,6 +826,8 @@ export default function SrsTrainer({
         ply={Math.min(Math.max(currentPlyIndex, 0), line.length)}
         fen={fen}
         orientation={orientation}
+        probabilityFormat={probabilityFormat}
+        onProbabilityFormatChange={changeProbabilityFormat}
       />
 
       {undoMessage && (
@@ -903,7 +923,7 @@ export default function SrsTrainer({
           </p>
         )}
 
-        {/* Opening name, 4px above the board (UI.04) */}
+        {/* Opening name, 4px above the board (UI.04), and the probability at its right edge (UI.40) */}
         <div
           style={{
             position: "absolute",
@@ -911,6 +931,7 @@ export default function SrsTrainer({
             bottom: "calc(100% + 4px)",
             width: "var(--board-size)",
             maxWidth: "100%",
+            display: "flex",
             color: "var(--opening-text)",
             fontSize: "14px",
             fontWeight: 375,
@@ -918,13 +939,24 @@ export default function SrsTrainer({
             // Inter's recommended tracking at 14px (rsms.me/inter "dynamic metrics"): -0.087px
             letterSpacing: "-0.0062em",
             whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            visibility: hasPositionOpening ? "visible" : "hidden",
           }}
-          title={hasPositionOpening ? positionOpening : undefined}
         >
-          {hasPositionOpening ? positionOpening : "ECO Opening Name"}
+          <span
+            style={{
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              visibility: hasPositionOpening ? "visible" : "hidden",
+            }}
+            title={hasPositionOpening ? positionOpening : undefined}
+          >
+            {hasPositionOpening ? positionOpening : "ECO Opening Name"}
+          </span>
+          {positionProbability && (
+            <span style={{ flex: "none", marginLeft: "auto", paddingLeft: "16px" }}>
+              {positionProbability}
+            </span>
+          )}
         </div>
 
         <div

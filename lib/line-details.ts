@@ -17,20 +17,22 @@ export async function lineEvals(repertoireId: string, historyUcis: string[]) {
 }
 
 // The opening at each ply of a line, for live move-list browsing (UI.04): the
-// start position, each move of the history, then the answer.
+// start position, each move of the history, then the answer. With its cumProb (UI.40).
 export async function lineOpenings(repertoireId: string, history: string, targetMove: TargetMove) {
   const historyUcis = history === "" ? [] : history.split(/\s+/);
   const histories = ["", ...historyUcis.map((_, index) => historyUcis.slice(0, index + 1).join(" "))];
   const historyNodes = await prisma.repertoireNode.findMany({
     where: { repertoireId, history: { in: histories } },
-    select: { history: true, eco: true, openingName: true, openingMetadataStatus: true }
+    select: { history: true, eco: true, openingName: true, openingMetadataStatus: true, cumProb: true }
   });
   const metadataByHistory = new Map(historyNodes.map(node => [node.history, node]));
-  const openingByPly = histories.map(history => metadataByHistory.get(history) ?? null);
+  // A repetition's last position is not a node, so it has no cumProb.
+  const openingByPly: ({ history: string; eco: string | null; openingName: string | null; openingMetadataStatus: string | null; cumProb: number | null } | null)[] =
+    histories.map(history => metadataByHistory.get(history) ?? null);
   if (targetMove.toNodeId) {
     const destination = await prisma.repertoireNode.findUnique({
       where: { id: targetMove.toNodeId },
-      select: { history: true, eco: true, openingName: true, openingMetadataStatus: true }
+      select: { history: true, eco: true, openingName: true, openingMetadataStatus: true, cumProb: true }
     });
     openingByPly.push(destination);
   } else if (targetMove.stopReason === "Repetition" && targetMove.uci) {
@@ -43,7 +45,8 @@ export async function lineOpenings(repertoireId: string, history: string, target
       history: routeHistory,
       eco: terminal.eco,
       openingName: terminal.openingName,
-      openingMetadataStatus: terminal.status
+      openingMetadataStatus: terminal.status,
+      cumProb: null
     } : null);
   }
   return openingByPly;

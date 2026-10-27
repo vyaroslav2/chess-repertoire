@@ -135,6 +135,15 @@ UI.27 **Centring.** The board is centred across and down; only the board counts.
 
 UI.28 **Opening name position.** The opening name sits 4px above the board, as wide as the board and lined up with its left edge.
 
+UI.40 **Probability.**
+The share of games that reach the position on the board ([[cumulative-probability|cumProb]]), on the opening name's line, right-aligned with the board's right edge. Same style as the name (UI.20). Since 2026-10-27.
+- At least 16px between the name and the probability. A longer name is cut with an ellipsis (`…`) before it; the full name shows as a tooltip.
+- Two formats, chosen in the settings menu ([[SM|SM.12]]). Default: "1 in N".
+  - "1 in N": N = 1 ÷ cumProb. One decimal below 10, without a trailing ".0"; a whole number from 10 up, rounded to the nearest; a comma from 1,000 up. 75% → `1 in 1.3`, 50% → `1 in 2`, 10% → `1 in 10`, 0.64% → `1 in 156`, 0.0123% → `1 in 8,130`.
+  - %: two decimals. 12.34% → `12.34%`, 0.10% → `0.10%`. Below 0.005%, which would show `0.00%`: `<0.01%`.
+- Why one decimal below 10: with whole numbers, everything from 67% to 100% showed "1 in 1", which reads as "certain". High values are not only on move 1: in a Black repertoire, 1.e4 e5 2.Nf3 is about 51%.
+- None at the start position, as for the name. None after a repetition that ends a line: its last position is not a node, so it has no cumProb.
+
 UI.29 **Test pages.** Temporary: `/fonts`, `/coords`, `/moves`, `/grid`, `/gauge`, `/depth`, `/settings` and `/status`. Delete them before deploying.
 - `/depth` shows the real move list with mock evals and depths (UI.38): the Blackburne Shilling trap, which ends in a checkmate on the board, so one eval has no tooltip.
 - `/status` shows Anki's counts (UI.22, [[AK|AK.12]]) left of a real board, always visible. Sliders set the size, the labels' weight and the numbers' weight (Anki's overview: 700), line height, column gap, the gap to the board and the offset from its top; letter spacing follows the size, by UI.20's formula. Colours: the app's muted grey, or Anki's own for New, Learning and To Review (blue, red, green; night or day). Zeros can be faint, as in Anki's deck list (its overview never fades them). The counts can be typed, or set to 9999 each, 54 · 5 · 0, or 0 · 0 · 0. Above the board, the opening name (UI.20, UI.28), with sliders for its size, weight and gap to the board, and for its grey: the lightness of `#979490`'s warm grey. Its colour can also be picked or typed as hex, with its contrast shown. Weights step by 25; letter spacing and line height follow the size. Three real names to try, from the repertoire's longest (90 characters) to "A40 Queen's Pawn Game". Lines at the bottom sum up the choice, for UI.20 and UI.22.
