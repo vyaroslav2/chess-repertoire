@@ -100,7 +100,7 @@ const pickers: { label: string; icon: React.ReactNode; picker: Picker }[] = [
 // Never takes focus, so Enter still goes to the trainer.
 const keepFocus = (e: React.MouseEvent) => e.preventDefault();
 
-function MenuItem({ hover, onClick, children }: { hover?: boolean; onClick?: () => void; children: React.ReactNode }) {
+function MenuItem({ hover, onClick, children }: { hover?: boolean; onClick?: (e: React.MouseEvent) => void; children: React.ReactNode }) {
   return (
     <button className={`settings-menu-item${hover ? " hover" : ""}`} role="menuitem" onMouseDown={keepFocus} onClick={onClick}>
       {children}
@@ -143,10 +143,15 @@ export function SettingsMenuPanel({
         </MenuItem>
       ))}
       <div className="settings-menu-separator" role="separator" />
-      <MenuItem onClick={onToggleProbability}>
+      {/* A double click's second click is ignored: it switched the format back at once (SM.12). */}
+      <MenuItem onClick={(e) => e.detail <= 1 && onToggleProbability?.()}>
         {percent}
         Probability
-        <span className="settings-menu-value">{probabilityFormat === "odds" ? "1 in N" : "%"}</span>
+        {/* Both values take the same place, so the menu keeps the wider one's width (SM.12). */}
+        <span className="settings-menu-value">
+          <span style={{ visibility: probabilityFormat === "odds" ? "visible" : "hidden" }}>1 in N</span>
+          <span style={{ visibility: probabilityFormat === "percent" ? "visible" : "hidden" }}>%</span>
+        </span>
       </MenuItem>
     </div>
   );

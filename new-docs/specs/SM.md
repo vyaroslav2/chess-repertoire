@@ -67,6 +67,8 @@ Both choices are kept in localStorage (`board`, `piece-set`). A script in `<head
 SM.12 **Probability.**
 Under Piece set, after a line. Icon: `percent`. The current format at the right edge, in the dots' colour: `1 in N` or `%`. A click switches to the other and keeps the menu open, to compare. Sets how [[UI|UI.40]] shows. Since 2026-10-27.
 - Default: `1 in N`.
+- The menu keeps one width in both formats: the value's place is as wide as `1 in N`, so `%` doesn't make the menu narrower.
+- A double click switches once. Its second click is ignored: before 2026-10-27 it switched the format straight back, so the new format flashed and was gone.
 - Kept in localStorage (`probability`: `odds` or `percent`), read as the evals' choice is ([[UI|UI.34]]).
 
 ## Later

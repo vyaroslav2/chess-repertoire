@@ -690,11 +690,18 @@ html.coords-large .cg-wrap coords coord {
   margin-left: auto;
 }
 
-/* A setting's current value, at the right edge (SM.12). */
+/* A setting's current value, at the right edge (SM.12). Every value sits in one grid
+   cell, the others hidden, so the cell is as wide as the widest. */
 .settings-menu-value {
+  display: grid;
+  justify-items: end;
   margin-left: auto;
   padding-left: 16px;
   color: var(--settings-icon);
+}
+
+.settings-menu-value > * {
+  grid-area: 1 / 1;
 }
 
 /* The lists replace the menu in the same panel, as in Lichess's own menu:
