@@ -3,16 +3,13 @@ import { describe, it } from "node:test";
 import { formatProbability } from "./probability";
 
 describe("formatProbability", () => {
-  it("shows 1 in N, one decimal below 10", () => {
-    assert.equal(formatProbability(0.75, "odds"), "1 in 1.3");
-    assert.equal(formatProbability(0.6, "odds"), "1 in 1.7");
-    assert.equal(formatProbability(0.4, "odds"), "1 in 2.5");
-    assert.equal(formatProbability(0.1234, "odds"), "1 in 8.1");
-    assert.equal(formatProbability(0.5, "odds"), "1 in 2");
+  it("shows 1 in N as a whole number, with commas", () => {
     assert.equal(formatProbability(1, "odds"), "1 in 1");
-  });
-
-  it("shows 1 in N as a whole number from 10 up, with commas", () => {
+    assert.equal(formatProbability(0.75, "odds"), "1 in 1");
+    assert.equal(formatProbability(0.6411505507359839, "odds"), "1 in 2");
+    assert.equal(formatProbability(0.5, "odds"), "1 in 2");
+    assert.equal(formatProbability(0.4, "odds"), "1 in 3");
+    assert.equal(formatProbability(0.1234, "odds"), "1 in 8");
     assert.equal(formatProbability(0.1, "odds"), "1 in 10");
     assert.equal(formatProbability(0.1003, "odds"), "1 in 10");
     assert.equal(formatProbability(0.0064, "odds"), "1 in 156");
