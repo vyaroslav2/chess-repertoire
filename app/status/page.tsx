@@ -6,6 +6,7 @@
 import { useState } from "react";
 import Chessground from "@react-chess/chessground";
 import "chessground/assets/chessground.base.css";
+import { formatProbability, type ProbabilityFormat } from "../../lib/probability";
 
 const muted = { color: "var(--lichess-text-muted)", fontSize: "13px" };
 const mono = { fontFamily: "var(--font-jetbrains-mono), monospace", fontSize: "13px" };
@@ -26,6 +27,16 @@ const openings = [
   "D00 Queen's Pawn Game: Accelerated London System, Steinitz Countergambit, Morris Countergambit",
   "B11 Caro-Kann Defense: Two Knights Attack, Mindeno Variation, Exchange Line",
   "A40 Queen's Pawn Game",
+];
+
+// Probabilities beside the name (UI.40): real cumProbs from the repertoire, from its
+// highest after one move to its lowest, then a made-up one for the widest "1 in N".
+const probabilities = [
+  { label: "1.e4", cumProb: 0.64115055 },
+  { label: "1.e4 c6 2.Nf3", cumProb: 0.16760363 },
+  { label: "1.d4 d5 2.Bf4 c5 3.dxc5 Nc6 4.Nf3 Nf6", cumProb: 0.00073119 },
+  { label: "1.d4 d5 2.Bf4 c5 3.dxc5 Nc6 4.a3 e5", cumProb: 0.0003375 },
+  { label: "made up", cumProb: 0.00004 },
 ];
 
 // Inter's recommended tracking, in em (UI.20).
@@ -104,6 +115,10 @@ export default function StatusPage() {
   const [openingWeight, setOpeningWeight] = useState(375);
   const [openingGap, setOpeningGap] = useState(4);
   const [opening, setOpening] = useState(openings[0]);
+  const [cumProb, setCumProb] = useState(probabilities[3].cumProb);
+  const [probabilityFormat, setProbabilityFormat] = useState<ProbabilityFormat>("odds");
+  const [probabilityGap, setProbabilityGap] = useState(16);
+  const probability = formatProbability(cumProb, probabilityFormat);
   const [openingColour, setOpeningColour] = useState("#979490");
   const [openingColourText, setOpeningColourText] = useState("#979490");
   const [openingLightness, setOpeningLightness] = useState(openingGrey.lightness);
@@ -151,14 +166,15 @@ export default function StatusPage() {
             </div>
           ))}
         </div>
-        {/* Opening name above the board, as in the trainer (UI.20, UI.28) */}
+        {/* Opening name above the board, and the probability at its right edge, as in the
+            trainer (UI.20, UI.28, UI.40) */}
         <div
-          title={opening}
           style={{
             position: "absolute",
             left: 0,
             bottom: `calc(100% + ${openingGap}px)`,
             width: "100%",
+            display: "flex",
             color: openingColour,
             fontSize: `${openingSize}px`,
             fontWeight: openingWeight,
@@ -166,11 +182,14 @@ export default function StatusPage() {
             lineHeight: `${Math.round((openingSize * 20) / 14)}px`,
             letterSpacing: `${openingTracking.toFixed(4)}em`,
             whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
           }}
         >
-          {opening}
+          <span title={opening} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+            {opening}
+          </span>
+          {probability && (
+            <span style={{ flex: "none", marginLeft: "auto", paddingLeft: `${probabilityGap}px`, fontVariantNumeric: "tabular-nums" }}>{probability}</span>
+          )}
         </div>
         <div className="board-themed" style={{ width: "100%", height: "100%", boxShadow: "var(--glass-shadow)" }}>
           <Chessground width="100%" height="100%" config={{ coordinates: true, viewOnly: true }} />
@@ -275,11 +294,34 @@ export default function StatusPage() {
             </button>
           ))}
         </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+          <Slider label="Probability gap" value={probabilityGap} onChange={setProbabilityGap} min={0} max={48} step={1} unit="px" />
+          <div style={{ display: "flex", gap: "4px" }}>
+            {(["odds", "percent"] as const).map((format) => (
+              <button
+                key={format}
+                onClick={() => setProbabilityFormat(format)}
+                style={{ ...buttonStyle, borderColor: probabilityFormat === format ? "var(--lichess-text-muted)" : "var(--lichess-border)" }}
+              >
+                {format === "odds" ? "1 in N" : "%"}
+              </button>
+            ))}
+          </div>
+          {probabilities.map((item) => (
+            <button
+              key={item.cumProb}
+              onClick={() => setCumProb(item.cumProb)}
+              style={{ ...buttonStyle, textAlign: "left", borderColor: cumProb === item.cumProb ? "var(--lichess-text-muted)" : "var(--lichess-border)" }}
+            >
+              {formatProbability(item.cumProb, "odds")} · {formatProbability(item.cumProb, "percent")} · {item.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* The current choice, to copy into UI.20 and UI.22 */}
       <div style={{ ...mono, color: "var(--lichess-text-muted)" }}>
-        Opening: Inter {openingSize}px, weight {openingWeight}, line height {Math.round((openingSize * 20) / 14)}px, letter spacing {openingTracking.toFixed(4)}em, {openingColour} ({contrast(openingColour).toFixed(2)} : 1), {openingGap}px above the board
+        Opening: Inter {openingSize}px, weight {openingWeight}, line height {Math.round((openingSize * 20) / 14)}px, letter spacing {openingTracking.toFixed(4)}em, {openingColour} ({contrast(openingColour).toFixed(2)} : 1), {openingGap}px above the board, probability {probabilityGap}px after the name
       </div>
       <div style={{ ...mono, color: "var(--lichess-text-muted)" }}>
         Counts:

@@ -953,7 +953,8 @@ export default function SrsTrainer({
             {hasPositionOpening ? positionOpening : "ECO Opening Name"}
           </span>
           {positionProbability && (
-            <span style={{ flex: "none", marginLeft: "auto", paddingLeft: "16px" }}>
+            // Fixed-width digits, so the right-aligned text doesn't shift as the digits change (UI.40).
+            <span style={{ flex: "none", marginLeft: "auto", paddingLeft: "16px", fontVariantNumeric: "tabular-nums" }}>
               {positionProbability}
             </span>
           )}
