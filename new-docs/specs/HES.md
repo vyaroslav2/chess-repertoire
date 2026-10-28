@@ -92,6 +92,40 @@ HES.40 Made-up positions, checked by unit tests (`tests/he.test.ts`, all passing
 * **The best case:** a contender it drops, with few games or many poor ones, could not have passed with a full search either.
 * **The engine check:** a contender beyond the cp limit fails, whatever its safe gain.
 
+## First run, 2026-10-28
+
+HES.80 **Both k runs pick the same moves.** `tree-low` and `tree-best`, on pool `2024-02-03`:
+* 84 positions judged, 2 skipped (Black's first move).
+* 16 switches in each run: 1 at Black's move 2, 6 at move 3 and 9 at move 4. They cover 11% of the judged positions' cumProb.
+* 0 positions differ. The k test (HES.31) says k's exact value doesn't matter here. Explorer moves have thousands to millions of games, against k's few hundred pretend games, so the games decide. k only moved safe gains on the smallest samples (Nd7 with 1,354 games: 6.4 points at the low end, 3.9 at the best fit), and none crossed the margin.
+* About 215 searches in all, after the best-case filter dropped 853 of 900 contenders.
+* A 2M search picks a different top move from the tree's in 17 positions (`top2M`).
+
+HES.81 **The switches**, by cumProb:
+
+| cumProb | Line | Tree's move | Switch | Safe gain | cp loss |
+| --- | --- | --- | --- | --- | --- |
+| 5.92% | 1. d4 d5 2. c4 e6 3. Nc3 | Nf6 | Be7 | 3.5 | 4 |
+| 2.88% | 1. e4 c6 2. Bc4 d5 3. exd5 cxd5 4. Bb3 | Bf5 | a5 | 2.4–2.6 | 24 |
+| 2.23% | 1. d4 d5 2. c4 e6 3. Nc3 Nf6 4. Nf3 | Bb4 | Nbd7 | 4.6 | 8 |
+| 2.15% | 1. d4 d5 2. c4 e6 3. Nc3 Nf6 4. Bg5 | Be7 | Nbd7 | 3.3 | 8 |
+| 2.05% | 1. e4 c6 2. d4 d5 3. e5 c5 4. Nf3 | cxd4 | Nc6 | 2.0 | 10 |
+| 1.87% | 1. d4 d5 2. c4 e6 3. Nf3 | Nf6 | a6 | 1.0 | 9 |
+| 1.39% | 1. d4 d5 2. Nc3 | Nf6 | c5 | 1.7–1.8 | 7 |
+| 1.02% | 1. d4 d5 2. Bf4 c5 3. c3 | Nc6 | Qb6 | 4.2–4.7 | 0 |
+| 0.89% | 1. d4 d5 2. Nf3 Nf6 3. Bf4 | e6 | c5 | 6.3 | −6 |
+| 0.84% | 1. d4 d5 2. c4 e6 3. e3 | Nf6 | Be7 | 1.9–2.0 | 6 |
+| 0.69% | 1. d4 d5 2. Bf4 c5 3. c3 Nc6 4. e3 | Bf5 | Qb6 | 3.9–4.0 | −6 |
+| 0.32% | 1. d4 d5 2. Bf4 c5 3. Nf3 cxd4 4. Nxd4 | f6 | Nd7 | 3.9–6.4 | 7 |
+| 0.28% | 1. d4 d5 2. Nf3 Nf6 3. e3 c5 4. c3 | e6 | Nbd7 | 1.5–3.3 | 12 |
+| 0.24% | 1. d4 d5 2. Nf3 Nf6 3. Nc3 | e6 | c5 | 4.5–4.6 | 0 |
+| 0.17% | 1. e4 c6 2. Nc3 d5 3. exd5 cxd5 4. Bb5+ | Bd7 | Nc6 | 1.6 | 10 |
+| 0.07% | 1. d4 d5 2. Bf4 c5 3. dxc5 Nc6 4. Nf3 | Nf6 | f6 | 1.3–2.0 | 23 |
+
+Safe gains are in points, best fit to low end where they differ. The 1… a6 switch (1.87%) only just clears the 1-point margin.
+
+HES.82 **What this means.** With Explorer's large samples, the selector is in effect "the best-scoring human move within 30 cp". So the dials that matter are the margin, the cp limit, and the known limits in HES.50–51 (all years, any rating gap), not k. More months of k data would not change today's choices.
+
 ## Known limits
 
 HES.50 **Explorer games are from all years.** They include 2025 and 2026, which HE keeps apart for tuning and the final test. That is fine for choosing moves. But tuning and testing the dials will need move counts from the right years only, from our own downloads or the Explorer's date filter. That belongs to the tuning step, not this one.
