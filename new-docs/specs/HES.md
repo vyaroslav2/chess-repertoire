@@ -122,7 +122,7 @@ HES.81 **The switches**, by cumProb:
 | 0.17% | 1. e4 c6 2. Nc3 d5 3. exd5 cxd5 4. Bb5+ | Bd7 | Nc6 | 1.6 | 10 |
 | 0.07% | 1. d4 d5 2. Bf4 c5 3. dxc5 Nc6 4. Nf3 | Nf6 | f6 | 1.3–2.0 | 23 |
 
-Safe gains are in points, best fit to low end where they differ. The 1… a6 switch (1.87%) only just clears the 1-point margin.
+Safe gains are in points, best fit to low end where they differ. The 3… a6 switch (1.87%) only just clears the 1-point margin.
 
 HES.82 **What this means.** With Explorer's large samples, the selector is in effect "the best-scoring human move within 30 cp". So the dials that matter are the margin, the cp limit, and the known limits in HES.50–51 (all years, any rating gap), not k. More months of k data would not change today's choices.
 
