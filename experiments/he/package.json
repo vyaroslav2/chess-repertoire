@@ -12,6 +12,7 @@
     "recheck": "tsx cli.ts recheck",
     "check-game": "tsx cli.ts recheck --run 2024-02-3000mb --engine stockfish-windows-x86-64-universal/stockfish/stockfish-windows-x86-64-universal.exe",
     "pool": "tsx cli.ts pool",
+    "select": "tsx cli.ts select",
     "curve": "tsx cli.ts curve",
     "k": "tsx cli.ts k",
     "dots": "tsx cli.ts dots",
