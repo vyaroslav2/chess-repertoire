@@ -10,8 +10,9 @@ import { parseEvaluation } from "../engine";
 import { writeJobs } from "../jobs";
 import { importResults } from "../results";
 import { basis, chances, fit, random } from "../curve";
-import { fitK, logGamma, type KGroup } from "../scatter";
+import { fitK, fitKTrend, logGamma, type KGroup } from "../scatter";
 import { sampledMoves } from "../dots";
+import { poolRuns } from "../pool";
 import { DATA_ROOT, assertDataDirectory, runPath } from "../paths";
 import type { Observation } from "../types";
 
@@ -355,6 +356,71 @@ test("k fit finds the scatter it was given, and none where there is none", () =>
   assert.ok(scattered.range[0]! < 30 && 30 < scattered.range[1]!, JSON.stringify(scattered));
   const none = fitK(groups(null));
   assert.ok(none.range[1] === null && none.k > 200, JSON.stringify(none));
+});
+test("pool adds up the same position and move across runs, and refuses doubtful input", async () => {
+  const [feb, mar, pool] = ["feb", "mar", "pool"].map(name => "test-pool-" + name + "-" + process.pid);
+  const row = observation();
+  const group = (uci: string, games: number, extra = {}) => ({ id: 1, period: "fit", positionKey: row.positionKey, uci, fens: [row.fen],
+    games, wins: games, draws: 0, losses: 0, moveNumbers: { [row.moveNumber]: games }, part: "a", cpWhite: -35, mateWhite: null,
+    depth: 24, nodes: 2000000, ...extra });
+  const write = (name: string, file: string, rows: object[]) =>
+    writeFile(path.join(runPath(name), file), rows.map(r => JSON.stringify(r)).join("\n") + "\n");
+  try {
+    for (const name of [feb, mar]) await assertDataDirectory(runPath(name));
+    await write(feb, "evals.jsonl", [group(row.uci, 1)]);
+    await write(feb, "observations.jsonl", [row]);
+    // March's search of the same group is February's, reused.
+    await write(mar, "evals.jsonl", [group(row.uci, 2, { id: 4, part: "b", from: { run: feb, part: "a", id: 1 } }),
+      group("a7a6", 1, { id: 5, cpWhite: 10 })]);
+    await write(mar, "observations.jsonl", [row]);
+    await assert.rejects(poolRuns(pool, [feb, mar]), /is in an earlier run too/);
+    const other = { ...row, gameId: "efgh5678" }, third = { ...row, gameId: "ijkl9012", uci: "a7a6" };
+    await write(mar, "observations.jsonl", [other, { ...other, gameId: "mnop3456" }, third]);
+    const report = await poolRuns(pool, [feb, mar]);
+    assert.deepEqual([report.groups, report.games, report.repeated], [2, 4, 1]);
+    const rows = (await readFile(path.join(runPath(pool), "evals.jsonl"), "utf8")).trim().split("\n").map(l => JSON.parse(l));
+    assert.deepEqual(rows.map(r => [r.id, r.uci, r.games, r.wins, r.from]),
+      [[1, row.uci, 3, 3, { run: feb, part: "a", id: 1 }], [2, "a7a6", 1, 1, { run: mar, part: "a", id: 5 }]]);
+    const games = await sampledMoves(pool);
+    assert.deepEqual(games.map(g => [g.gameId, g.searchRun, g.groupGames]),
+      [[row.gameId, feb, 3], ["efgh5678", feb, 3], ["mnop3456", feb, 3], ["ijkl9012", mar, 1]]);
+    await assert.rejects(poolRuns(pool, [feb, mar]));
+    await rm(runPath(pool), { recursive: true });
+    await write(mar, "evals.jsonl", [group(row.uci, 2, { cpWhite: -36 })]);
+    await assert.rejects(poolRuns(pool, [feb, mar]), /another eval/);
+  } finally { for (const name of [feb, mar, pool]) await rm(runPath(name), { recursive: true, force: true }); }
+});
+test("k trend fit finds a k that falls with the move, and a flat one", () => {
+  const next = random("k-trend-test");
+  const normal = () => Math.sqrt(-2 * Math.log(1 - next())) * Math.cos(2 * Math.PI * next());
+  const gamma = (shape: number): number => {
+    if (shape < 1) return gamma(shape + 1) * Math.pow(next(), 1 / shape);
+    const d = shape - 1 / 3, c = 1 / Math.sqrt(9 * d);
+    for (;;) {
+      const z = normal(), v = (1 + c * z) ** 3;
+      if (v > 0 && Math.log(next()) < z * z / 2 + d - d * v + d * Math.log(v)) return d * v;
+    }
+  };
+  const groups = (k: (move: number) => number) => new Map(Array.from({ length: 7 }, (_, i) => i + 2).map(move =>
+    [move, Array.from({ length: 1500 }, (_, i): KGroup => {
+      const centre = i % 2 ? [0.45, 0.06, 0.49] : [0.3, 0.05, 0.65];
+      const draws = centre.map(p => gamma(k(move) * p));
+      const chances = draws.map(value => value / draws.reduce((sum, d) => sum + d, 0));
+      const counts = [0, 0, 0];
+      for (let n = 0; n < 5 + (i % 40); n++) { const u = next(); counts[u < chances[0] ? 0 : u < chances[0] + chances[1] ? 1 : 2]++; }
+      return { counts, centre };
+    })]));
+  const inside = (value: number, range: (number | null)[]) => (range[0] ?? 0) < value && value < (range[1] ?? Infinity);
+  const falling = fitKTrend(groups(move => 60 * 0.6 ** (move - 2)));
+  // The check fails 1 time in 20 on a true trend, as this sample shows (12.6 against 11.07);
+  // other samples gave 0.5 to 5.3. A step is far beyond it.
+  assert.ok(inside(60, falling.k2.range) && inside(0.6, falling.r.range) && falling.check.chiSquare < 15, JSON.stringify(falling));
+  const step = fitKTrend(groups(move => move <= 4 ? 200 : 10));
+  assert.ok(!step.check.holds && step.check.chiSquare > 50, JSON.stringify(step.check));
+  const move5 = falling.moves.find(row => row.move === 5)!;
+  assert.ok(inside(60 * 0.6 ** 3, move5.range) && move5.groups === 1500, JSON.stringify(move5));
+  const flat = fitKTrend(groups(() => 20));
+  assert.ok(inside(1, flat.r.range) && inside(20, flat.k2.range), JSON.stringify(flat));
 });
 test("each game gets its group's eval, and a game without one is refused", async () => {
   const name = "test-dots-" + process.pid, run = runPath(name);

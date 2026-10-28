@@ -10,6 +10,7 @@ import type { Period } from "./types";
 import { resolveInputPath } from "./paths";
 import { checkConnection, loadGames, loadSampledMoves } from "./db";
 import { writeDots } from "./dots";
+import { poolRuns } from "./pool";
 import path from "node:path";
 import { DATA_ROOT, runPath } from "./paths";
 
@@ -21,6 +22,7 @@ const HELP = String.raw`Human evidence pilot
   npm --prefix experiments/he run jobs -- --run 2024-03-3000mb [--period fit] [--split 20000] [--reuse 2024-02-3000mb ...]
   npm --prefix experiments/he run results -- --run 2024-02-3000mb [--period fit]
   npm --prefix experiments/he run recheck -- --run 2024-02-3000mb --engine <stockfish-19-binary> [--count 20 | --game g8gCaNm4]
+  npm --prefix experiments/he run pool -- --run 2024-02-03 --from 2024-02-3000mb --from 2024-03-3000mb
   npm --prefix experiments/he run curve -- --run 2024-02-3000mb
   npm --prefix experiments/he run k -- --run 2024-02-3000mb
   npm --prefix experiments/he run dots -- --run 2024-02-3000mb
@@ -40,8 +42,10 @@ With --reuse, groups a finished earlier run has searched go to jobs-reused.jsonl
 Results checks results-a.jsonl and results-b.jsonl against their jobs and writes evals.jsonl: each group with its eval.
 Recheck searches --count random jobs from each results file again here; they must match exactly.
 With --game it searches that one game's position afresh and prints the Colab line above the local one.
+Pool joins finished runs into one: groups with the same position and move add up. Curve, k and dots run on it.
 Curve fits eval → Black's win/draw/loss on evals.jsonl and writes curve.json and curve.svg.
 K fits the scatter around the curve on groups with 2+ games, overall and by size, eval and move, into k.json.
+It also fits k as a trend, k(move) = k2 × r^(move − 2), giving a k for every move.
 Input supports .pgn and .pgn.gz. Decompress Lichess .pgn.zst exports first.
 `;
 async function main() {
@@ -49,7 +53,7 @@ async function main() {
   if (!command || command === "--help" || command === "help") { console.log(HELP); return; }
   const parsed = parseArgs({ args: process.argv.slice(3), allowPositionals: true, options: {
     run: { type: "string" }, seed: { type: "string" }, "max-gap": { type: "string" },
-    month: { type: "string" }, gb: { type: "string" }, limit: { type: "string" }, engine: { type: "string" }, period: { type: "string" }, split: { type: "string" }, reuse: { type: "string", multiple: true }, count: { type: "string" }, game: { type: "string" }, help: { type: "boolean" },
+    month: { type: "string" }, gb: { type: "string" }, limit: { type: "string" }, engine: { type: "string" }, period: { type: "string" }, split: { type: "string" }, reuse: { type: "string", multiple: true }, from: { type: "string", multiple: true }, count: { type: "string" }, game: { type: "string" }, help: { type: "boolean" },
   } });
   const { values, positionals } = parsed;
   if (values.help) { console.log(HELP); return; }
@@ -59,6 +63,7 @@ async function main() {
   if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) throw new Error("--limit must be a positive integer.");
   if (command !== "download" && (values.month || values.gb)) throw new Error("--month and --gb belong to download.");
   if (command !== "jobs" && values.reuse) throw new Error("--reuse belongs to jobs.");
+  if (command !== "pool" && values.from) throw new Error("--from belongs to pool.");
   if (command === "download") {
     if (positionals.length || values.engine || values.period) throw new Error("Download takes --month and --gb, not input paths or engine options.");
     if (!values.month || !values.gb) throw new Error("Download requires --month YYYY-MM and --gb (e.g. 2.5).");
@@ -92,6 +97,10 @@ async function main() {
     const period = values.period ?? "fit";
     if (!["fit", "tune", "test"].includes(period)) throw new Error("--period must be fit, tune or test.");
     console.log(JSON.stringify(await importResults(values.run, period as Period), null, 2));
+  } else if (command === "pool") {
+    if (positionals.length || values.seed || values["max-gap"] || values.engine || values.limit || values.split || values.count || values.period)
+      throw new Error("Pool takes only --run and two or more --from.");
+    console.log(JSON.stringify(await poolRuns(values.run, values.from ?? []), null, 2));
   } else if (command === "curve") {
     if (positionals.length || values.seed || values["max-gap"] || values.engine || values.limit || values.split || values.count || values.period)
       throw new Error("Curve takes only --run.");

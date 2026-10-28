@@ -187,6 +187,22 @@ bootstrap resamples of groups for a 95% range, and writes `curve.json` and `curv
 and a cp eval: a Dirichlet-multinomial centred on the curve's win/draw/loss at each group's eval,
 k searched from 0.5 to 100,000 on a log scale, with a 95% profile-likelihood range (open where it
 runs off the scale). It fits all groups, then by group size, eval and move number, into `k.json`.
+It also fits k as a trend over Black's move, k(move) = k2 × r^(move − 2), on all groups at once
+(each group at its most common move number): k2 and r with their 95% ranges, and k with its
+range at every move from 2 to 15. Its check compares the trend with a free k for each move
+(a likelihood-ratio test at 95%); `holds` says whether the trend does about as well.
+
+Months are pooled into one run, so that a position and move seen in several of them becomes one
+group with their games summed:
+
+```powershell
+npm --prefix experiments/he run pool -- --run 2024-02-03 --from 2024-02-3000mb --from 2024-03-3000mb
+```
+
+`pool` writes `evals.jsonl`, `observations.jsonl` and `pool.json`. Each group keeps its search
+in `from`. It refuses a game found in two runs, and a group whose evals differ between runs
+(write later months' jobs with `--reuse`). `curve`, `k` and `dots` then run on the pool as on
+any run. `load-moves` refuses a pool: its games are loaded with their own months.
 
 ## Checks
 

@@ -1,6 +1,9 @@
 import mysql from "mysql2/promise";
 import { readGames, gameRecord, type GameRecord } from "./pgn";
+import { access } from "node:fs/promises";
+import path from "node:path";
 import { sampledMoves } from "./dots";
+import { runPath } from "./paths";
 
 // Connection details come from HE_MYSQL_URL (mysql://he:<password>@127.0.0.1:13306/he),
 // so no password lives in the code. Error messages never repeat the URL.
@@ -74,6 +77,9 @@ export const SAMPLED_MOVES_TABLE = `CREATE TABLE IF NOT EXISTS sampled_moves (
 
 // Loading is safe to repeat: a row already in the table is overwritten, never doubled.
 export async function loadSampledMoves(run: string) {
+  // A pool's games belong to their months: loading it would relabel each row with the pool's name.
+  if (await access(path.join(runPath(run), "pool.json")).then(() => true, () => false))
+    throw new Error(run + " is a pool. Load its months instead.");
   const connection = await connect();
   try {
     await connection.query(SAMPLED_MOVES_TABLE);
