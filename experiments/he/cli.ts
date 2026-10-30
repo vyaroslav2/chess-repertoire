@@ -12,6 +12,7 @@ import { checkConnection, loadGames, loadSampledMoves } from "./db";
 import { writeDots } from "./dots";
 import { poolRuns } from "./pool";
 import { selectMoves } from "./select";
+import { DEFAULT_BASE, sampleGroups, walkExplorer } from "./explorer";
 import path from "node:path";
 import { DATA_ROOT, runPath } from "./paths";
 
@@ -25,9 +26,11 @@ const HELP = String.raw`Human evidence pilot
   npm --prefix experiments/he run recheck -- --run 2024-02-3000mb --engine <stockfish-19-binary> [--count 20 | --game g8gCaNm4]
   npm --prefix experiments/he run pool -- --run 2024-02-03 --from 2024-02-3000mb --from 2024-03-3000mb
   npm --prefix experiments/he run curve -- --run 2024-02-3000mb
-  npm --prefix experiments/he run k -- --run 2024-02-3000mb
+  npm --prefix experiments/he run k -- --run 2024-02-3000mb [--curve 2024-02-03]
+  npm --prefix experiments/he run explorer -- --run explorer-2023-24 [--follow 1000] [--calls 5000] [--min-group 2] [--last-move 15] [--ask-from 1] [--explorer http://127.0.0.1:55555/lichess]
+  npm --prefix experiments/he run sample -- --run explorer-k --from explorer-deep [--min-games 50] [--per-move 500]
   npm --prefix experiments/he run dots -- --run 2024-02-3000mb
-  npm --prefix experiments/he run select -- --run tree-low --pool 2024-02-03 --k low --engine <stockfish-19-binary> [--db prisma/dev.db]
+  npm --prefix experiments/he run select -- --run tree-low --pool 2024-02-03 --k low --engine <stockfish-19-binary> [--k-run explorer-k] [--db prisma/dev.db]
   npm --prefix experiments/he run db-check
   npm --prefix experiments/he run load -- --run 2024-01-2500mb [--limit 100]
   npm --prefix experiments/he run load-moves -- --run 2024-02-3000mb
@@ -47,7 +50,10 @@ With --game it searches that one game's position afresh and prints the Colab lin
 Pool joins finished runs into one: groups with the same position and move add up. Curve, k and dots run on it.
 Curve fits eval → Black's win/draw/loss on evals.jsonl and writes curve.json and curve.svg.
 K fits the scatter around the curve on groups with 2+ games, overall and by size, eval and move, into k.json.
-It also fits k as a trend, k(move) = k2 × r^(move − 2), giving a k for every move.
+It also fits k for each move on its own, and as a trend, k(move) = k2 × r^(move − 2), giving a k for every move.
+--curve takes the curve from another run, e.g. the pool's for an Explorer run.
+Explorer walks the Lichess Explorer's main lines (2023-24, 1600-2199, rapid and classical) through the local
+token proxy and writes each Black move's counts as groups.jsonl (HEK). Answers are cached; a rerun calls nothing new.
 Select runs the HE selector over the app's tree (read-only): for each position with Black to move, the
 tree's move stays unless another move's games prove it better (HES). --k low or best picks k from the pool's trend.
 Input supports .pgn and .pgn.gz. Decompress Lichess .pgn.zst exports first.
@@ -57,7 +63,7 @@ async function main() {
   if (!command || command === "--help" || command === "help") { console.log(HELP); return; }
   const parsed = parseArgs({ args: process.argv.slice(3), allowPositionals: true, options: {
     run: { type: "string" }, seed: { type: "string" }, "max-gap": { type: "string" },
-    month: { type: "string" }, gb: { type: "string" }, limit: { type: "string" }, engine: { type: "string" }, period: { type: "string" }, split: { type: "string" }, reuse: { type: "string", multiple: true }, from: { type: "string", multiple: true }, pool: { type: "string" }, k: { type: "string" }, db: { type: "string" }, count: { type: "string" }, game: { type: "string" }, help: { type: "boolean" },
+    month: { type: "string" }, gb: { type: "string" }, limit: { type: "string" }, engine: { type: "string" }, period: { type: "string" }, split: { type: "string" }, reuse: { type: "string", multiple: true }, from: { type: "string", multiple: true }, pool: { type: "string" }, k: { type: "string" }, db: { type: "string" }, count: { type: "string" }, game: { type: "string" }, curve: { type: "string" }, follow: { type: "string" }, calls: { type: "string" }, "min-group": { type: "string" }, "last-move": { type: "string" }, "ask-from": { type: "string" }, "min-games": { type: "string" }, "k-run": { type: "string" }, "per-move": { type: "string" }, explorer: { type: "string" }, help: { type: "boolean" },
   } });
   const { values, positionals } = parsed;
   if (values.help) { console.log(HELP); return; }
@@ -67,8 +73,12 @@ async function main() {
   if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) throw new Error("--limit must be a positive integer.");
   if (command !== "download" && (values.month || values.gb)) throw new Error("--month and --gb belong to download.");
   if (command !== "jobs" && values.reuse) throw new Error("--reuse belongs to jobs.");
-  if (command !== "pool" && values.from) throw new Error("--from belongs to pool.");
-  if (command !== "select" && (values.pool || values.k || values.db)) throw new Error("--pool, --k and --db belong to select.");
+  if (command !== "pool" && command !== "sample" && values.from) throw new Error("--from belongs to pool and sample.");
+  if (command !== "sample" && (values["min-games"] || values["per-move"])) throw new Error("--min-games and --per-move belong to sample.");
+  if (command !== "select" && (values.pool || values.k || values["k-run"] || values.db)) throw new Error("--pool, --k, --k-run and --db belong to select.");
+  if (command !== "k" && values.curve) throw new Error("--curve belongs to k.");
+  if (command !== "explorer" && (values.follow || values.calls || values["min-group"] || values["last-move"] || values["ask-from"] || values.explorer))
+    throw new Error("--follow, --calls, --min-group, --last-move, --ask-from and --explorer belong to explorer.");
   if (command === "download") {
     if (positionals.length || values.engine || values.period) throw new Error("Download takes --month and --gb, not input paths or engine options.");
     if (!values.month || !values.gb) throw new Error("Download requires --month YYYY-MM and --gb (e.g. 2.5).");
@@ -110,9 +120,9 @@ async function main() {
     if (!values.engine || !values.pool || (values.k !== "low" && values.k !== "best"))
       throw new Error("Select needs --engine, --pool and --k low or --k best.");
     if (positionals.length || values.seed || values["max-gap"] || values.limit || values.split || values.count || values.period)
-      throw new Error("Select takes only --run, --pool, --k, --engine and --db.");
+      throw new Error("Select takes only --run, --pool, --k, --k-run, --engine and --db.");
     console.log(JSON.stringify(await selectMoves(values.run, values.pool, values.k, resolveInputPath(values.engine),
-      values.db ? resolveInputPath(values.db) : undefined), null, 2));
+      values.db ? resolveInputPath(values.db) : undefined, undefined, values["k-run"]), null, 2));
   } else if (command === "curve") {
     if (positionals.length || values.seed || values["max-gap"] || values.engine || values.limit || values.split || values.count || values.period)
       throw new Error("Curve takes only --run.");
@@ -124,8 +134,19 @@ async function main() {
     console.log(JSON.stringify(command === "dots" ? await writeDots(values.run) : await loadSampledMoves(values.run), null, 2));
   } else if (command === "k") {
     if (positionals.length || values.seed || values["max-gap"] || values.engine || values.limit || values.split || values.count || values.period)
-      throw new Error("K takes only --run.");
-    console.log(JSON.stringify(await writeK(values.run), null, 2));
+      throw new Error("K takes only --run and --curve.");
+    console.log(JSON.stringify(await writeK(values.run, values.curve), null, 2));
+  } else if (command === "explorer") {
+    if (positionals.length || values.seed || values["max-gap"] || values.engine || values.limit || values.split || values.count || values.period)
+      throw new Error("Explorer takes only --run, --follow, --calls, --min-group, --last-move, --ask-from and --explorer.");
+    const number = (value: string | undefined, fallback: number) => value === undefined ? fallback : Number(value);
+    console.log(JSON.stringify(await walkExplorer(values.run, { base: values.explorer ?? DEFAULT_BASE,
+      follow: number(values.follow, 1000), calls: number(values.calls, 5000), minGroup: number(values["min-group"], 2),
+      lastMove: number(values["last-move"], 15), askFrom: number(values["ask-from"], 1) }), null, 2));
+  } else if (command === "sample") {
+    if (positionals.length || values.seed || values["max-gap"] || values.engine || values.limit || values.split || values.count || values.period || values.from?.length !== 1)
+      throw new Error("Sample takes only --run, one --from, --min-games and --per-move.");
+    console.log(JSON.stringify(await sampleGroups(values.run, values.from[0], Number(values["min-games"] ?? 50), Number(values["per-move"] ?? 500)), null, 2));
   } else if (command === "recheck") {
     if (!values.engine) throw new Error("--engine is required; point to a Stockfish 19 binary.");
     if (positionals.length || values.seed || values["max-gap"] || values.limit || values.split || values.period || (values.game && values.count))

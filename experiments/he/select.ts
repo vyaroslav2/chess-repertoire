@@ -94,15 +94,16 @@ export type SelectionRow = { line: string; fullFen: string; cumProb: number; mov
   skipped?: "fixed" | "no-games" | "mate"; k?: number; championInfo?: ChampionInfo; contenders?: Judged[]; switched?: boolean };
 
 // Runs the selector over every tree position with Black to move and a move already chosen,
-// and writes data/selections/<name>/selections.jsonl and selections-summary.json.
+// and writes data/selections/<name>/selections.jsonl and selections-summary.json. The curve comes
+// from the pool; k's trend from kRun, the pool unless another run's k.json is named (HEK.81).
 export async function selectMoves(name: string, pool: string, kChoice: "low" | "best", binary: string,
-  database = path.resolve(HE_ROOT, "../../prisma/dev.db"), dials: Dials = DIALS) {
+  database = path.resolve(HE_ROOT, "../../prisma/dev.db"), dials: Dials = DIALS, kRun = pool) {
   runPath(name);
   const directory = path.join(DATA_ROOT, "selections", name);
   await assertDataDirectory(directory);
   const curveFile = JSON.parse(await readFile(path.join(runPath(pool), "curve.json"), "utf8"));
-  const kFile = JSON.parse(await readFile(path.join(runPath(pool), "k.json"), "utf8"));
-  if (!kFile.trend) throw new Error(pool + "'s k.json has no trend: run k again on it.");
+  const kFile = JSON.parse(await readFile(path.join(runPath(kRun), "k.json"), "utf8"));
+  if (!kFile.trend) throw new Error(kRun + "'s k.json has no trend: run k again on it.");
   const curve: Curve = cp => chances(curveFile.chosen.params, curveFile.chosen.knots, cp);
   const kFor = (move: number) => {
     const row = kFile.trend.moves.find((m: { move: number }) => m.move === Math.min(15, Math.max(2, move)));
@@ -166,7 +167,7 @@ export async function selectMoves(name: string, pool: string, kChoice: "low" | "
   }
   const verdicts: Record<string, number> = {};
   for (const r of judgedRows) for (const c of r.contenders ?? []) verdicts[c.verdict] = (verdicts[c.verdict] ?? 0) + 1;
-  const summary = { name, pool, k: kChoice, dials, curve: curveFile.chosen.name, engine: engine.profile.id, explorerProfile, database,
+  const summary = { name, pool, k: kChoice, kRun, dials, curve: curveFile.chosen.name, engine: engine.profile.id, explorerProfile, database,
     positions: rows.length, judged: judgedRows.length,
     skipped: Object.fromEntries(["fixed", "no-games", "mate"].map(s => [s, rows.filter(r => r.skipped === s).length])),
     searches, contenders: verdicts, switches: switches.length,

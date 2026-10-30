@@ -139,11 +139,12 @@ const SPLITS: Record<string, { label: string; keep: (row: GroupEval) => boolean 
 };
 
 // Fits k on all groups with 2+ games and a cp eval, then separately by group size, eval and
-// move number, then as a trend over the move, and writes k.json.
-export async function writeK(name: string) {
+// move number, then for each move on its own and as a trend over the move, and writes k.json.
+// curveRun names the run whose curve.json is the centre: an Explorer run has none of its own (HEK.14).
+export async function writeK(name: string, curveRun = name) {
   const directory = runPath(name);
   await assertDataDirectory(directory);
-  const curve = JSON.parse(await readFile(path.join(directory, "curve.json"), "utf8"));
+  const curve = JSON.parse(await readFile(path.join(runPath(curveRun), "curve.json"), "utf8"));
   const rows: GroupEval[] = (await readFile(path.join(directory, "evals.jsonl"), "utf8")).trim().split("\n")
     .map(line => JSON.parse(line)).filter((row: GroupEval) => row.cpWhite !== null && row.games >= 2);
   const toGroup = (row: GroupEval): KGroup => {
@@ -155,8 +156,10 @@ export async function writeK(name: string) {
     [split, parts.map(part => ({ part: part.label, ...fitK(rows.filter(part.keep).map(toGroup)) }))]));
   const byMove = new Map<number, KGroup[]>();
   for (const row of rows) byMove.set(mainMove(row), [...byMove.get(mainMove(row)) ?? [], toGroup(row)]);
+  // HEK.15: groups at one move number share no games, so a fit per move stays clean.
+  const perMove = [...byMove].sort(([x], [y]) => x - y).map(([move, groups]) => ({ move, ...fitK(groups) }));
   const trend = fitKTrend(byMove);
-  const result = { run: name, curve: curve.chosen.name, kSearched: [K_MIN, K_MAX], all, splits, trend };
+  const result = { run: name, curve: curve.chosen.name, curveRun, kSearched: [K_MIN, K_MAX], all, splits, perMove, trend };
   // Exclusive destination protects an existing fit.
   const output = await open(path.join(directory, "k.json"), "wx");
   await output.write(JSON.stringify(result, null, 2) + "\n"); await output.close();

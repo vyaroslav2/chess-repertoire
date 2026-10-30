@@ -204,6 +204,45 @@ in `from`. It refuses a game found in two runs, and a group whose evals differ b
 (write later months' jobs with `--reuse`). `curve`, `k` and `dots` then run on the pool as on
 any run. `load-moves` refuses a pool: its games are loaded with their own months.
 
+## Groups from the Explorer
+
+`explorer` builds groups from the Lichess Explorer's counts instead of our own games, for a better
+k at deep moves (`new-docs/specs/HEK.md`):
+
+```powershell
+npm --prefix experiments/he run explorer -- --run explorer-2023-24
+npm --prefix experiments/he run k -- --run explorer-2023-24 --curve 2024-02-03
+```
+
+It walks the main lines from 1. d4 d5 and 1. e4 c6, most-played position first, with the curve's
+filters where the Explorer has them: 2023-01 to 2024-12, rating groups 1600, 1800 and 2000 (the
+average of both players, 1600–2199), rapid and classical. It follows every move with at least
+`--follow` games (1000), stops after Black's move `--last-move` (15) and makes at most `--calls`
+requests (5000). At each position with Black to move, every move with at least `--min-group` games
+(2) is a group in `groups.jsonl`, with Black's move number; `positions.jsonl` lists every position
+asked and `manifest.json` counts the groups by move and size. `jobs`, Colab and `results` then work
+on the run as on an import.
+
+The Explorer needs a Lichess token. Requests go through the local proxy (`--explorer`, default
+`http://127.0.0.1:55555/lichess`), which adds it; HE never sees the token. Answers are cached in
+`data/explorer-cache/`, named by the request's filters, so a rerun under a new run name, e.g. with a
+bigger `--min-group`, asks nothing new. `--ask-from <move>` asks only from that Black move on;
+earlier positions come from the cache, and one missing there is skipped. It sends a deeper walk's
+calls to deep moves.
+
+An Explorer run has too many groups to search them all. `sample` writes the ones to search as a new
+run: every group with at least `--min-games` games (50), at most `--per-move` at each Black move
+(500), picked by a hash of position and move, so the same sample comes out every time:
+
+```powershell
+npm --prefix experiments/he run sample -- --run explorer-k --from explorer-deep
+npm --prefix experiments/he run jobs -- --run explorer-k --reuse 2024-02-3000mb --reuse 2024-03-3000mb
+```
+
+`k --curve` centres the fit on another run's curve, since an Explorer run has none. k now also fits
+each move number on its own (`perMove`): groups at one move number share no games, while the
+overall fit and the trend count a game once for each position it passes.
+
 ## The selector
 
 `select` runs HE's selector (`new-docs/specs/HES.md`) over the app's tree, read-only:
@@ -218,7 +257,8 @@ gets k pretend games at the curve's chances for its eval, never better than the 
 its real games. It switches only if, 95% sure, it scores at least 1 point more than the champion
 and loses at most 30 cp. A contender that couldn't pass even with the champion's prior and its
 real games is not searched. Evals are HE's Stockfish 19 at 2M nodes, cached. `--k low` takes each move's k from the low end
-of the pool's trend range, `--k best` from its best fit. It writes
+of the pool's trend range, `--k best` from its best fit. `--k-run explorer-k` takes the trend from
+that run's `k.json` instead, while the curve still comes from the pool. It writes
 `data/selections/<run>/selections.jsonl` (every position, every contender and why it passed or
 failed) and `selections-summary.json` (switches, their cumProb-weighted share, by move number).
 `--db` points at another SQLite file; the default is `prisma/dev.db`, opened read-only.

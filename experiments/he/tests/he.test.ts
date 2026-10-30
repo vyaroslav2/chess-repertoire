@@ -15,6 +15,7 @@ import { sampledMoves } from "../dots";
 import { poolRuns } from "../pool";
 import { choose, couldPass, DIALS, judge, safeGain, scoreDraws, type Curve } from "../select";
 import { DATA_ROOT, assertDataDirectory, runPath } from "../paths";
+import { sampleGroups, walkExplorer, type ExplorerAnswer } from "../explorer";
 import type { Observation } from "../types";
 
 const options = { seed: "he-v1", maxGap: 100 as const };
@@ -485,4 +486,69 @@ test("each game gets its group's eval, and a game without one is refused", async
     await writeFile(path.join(run, "evals.jsonl"), JSON.stringify({ ...group, uci: "a7a6" }) + "\n");
     await assert.rejects(sampledMoves(name), /has no eval/);
   } finally { await rm(run, { recursive: true }); }
+});
+test("the Explorer walk writes Black's moves as groups and follows only big moves (HEK)", async () => {
+  const fenAfter = (...sans: string[]) => { const chess = new Chess(); for (const san of sans) chess.move(san); return chess.fen(); };
+  const key = (fen: string) => fen.split(" ").slice(0, 4).join(" ");
+  const move = (san: string, white: number, draws: number, black: number) => ({ uci: "?", san, white, draws, black });
+  const answer = (...moves: ReturnType<typeof move>[]): ExplorerAnswer => ({ moves,
+    white: moves.reduce((s, m) => s + m.white, 0), draws: moves.reduce((s, m) => s + m.draws, 0), black: moves.reduce((s, m) => s + m.black, 0) });
+  const answers = new Map([
+    [key(fenAfter("d4", "d5")), answer(move("c4", 2000, 1000, 2000), move("Nf3", 200, 100, 200))],
+    [key(fenAfter("d4", "d5", "c4")), answer(move("e6", 1000, 500, 1500), move("dxc4", 500, 500, 500), move("Nh6", 1, 0, 0))],
+    [key(fenAfter("d4", "d5", "c4", "e6")), answer(move("Nc3", 800, 400, 800))],
+    [key(fenAfter("d4", "d5", "c4", "e6", "Nc3")), answer(move("Nf6", 700, 600, 700))],
+    [key(fenAfter("d4", "d5", "c4", "dxc4")), answer()],
+    [key(fenAfter("e4", "c6")), answer()],
+  ]);
+  const asked: string[] = [], urls: string[] = [];
+  const fetcher = async (url: string) => {
+    urls.push(url);
+    const fen = new URL(url).searchParams.get("fen")!;
+    asked.push(fen);
+    const found = answers.get(key(fen));
+    if (!found) throw new Error("asked an unexpected position: " + fen);
+    return found;
+  };
+  const cache = await mkdtemp(path.join(DATA_ROOT, "test-explorer-cache-"));
+  const names = ["first", "again", "capped", "deep", "sample", "sample-one", "sample-two"].map(n => "test-explorer-" + n + "-" + process.pid);
+  const options = { base: "http://proxy/lichess", follow: 1000, calls: 50, minGroup: 2, lastMove: 3, cache };
+  try {
+    const first = await walkExplorer(names[0], options, fetcher);
+    assert.deepEqual([first.calls, first.positions, first.groups, first.stoppedAtCap], [6, 6, 3, false]);
+    const url = new URL(urls[0]);
+    assert.deepEqual([url.origin + url.pathname, url.searchParams.get("ratings"), url.searchParams.get("since"), url.searchParams.get("until")],
+      ["http://proxy/lichess/lichess", "1600,1800,2000", "2023-01", "2024-12"]);
+    const groups = (await readFile(path.join(runPath(names[0]), "groups.jsonl"), "utf8")).trim().split("\n").map(l => JSON.parse(l));
+    // Black's view: Black's wins are wins. Nh6 has one game, so it is no group.
+    assert.deepEqual(groups.map(g => [g.uci, g.games, g.wins, g.losses, g.moveNumbers]),
+      [["e7e6", 3000, 1500, 1000, { "2": 3000 }], ["d5c4", 1500, 500, 500, { "2": 1500 }], ["g8f6", 2000, 700, 700, { "3": 2000 }]]);
+    assert.deepEqual(first.byMove["2"], { groups: 2, games: 4500, "2-9": 0, "10-49": 0, "50-199": 0, "200-999": 0, "1000+": 2 });
+    // Nf3 (500 games) is not followed; after Black's move 3 the walk stops.
+    assert.ok(!asked.some(fen => key(fen) === key(fenAfter("d4", "d5", "Nf3"))));
+    // A rerun takes every answer from the cache and asks nothing.
+    const again = await walkExplorer(names[1], options, async () => { throw new Error("called the Explorer"); });
+    assert.deepEqual([again.calls, again.cached, again.groups], [0, 6, 3]);
+    // The call cap stops the walk and says so.
+    const capped = await walkExplorer(names[2], { ...options, cache: cache + "-capped", calls: 2 }, fetcher);
+    assert.deepEqual([capped.calls, capped.stoppedAtCap], [2, true]);
+    // From move 3 on only: Nf3 (500 games) is now followed, but its move-2 position is not in the cache, so it is skipped.
+    const deep = await walkExplorer(names[3], { ...options, follow: 500, askFrom: 3 }, async () => { throw new Error("called the Explorer"); });
+    assert.deepEqual([deep.calls, deep.skipped, deep.cached], [0, 1, 6]);
+    await assert.rejects(walkExplorer(names[0], options, fetcher));
+    // The sample keeps groups of 1,600+ games: dxc4 (1,500) is left out.
+    const sample = await sampleGroups(names[4], names[0], 1600, 5);
+    assert.deepEqual([sample.groups, sample.byMove["2"], sample.byMove["3"]], [2, { eligible: 1, chosen: 1, games: 3000 }, { eligible: 1, chosen: 1, games: 2000 }]);
+    const sampled = (await readFile(path.join(runPath(names[4]), "groups.jsonl"), "utf8")).trim().split("\n").map(l => JSON.parse(l).uci);
+    assert.deepEqual(sampled, ["e7e6", "g8f6"]);
+    // At most one per move, and the same one every time.
+    const [one, two] = [await sampleGroups(names[5], names[0], 2, 1), await sampleGroups(names[6], names[0], 2, 1)];
+    assert.deepEqual([one.groups, one.byMove["2"].eligible, one.byMove["2"].chosen], [2, 2, 1]);
+    assert.deepEqual(two.byMove, one.byMove);
+    assert.equal(await readFile(path.join(runPath(names[6]), "groups.jsonl"), "utf8"), await readFile(path.join(runPath(names[5]), "groups.jsonl"), "utf8"));
+    await assert.rejects(sampleGroups(names[5], names[0], 2, 1));
+  } finally {
+    for (const name of names) await rm(runPath(name), { recursive: true, force: true });
+    await rm(cache, { recursive: true }); await rm(cache + "-capped", { recursive: true, force: true });
+  }
 });

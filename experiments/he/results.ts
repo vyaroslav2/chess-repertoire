@@ -39,7 +39,7 @@ const absent = (error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") 
 const found = (info: string) => info.replace(/ (?:nps|time) \d+/g, "");
 
 // Reads each part's jobs and results files and checks every result against its job and its session.
-// A part with no jobs file is left out.
+// A part with no jobs file, or an empty one, is left out.
 // Groups in jobs-reused.jsonl take their search from the earlier run, checked the same way.
 async function readResults(directory: string): Promise<{ checked: Map<number, Checked>; binarySha256: string;
   report: Partial<Record<Part, object>>; reused?: { groups: number; runs: Record<string, object>; sha256: string } }> {
@@ -49,7 +49,7 @@ async function readResults(directory: string): Promise<{ checked: Map<number, Ch
   for (const part of PARTS) {
     const jobsFile = "jobs-" + part + ".jsonl", resultsFile = "results-" + part + ".jsonl";
     const jobsText = await readFile(path.join(directory, jobsFile), "utf8").catch(absent);
-    if (jobsText === null) continue;
+    if (jobsText === null || !jobsText.trim()) continue;
     const jobs = new Map(lines<Job>(jobsText, jobsFile).map(job => [job.id, job]));
     const text = await readFile(path.join(directory, resultsFile), "utf8");
     const rows = lines<SessionLine | ResultLine>(text, resultsFile);
