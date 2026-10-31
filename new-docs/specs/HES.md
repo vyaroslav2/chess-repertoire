@@ -55,7 +55,7 @@ HES.20 Starting values, to be tuned later on 2025 games (as [[HE]] plans):
 
 | Dial | Start | Why |
 | --- | --- | --- |
-| Confidence | 95% | HE's example |
+| Confidence | 90% | HE's example was 95%; lowered after the 2025 tuning (HES.104), 2026-10-31 |
 | Margin | 1 point of score | HE's example ("1% better") |
 | Per-move cp limit | 30 cp | your taste: how much engine soundness to trade. Decided 2026-10-28 |
 | k | two runs: the trend's low end and its best fit | the test in HES.31 |
@@ -205,3 +205,37 @@ Per switch, 2025 gain in points (games, champion / chosen):
 HES.96 **What it shows.** Inside the 1600 and 1800 groups the gains are as large as overall (4.4 and 4.1 against 4.1). So they don't come from stronger players choosing the switch. That leaves bias inside a group's 200 points, and the rating gap (HES.51); neither is likely to explain gains this size. The gains shrink at 2000 (3.4), but stay clearly positive. The 1600 and 1800 groups are the ones that matter for this repertoire.
 
 HES.97 **One switch to doubt: a5.** In 2000 games it scores 11.5 ± 5.1 points worse (103 games), more than two standard errors. Its 2025 gain overall (1.6) was already below its safe gain (1.7). The other three losses at 2000 are within noise or on very few games (Nc6 −1.6 ± 1.8; Nd7 on 19 games; f6 on 68).
+
+## Tuning the dials on 2025, 2026-10-31
+
+HES.100 **Five looser settings.** `select --margin <points> --confidence <percent>`, each chosen on 2023–24 and checked on 2025 as in HES.90; k from `explorer-k`, cp limit 30 as before. Runs `tune-m05-c95`, `tune-m1-c90`, `tune-m05-c90`, `tune-m0-c90`, `tune-m0-c80`, against `tree-2023-24` (1 point, 95%).
+
+| Margin | Confidence | Switches | cumProb | New switches | Pooled 2025 gain of the new ones |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 95% | 14 | 10.8% | — | — |
+| 0.5 | 95% | 14 | 10.8% | 0 | — |
+| 1 | 90% | 15 | 10.9% | 1 | 2.2 ± 3.5 |
+| 0.5 | 90% | 15 | 10.9% | 1 | 2.2 ± 3.5 |
+| 0 | 90% | 18 | 12.3% | 4 | 0.4 ± 0.2 |
+| 0 | 80% | 20 | 14.1% | 6 | 0.4 ± 0.1 |
+
+HES.101 **The switches they add.** Gains in points; cp loss against the champion:
+
+| cumProb | Line | Champion → chosen | Safe gain | 2025 gain | cp loss | First at |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3.81% | 1. d4 d5 2. Nf3 | Nf6 → c5 | 0.0 | 0.3 ± 0.2 | 15 | 0 points, 80% |
+| 2.01% | 1. d4 d5 2. e3 | Nf6 → c5 | 0.1 | 0.6 ± 0.3 | 1 | 0 points, 90% |
+| 0.73% | 1. d4 d5 2. Nf3 Nf6 3. c4 | e6 → c6 | 0.3 | 0.0 ± 0.3 | 2 | 0 points, 90% |
+| 0.28% | 1. d4 d5 2. Nf3 Nf6 3. e3 c5 4. c3 | e6 → Nbd7 | 1.2 | 2.2 ± 3.5 | 12 | 1 point, 90% |
+| 0.17% | 1. e4 c6 2. Nc3 d5 3. exd5 cxd5 4. Bb5+ | Bd7 → Nc6 | 0.3 | 2.1 ± 1.1 | 10 | 0 points, 90% |
+| 0.11% | 1. d4 d5 2. c4 e6 3. e3 Nf6 4. a3 | Be7 → b6 | 0.2 | 4.3 ± 1.5 | −3 | 0 points, 80% |
+
+No setting dropped or changed any of the 14 switches in HES.92.
+
+HES.102 **What it shows.** None of the added switches does worse in 2025. Their gains match what the selector predicted: where it promised next to nothing, it delivered next to nothing (0.0–0.6 points), and the big Explorer samples make even those small gains real. So the confidence and margin aren't guarding against luck here. The 95% is stricter than it needs to be.
+
+HES.103 **So the margin is a matter of taste:** how small a gain is worth leaving the tree's move for. With margin 0, the selector would leave the engine's move for a third of a point (c5 after 2. Nf3, at 15 cp). With margin 1, a switch must be worth at least a point.
+
+HES.104 **New dials, adopted 2026-10-31:** confidence 90%, margin 1 point. They are now the defaults in `select`. 90% adds one switch (Nbd7, also chosen on all years) at no visible cost. Keeping the 1-point margin leaves out gains too small to notice over a board. A tree with many deep positions on few games may need this check again: there, the confidence does the work that big samples do here.
+
+HES.105 **Limits.** 20 switches in one tree, all within Black's first four moves, is thin evidence. 2025 is now spent on tuning; 2026 stays frozen for the final test (HES.60).
