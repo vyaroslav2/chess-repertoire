@@ -1,10 +1,10 @@
 ---
 tags:
-  - in-progress
+  - processed
 ---
 # HEG — Human evidence in the generator
 
-HEG puts the selector ([[HES]]) into the tree generator. Black's move stays local Stockfish's top move unless human games show, 90% sure, that another move scores at least a point more, within the cp limits. Planned 2026-10-31. Not built.
+HEG puts the selector ([[HES]]) into the tree generator. Black's move stays local Stockfish's top move unless human games show, 90% sure, that another move scores at least a point more, within the cp limits. Planned and built 2026-10-31. Not yet run on the real tree (HEG.98).
 
 ## Why
 
@@ -46,7 +46,7 @@ HEG.21 **Evals at 2M nodes, as the curve was fitted.** Threads 1, Hash 64 MB, Mu
 
 HEG.22 **The curve, frozen.** The pool's chosen curve (`experiments/he/data/runs/2024-02-03/curve.json`: its name, parameters and knots) is copied into a file under `src/`, with where it came from. The generator never reads `experiments/`.
 
-HEG.23 **k from the Explorer trend.** k(move) = 265 × 0.879^(move − 2), the best fit on `explorer-k` ([[HEK]] HEK.83). It is 265 at Black's move 2, 120 at move 8 and 50 at move 15. Moves outside 2–15 take the nearest end, as `select` does.
+HEG.23 **k from the Explorer trend.** k(move) = 265 × 0.879^(move − 2), the best fit on `explorer-k` ([[HEK]] HEK.83). It is 265 at Black's move 2, 122 at move 8 and 50 at move 15. Moves outside 2–15 take the nearest end, as `select` does.
 
 ## The dials
 
@@ -77,7 +77,7 @@ HEG.32 **cp loss at 200M.** Decided 2026-10-31. The prior needs 2M evals, becaus
 HEG.40 **On a switched Black move** ([[DB]] DB.14):
 * `selectionMethod`: `Human evidence`. `moveOrigin`: `Human Move`. `engineRank`: `null`.
 * New fields: the champion's SAN, both 2M evals, the 200M cp loss, the move's games and score, its safe gain, and the line budget spent after it.
-* Every judged contender too, as JSON on the node, and in the log (HEG.41): its games, score, eval, safe gain and verdict. Decided 2026-10-31: it is small, and it explains a choice later.
+* Every judged contender too, as JSON on Black's move (`selectorJudged`), and in the log (HEG.41): its games, score, eval, safe gain and verdict. Decided 2026-10-31: it is small, and it explains a choice later.
 
 HEG.41 **The log** ([[TGL]]): one line per switch: the line, champion → chosen, games, safe gain, cp loss, budget spent. The run summary adds: positions judged, switches, their share by cumProb, and 2M searches made.
 
@@ -108,3 +108,26 @@ HEG.81 **Notes that change with it:** [[OV]] OV.02 and OV.12, [[EW]] (its openin
 HEG.90 Decided 2026-10-31: recent months (HEG.20), HE's way of reading 2M evals (HEG.21), a 50 cp line budget (HEG.31), every judged contender stored (HEG.40), `humanEvidence` off until HEG.60 passes (HEG.50), cp loss measured at 200M (HEG.32).
 
 Nothing is open.
+
+## Built, 2026-10-31
+
+HEG.95 **Where it lives.**
+* `src/lib/core/selector.ts`: the maths (HEG.80). HE's `select` and `curve` now import it from there; a rerun of `select` gave the same 16 switches as before.
+* `src/lib/core/selector-evidence.ts`: the frozen curve and the k trend (HEG.22–23).
+* `src/lib/core/evaluator.ts`: EW.14, the selector at one position.
+* `src/lib/core/local-engine.ts`: the 2M search, read HE's way (HEG.21), cached in `EngineCache` under its own profile, one row per searched move.
+* `src/lib/api/lichess.ts`: the counts for `selectorMonths`, with every move (`moves=100`), under their own cache profile (HEG.20).
+* `src/lib/core/generator.ts`: the route's budget spent so far, the log lines and the summary (HEG.31, HEG.41).
+* `src/lib/core/config.ts`: the settings (HEG.30). `prisma/schema.prisma` and migration `20261031120000_human_evidence`: the fields (HEG.40).
+
+HEG.96 **Choices made in building.**
+* The cp loss is the 200M eval of the position the move reaches, minus EW.09's eval of the position before it.
+* `lineCpSpent` is stored on every Black move the selector judged. Where it did not run (a hardcoded move, or `humanEvidence` off), it is null and counts as 0.
+* A contender may lose no more than the cp limit or what the budget has left, whichever is smaller. A switch to a move the 200M search rates better spends nothing.
+* With `humanEvidence` off, Black's choice and what is stored are exactly as before; the tests check it.
+
+HEG.97 **Tests.** `src/lib/core/human-evidence.test.ts`: HE's read of a 2M search, k at the trend's ends, the switch's field rules, and a whole run on a fake Explorer and engine. In that run, a switch is built on and recorded with its fields; the budget blocks a second switch on the same line; the hardcoded first move is never judged; and `off` stores nothing new. All 246 app tests pass on `test.db`; HE's 34 pass.
+
+HEG.98 **Not done yet.**
+* Done 2026-10-31: the migration is applied to `dev.db` (`prisma migrate deploy`; backup `prisma/dev.db.bak-2026-10-31`).
+* The first build (HEG.60) has not run. It needs `humanEvidence` on, a Lichess token for the Explorer (as EX already does), and time: one 2M search per judged move and one 200M search per passing contender.
