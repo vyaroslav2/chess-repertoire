@@ -143,3 +143,65 @@ HES.60 Tuning the confidence and margin on 2025 games, the frozen 2026 test, the
 ## Cost
 
 HES.70 86 positions today. Two searches each for the champion and `top2M`, and under one contender on average after the best-case filter (HES.13). A 2M search takes about 1 s at full speed, but 5–30 s on a hot, throttled laptop. The searches are cached, so the k test reuses them.
+
+## The 2025 check, 2026-10-31
+
+HES.90 **Choose on 2023–24, check on 2025.** Explorer counts include every year (HES.50), so the first run's switches were partly chosen on the games meant for testing. So `select --months 2023-01..2024-12` reads counts from the Explorer for those months only (same ratings and speeds as [[HEK]]); `check --months 2025-01..2025-12` then fetches each switch's position for 2025 and scores the champion and the chosen move there. Run `tree-2023-24`, k from `explorer-k` ([[HEK]] HEK.88), all other dials as HES.20.
+
+HES.91 **The selection.** 14 switches of 84 positions (10.8% by cumProb), against 16 on all years. 13 are the same. One is new: c5 instead of Nbd7 after 1. d4 d5 2. c4 e6 3. Nc3 Nf6 4. Nf3 Bb4 (all years chose Nbd7 there). Three all-years switches don't pass on 2023–24 alone: Nbd7 there, Nbd7 after 1. d4 d5 2. Nf3 Nf6 3. e3 c5 4. c3, and Nc6 after 1. e4 c6 2. Nc3 d5 3. exd5 cxd5 4. Bb5+.
+
+HES.92 **All 14 score better in 2025.** Gains in points, chosen minus champion:
+
+| cumProb | Line | Champion → chosen | 2023–24 gain | Safe gain | 2025 games (champion / chosen) | 2025 gain |
+| --- | --- | --- | --- | --- | --- | --- |
+| 5.92% | 1. d4 d5 2. c4 e6 3. Nc3 | Nf6 → Be7 | 2.2 | 1.6 | 388,018 / 8,350 | 2.8 ± 0.5 |
+| 2.88% | 1. e4 c6 2. Bc4 d5 3. exd5 cxd5 4. Bb3 | Bf5 → a5 | 3.0 | 1.7 | 21,829 / 2,499 | 1.6 ± 1.0 |
+| 2.23% | 1. d4 d5 2. c4 e6 3. Nc3 Nf6 4. Nf3 | Bb4 → c5 | 4.7 | 4.4 | 69,700 / 40,796 | 3.8 ± 0.3 |
+| 2.15% | 1. d4 d5 2. c4 e6 3. Nc3 Nf6 4. Bg5 | Be7 → Nbd7 | 3.1 | 2.7 | 133,391 / 21,800 | 3.9 ± 0.4 |
+| 2.05% | 1. e4 c6 2. d4 d5 3. e5 c5 4. Nf3 | cxd4 → Nc6 | 2.7 | 2.0 | 7,470 / 23,139 | 2.8 ± 0.6 |
+| 1.87% | 1. d4 d5 2. c4 e6 3. Nf3 | Nf6 → a6 | 2.1 | 1.4 | 150,754 / 6,911 | 1.4 ± 0.6 |
+| 1.39% | 1. d4 d5 2. Nc3 | Nf6 → c5 | 2.2 | 1.8 | 278,205 / 18,896 | 3.2 ± 0.4 |
+| 1.02% | 1. d4 d5 2. Bf4 c5 3. c3 | Nc6 → Qb6 | 4.2 | 2.3 | 15,240 / 1,669 | 5.1 ± 1.2 |
+| 0.89% | 1. d4 d5 2. Nf3 Nf6 3. Bf4 | e6 → c5 | 5.8 | 5.5 | 83,257 / 44,964 | 5.8 ± 0.3 |
+| 0.84% | 1. d4 d5 2. c4 e6 3. e3 | Nf6 → Be7 | 5.2 | 3.1 | 59,053 / 810 | 4.3 ± 1.7 |
+| 0.69% | 1. d4 d5 2. Bf4 c5 3. c3 Nc6 4. e3 | Bf5 → Qb6 | 4.6 | 3.4 | 5,202 / 4,326 | 4.2 ± 1.0 |
+| 0.32% | 1. d4 d5 2. Bf4 c5 3. Nf3 cxd4 4. Nxd4 | f6 → Nd7 | 13.1 | 3.3 | 341 / 174 | 8.4 ± 4.3 |
+| 0.24% | 1. d4 d5 2. Nf3 Nf6 3. Nc3 | e6 → c5 | 5.4 | 4.5 | 19,748 / 6,328 | 6.3 ± 0.7 |
+| 0.07% | 1. d4 d5 2. Bf4 c5 3. dxc5 Nc6 4. Nf3 | Nf6 → f6 | 8.4 | 2.7 | 364 / 401 | 12.2 ± 3.4 |
+
+± is one standard error. Mean gain: 4.8 in 2023–24, 4.7 in 2025. Pooled by precision: 4.1 ± 0.1 points.
+
+HES.93 **What it shows.** The gains are not luck: they hold on new games at full size, with no shrinkage. The safe gain was mostly cautious. 11 of 14 switches gained more in 2025 than it promised, and a6 matched it (1.4). Two fell a little short: a5 (1.6 against 1.7) and c5 after 4. Nf3 Bb4 (3.8 against 4.4).
+
+HES.94 **What it doesn't show.** A new year has the same bias as the old: if stronger players pick the chosen move, 2025 repeats that. So the check rules out luck, not "who plays the move" (HEK.30) or the rating gap (HES.51). The per-rating-group check is next: does each switch win in each Explorer rating group on its own?
+
+HES.95 **Each rating group on its own.** `check --rating 1600|1800|2000` scores the same 14 switches on 2025 games from one Explorer rating group only (the players' average: 1600–1799, 1800–1999, 2000–2199). If a switch won only because stronger players choose it, its gain would shrink or vanish inside a group.
+
+| Group | Better | Pooled gain |
+| --- | --- | --- |
+| 1600 | 14 of 14 | 4.4 ± 0.2 |
+| 1800 | 14 of 14 | 4.1 ± 0.2 |
+| 2000 | 10 of 14 | 3.4 ± 0.3 |
+
+Per switch, 2025 gain in points (games, champion / chosen):
+
+| Champion → chosen | Line | 1600 | 1800 | 2000 |
+| --- | --- | --- | --- | --- |
+| Nf6 → Be7 | 1. d4 d5 2. c4 e6 3. Nc3 | 4.7 ± 1.1 | 1.5 ± 0.8 | 3.1 ± 0.9 |
+| Bf5 → a5 | 1. e4 c6 2. Bc4 d5 3. exd5 cxd5 4. Bb3 | 2.3 ± 1.3 | 1.8 ± 1.7 | −11.5 ± 5.1 (627 / 103) |
+| Bb4 → c5 | 1. d4 d5 2. c4 e6 3. Nc3 Nf6 4. Nf3 | 4.9 ± 0.5 | 4.0 ± 0.5 | 1.7 ± 0.6 |
+| Be7 → Nbd7 | 1. d4 d5 2. c4 e6 3. Nc3 Nf6 4. Bg5 | 3.8 ± 0.6 | 4.2 ± 0.5 | 3.7 ± 0.7 |
+| cxd4 → Nc6 | 1. e4 c6 2. d4 d5 3. e5 c5 4. Nf3 | 3.5 ± 0.9 | 2.8 ± 1.1 | −1.6 ± 1.8 |
+| Nf6 → a6 | 1. d4 d5 2. c4 e6 3. Nf3 | 0.3 ± 1.1 | 2.0 ± 0.9 | 1.9 ± 1.1 |
+| Nf6 → c5 | 1. d4 d5 2. Nc3 | 3.3 ± 0.5 | 3.4 ± 0.6 | 1.9 ± 1.0 |
+| Nc6 → Qb6 | 1. d4 d5 2. Bf4 c5 3. c3 | 7.1 ± 1.9 | 5.1 ± 2.1 | 1.1 ± 2.7 |
+| e6 → c5 | 1. d4 d5 2. Nf3 Nf6 3. Bf4 | 6.0 ± 0.5 | 5.6 ± 0.5 | 5.8 ± 0.6 |
+| Nf6 → Be7 | 1. d4 d5 2. c4 e6 3. e3 | 2.8 ± 2.5 | 6.6 ± 2.8 | 3.5 ± 4.4 |
+| Bf5 → Qb6 | 1. d4 d5 2. Bf4 c5 3. c3 Nc6 4. e3 | 4.2 ± 1.8 | 3.3 ± 1.6 | 4.5 ± 1.9 |
+| f6 → Nd7 | 1. d4 d5 2. Bf4 c5 3. Nf3 cxd4 4. Nxd4 | 17.8 ± 5.5 | 0.9 ± 7.5 | −11.4 ± 12.8 (51 / 19) |
+| e6 → c5 | 1. d4 d5 2. Nf3 Nf6 3. Nc3 | 5.8 ± 0.9 | 7.4 ± 1.2 | 5.4 ± 2.0 |
+| Nf6 → f6 | 1. d4 d5 2. Bf4 c5 3. dxc5 Nc6 4. Nf3 | 14.5 ± 5.0 | 12.2 ± 5.6 | −0.7 ± 9.5 (34 / 68) |
+
+HES.96 **What it shows.** Inside the 1600 and 1800 groups the gains are as large as overall (4.4 and 4.1 against 4.1). So they don't come from stronger players choosing the switch. That leaves bias inside a group's 200 points, and the rating gap (HES.51); neither is likely to explain gains this size. The gains shrink at 2000 (3.4), but stay clearly positive. The 1600 and 1800 groups are the ones that matter for this repertoire.
+
+HES.97 **One switch to doubt: a5.** In 2000 games it scores 11.5 ± 5.1 points worse (103 games), more than two standard errors. Its 2025 gain overall (1.6) was already below its safe gain (1.7). The other three losses at 2000 are within noise or on very few games (Nc6 −1.6 ± 1.8; Nd7 on 19 games; f6 on 68).
