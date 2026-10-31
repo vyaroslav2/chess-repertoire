@@ -17,6 +17,7 @@
     "k": "tsx cli.ts k",
     "explorer": "tsx cli.ts explorer",
     "sample": "tsx cli.ts sample",
+    "check": "tsx cli.ts check",
     "dots": "tsx cli.ts dots",
     "load-moves": "tsx cli.ts load-moves",
     "db-check": "tsx cli.ts db-check",

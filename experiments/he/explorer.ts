@@ -20,9 +20,18 @@ const START = ["d4 d5", "e4 c6"];
 const games = (row: { white: number; draws: number; black: number }) => row.white + row.draws + row.black;
 const positionKey = (fen: string) => fen.split(" ").slice(0, 4).join(" ");
 
-export function explorerUrl(base: string, fen: string): string {
-  const query = new URLSearchParams({ fen, speeds: EXPLORER.speeds.join(","), ratings: EXPLORER.ratings.join(","),
-    since: EXPLORER.since, until: EXPLORER.until, moves: String(EXPLORER.moves), topGames: "0", recentGames: "0" });
+// The months a count comes from, and optionally fewer rating groups. The walk's are EXPLORER's
+// own; the 2025 check asks for others.
+export type Months = { since: string; until: string; ratings?: readonly number[] };
+export function parseMonths(text: string): Months {
+  const match = /^(\d{4}-\d{2})\.\.(\d{4}-\d{2})$/.exec(text);
+  if (!match || match[1] > match[2]) throw new Error("Months must look like 2025-01..2025-12.");
+  return { since: match[1], until: match[2] };
+}
+
+export function explorerUrl(base: string, fen: string, months: Months = EXPLORER): string {
+  const query = new URLSearchParams({ fen, speeds: EXPLORER.speeds.join(","), ratings: (months.ratings ?? EXPLORER.ratings).join(","),
+    since: months.since, until: months.until, moves: String(EXPLORER.moves), topGames: "0", recentGames: "0" });
   return base.replace(/\/$/, "") + "/lichess?" + query;
 }
 
@@ -40,10 +49,27 @@ export const httpFetcher: Fetcher = async url => {
   }
 };
 
-// The request's shape names the cache, so answers to other filters are never reused.
-function cacheDirectory(options: WalkOptions) {
-  const profile = createHash("sha256").update(JSON.stringify(EXPLORER)).digest("hex").slice(0, 16);
-  return options.cache ?? path.join(DATA_ROOT, "explorer-cache", profile);
+// The request's shape names the cache, so answers to other filters are never reused. The
+// spread keeps EXPLORER's key order, so the walk's own months give its original cache. Tests
+// pass their own root.
+function cacheDirectory(months: Months, root = path.join(DATA_ROOT, "explorer-cache")) {
+  const profile = createHash("sha256").update(JSON.stringify({ ...EXPLORER, ...months })).digest("hex").slice(0, 16);
+  return path.join(root, profile);
+}
+const cacheFile = (cache: string, fen: string) => path.join(cache, createHash("sha256").update(positionKey(fen)).digest("hex") + ".json");
+
+// One position's counts for the given months, from the cache or else from the Explorer.
+export async function explorerCounts(fen: string, months: Months, base = DEFAULT_BASE, fetcher: Fetcher = httpFetcher,
+  cacheOverride?: string): Promise<{ answer: ExplorerAnswer; fetched: boolean }> {
+  const cache = cacheDirectory(months, cacheOverride);
+  await assertDataDirectory(cache);
+  const file = cacheFile(cache, fen);
+  try { return { answer: JSON.parse(await readFile(file, "utf8")).answer, fetched: false }; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  const answer = await fetcher(explorerUrl(base, fen, months));
+  if (!Array.isArray(answer?.moves)) throw new Error("Explorer answer without moves for " + fen);
+  await writeFile(file, JSON.stringify({ fen, answer, fetchedAt: new Date().toISOString() }) + "\n");
+  return { answer, fetched: true };
 }
 
 // HEK.11–12: walks the main lines from 1. d4 d5 and 1. e4 c6, most-played position first. It
@@ -55,7 +81,7 @@ export async function walkExplorer(name: string, options: WalkOptions, fetcher: 
   const askFrom = options.askFrom ?? 1;
   for (const [key, value] of Object.entries({ follow: options.follow, calls: options.calls, minGroup: options.minGroup, lastMove: options.lastMove, askFrom }))
     if (!Number.isInteger(value) || value < (key === "minGroup" ? 2 : 1)) throw new Error(key + " must be a positive integer" + (key === "minGroup" ? " of at least 2." : "."));
-  const cache = cacheDirectory(options);
+  const cache = cacheDirectory(EXPLORER, options.cache);
   await assertDataDirectory(cache);
   await assertDataDirectory(path.join(DATA_ROOT, "runs"));
   const directory = runPath(name);
@@ -99,7 +125,7 @@ export async function walkExplorer(name: string, options: WalkOptions, fetcher: 
     while (queue.length) {
       const node = pop(), key = positionKey(node.fen), moveNumber = Number(node.fen.split(" ")[5]);
       if (seen.has(key)) { if (seen.get(key) !== moveNumber) transpositions++; continue; }
-      const file = path.join(cache, createHash("sha256").update(key).digest("hex") + ".json");
+      const file = cacheFile(cache, node.fen);
       let answer: ExplorerAnswer;
       try { answer = JSON.parse(await readFile(file, "utf8")).answer; cached++; }
       catch (error) {

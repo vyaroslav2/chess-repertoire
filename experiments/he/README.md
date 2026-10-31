@@ -263,6 +263,18 @@ that run's `k.json` instead, while the curve still comes from the pool. It write
 failed) and `selections-summary.json` (switches, their cumProb-weighted share, by move number).
 `--db` points at another SQLite file; the default is `prisma/dev.db`, opened read-only.
 
+Move counts come from the app's Explorer cache, which holds every year. `--months 2023-01..2024-12`
+asks the Explorer for those months only (through the proxy, cached as for the walk), so later
+months stay unseen. `check` then scores each switch on later months: the champion's and the chosen
+move's scores there, the gain with its standard error, and a pooled gain. It writes
+`check-<since>-<until>.json` beside the selection. `--rating 1600` counts one Explorer rating group
+only, and writes `check-<since>-<until>-1600.json`:
+
+```powershell
+npm --prefix experiments/he run select -- --run tree-2023-24 --pool 2024-02-03 --k best --k-run explorer-k --months 2023-01..2024-12 --engine stockfish-windows-x86-64-universal/stockfish/stockfish-windows-x86-64-universal.exe
+npm --prefix experiments/he run check -- --run tree-2023-24 --months 2025-01..2025-12
+```
+
 ## Checks
 
 ```powershell

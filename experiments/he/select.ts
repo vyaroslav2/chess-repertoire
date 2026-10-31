@@ -6,6 +6,7 @@ import { computeExplorerCacheProfile, defaultConfig } from "../../src/lib/core/c
 import { chances, random } from "./curve";
 import { HeEngine, type Evaluation } from "./engine";
 import { assertDataDirectory, DATA_ROOT, HE_ROOT, runPath } from "./paths";
+import { explorerCounts, httpFetcher, DEFAULT_BASE, EXPLORER, type ExplorerAnswer, type Fetcher, type Months } from "./explorer";
 
 // The selector (HES): in a position with Black to move, the tree's move (the champion) stays
 // unless another move's human games show, at the chosen confidence, that it scores better by
@@ -96,8 +97,10 @@ export type SelectionRow = { line: string; fullFen: string; cumProb: number; mov
 // Runs the selector over every tree position with Black to move and a move already chosen,
 // and writes data/selections/<name>/selections.jsonl and selections-summary.json. The curve comes
 // from the pool; k's trend from kRun, the pool unless another run's k.json is named (HEK.81).
+// Move counts come from the app's Explorer cache (all years), or with months from the Explorer
+// for those months only (HES.90).
 export async function selectMoves(name: string, pool: string, kChoice: "low" | "best", binary: string,
-  database = path.resolve(HE_ROOT, "../../prisma/dev.db"), dials: Dials = DIALS, kRun = pool) {
+  database = path.resolve(HE_ROOT, "../../prisma/dev.db"), dials: Dials = DIALS, kRun = pool, months?: Months) {
   runPath(name);
   const directory = path.join(DATA_ROOT, "selections", name);
   await assertDataDirectory(directory);
@@ -126,8 +129,9 @@ export async function selectMoves(name: string, pool: string, kChoice: "low" | "
     for (const node of tree) {
       const moveNumber = Number(node.fullFen.split(" ")[5]);
       const base = { line: node.displayPgn, fullFen: node.fullFen, cumProb: node.cumProb, moveNumber, champion: node.san };
-      const moves = (explorer.all(node.positionKey, explorerProfile) as ExplorerRow[]).map(m => ({ uci: m.uci, san: m.san,
-        record: { wins: m.blackWins, draws: m.draws, losses: m.whiteWins } }));
+      const moves = months ? explorerMoves(node.fullFen, (await explorerCounts(node.fullFen, months)).answer)
+        : (explorer.all(node.positionKey, explorerProfile) as ExplorerRow[]).map(m => ({ uci: m.uci, san: m.san,
+          record: { wins: m.blackWins, draws: m.draws, losses: m.whiteWins } }));
       // HES.10: Black's first move is fixed; with no games there is nothing to judge.
       const skip = moveNumber === 1 || node.selectionMethod === "Hardcoded" ? "fixed" as const : !moves.some(m => games(m.record)) ? "no-games" as const : null;
       if (skip) { rows.push({ ...base, skipped: skip, chosen: node.san }); await output.write(JSON.stringify(rows.at(-1)) + "\n"); continue; }
@@ -167,7 +171,8 @@ export async function selectMoves(name: string, pool: string, kChoice: "low" | "
   }
   const verdicts: Record<string, number> = {};
   for (const r of judgedRows) for (const c of r.contenders ?? []) verdicts[c.verdict] = (verdicts[c.verdict] ?? 0) + 1;
-  const summary = { name, pool, k: kChoice, kRun, dials, curve: curveFile.chosen.name, engine: engine.profile.id, explorerProfile, database,
+  const summary = { name, pool, k: kChoice, kRun, dials, curve: curveFile.chosen.name, engine: engine.profile.id,
+    counts: months ?? { explorerProfile, database },
     positions: rows.length, judged: judgedRows.length,
     skipped: Object.fromEntries(["fixed", "no-games", "mate"].map(s => [s, rows.filter(r => r.skipped === s).length])),
     searches, contenders: verdicts, switches: switches.length,
@@ -178,4 +183,60 @@ export async function selectMoves(name: string, pool: string, kChoice: "low" | "
   const file = await open(summaryFile, "wx");
   await file.write(JSON.stringify(summary, null, 2) + "\n"); await file.close();
   return summary;
+}
+
+// Explorer answers name castling e8h8; the tree and the engine use e8g8, so the move is read from its SAN.
+export function explorerMoves(fen: string, answer: ExplorerAnswer) {
+  const chess = new Chess(fen);
+  return answer.moves.map(m => { const uci = chess.move(m.san).lan; chess.undo();
+    return { uci, san: m.san, record: { wins: m.black, draws: m.draws, losses: m.white } }; });
+}
+
+// A score and its standard error: each game scores 1, ½ or 0.
+function scored(record: Record3) {
+  const n = games(record);
+  if (!n) return { games: 0, score: null, se: null };
+  const s = score(record), square = (record.wins + record.draws / 4) / n;
+  return { games: n, score: s, se: Math.sqrt(Math.max(0, square - s * s) / n) };
+}
+
+// HES.90: a selection made on some months' counts, checked on later months'. For each switch,
+// the champion's and the chosen move's scores then, and the gain. The pooled gain weighs each
+// switch by its precision; a selection that rode on luck shows a gain near zero here. With a
+// rating, only that Explorer rating group counts (HES.95).
+export async function checkSelection(name: string, months: Months, fetcher: Fetcher = httpFetcher, cache?: string, rating?: number) {
+  if (rating !== undefined && !(EXPLORER.ratings as readonly number[]).includes(rating))
+    throw new Error("Rating must be one of " + EXPLORER.ratings.join(", ") + ".");
+  const slice: Months = rating === undefined ? months : { ...months, ratings: [rating] };
+  const directory = path.join(DATA_ROOT, "selections", name);
+  await assertDataDirectory(directory);
+  const summary = JSON.parse(await readFile(path.join(directory, "selections-summary.json"), "utf8"));
+  if (!summary.counts?.until) throw new Error(name + " used the app's counts, which include every year: run select with --months.");
+  if (summary.counts.until >= months.since) throw new Error("The check's months must come after " + summary.counts.until + ".");
+  const rows: SelectionRow[] = (await readFile(path.join(directory, "selections.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+  const empty = { wins: 0, draws: 0, losses: 0 };
+  const switches = [];
+  for (const row of rows.filter(r => r.switched)) {
+    const moves = explorerMoves(row.fullFen, (await explorerCounts(row.fullFen, slice, DEFAULT_BASE, fetcher, cache)).answer);
+    const record = (san: string) => moves.find(m => m.san === san)?.record ?? empty;
+    const champion = scored(record(row.champion)), chosen = scored(record(row.chosen));
+    const picked = row.contenders!.find(c => c.san === row.chosen)!;
+    const gain = champion.score === null || chosen.score === null ? null
+      : { value: chosen.score - champion.score, se: Math.hypot(champion.se!, chosen.se!) };
+    switches.push({ line: row.line, cumProb: row.cumProb, from: row.champion, to: row.chosen,
+      fit: { champion: { games: row.championInfo!.games, score: row.championInfo!.score }, chosen: { games: picked.games, score: picked.score },
+        gain: picked.score - row.championInfo!.score!, safeGain: picked.safeGain },
+      check: { champion, chosen, gain } });
+  }
+  const measured = switches.filter(s => s.check.gain && s.check.gain.se > 0);
+  const weights = measured.map(s => 1 / s.check.gain!.se ** 2), total = weights.reduce((sum, w) => sum + w, 0);
+  const mean = (values: number[]) => values.reduce((sum, v) => sum + v, 0) / values.length;
+  const result = { name, selectedOn: summary.counts, checkedOn: slice, switches: switches.length, measured: measured.length,
+    better: measured.filter(s => s.check.gain!.value > 0).length,
+    meanGain: { fit: mean(measured.map(s => s.fit.gain)), safe: mean(measured.map(s => s.fit.safeGain!)), check: mean(measured.map(s => s.check.gain!.value)) },
+    pooledGain: total ? { value: measured.reduce((sum, s, i) => sum + weights[i] * s.check.gain!.value, 0) / total, se: Math.sqrt(1 / total) } : null,
+    details: switches };
+  const output = await open(path.join(directory, "check-" + months.since + "-" + months.until + (rating === undefined ? "" : "-" + rating) + ".json"), "wx");
+  await output.write(JSON.stringify(result, null, 2) + "\n"); await output.close();
+  return result;
 }

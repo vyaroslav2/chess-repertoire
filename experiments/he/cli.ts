@@ -11,8 +11,8 @@ import { resolveInputPath } from "./paths";
 import { checkConnection, loadGames, loadSampledMoves } from "./db";
 import { writeDots } from "./dots";
 import { poolRuns } from "./pool";
-import { selectMoves } from "./select";
-import { DEFAULT_BASE, sampleGroups, walkExplorer } from "./explorer";
+import { checkSelection, selectMoves } from "./select";
+import { DEFAULT_BASE, parseMonths, sampleGroups, walkExplorer } from "./explorer";
 import path from "node:path";
 import { DATA_ROOT, runPath } from "./paths";
 
@@ -30,7 +30,8 @@ const HELP = String.raw`Human evidence pilot
   npm --prefix experiments/he run explorer -- --run explorer-2023-24 [--follow 1000] [--calls 5000] [--min-group 2] [--last-move 15] [--ask-from 1] [--explorer http://127.0.0.1:55555/lichess]
   npm --prefix experiments/he run sample -- --run explorer-k --from explorer-deep [--min-games 50] [--per-move 500]
   npm --prefix experiments/he run dots -- --run 2024-02-3000mb
-  npm --prefix experiments/he run select -- --run tree-low --pool 2024-02-03 --k low --engine <stockfish-19-binary> [--k-run explorer-k] [--db prisma/dev.db]
+  npm --prefix experiments/he run select -- --run tree-low --pool 2024-02-03 --k low --engine <stockfish-19-binary> [--k-run explorer-k] [--months 2023-01..2024-12] [--db prisma/dev.db]
+  npm --prefix experiments/he run check -- --run tree-2023-24 --months 2025-01..2025-12 [--rating 1600]
   npm --prefix experiments/he run db-check
   npm --prefix experiments/he run load -- --run 2024-01-2500mb [--limit 100]
   npm --prefix experiments/he run load-moves -- --run 2024-02-3000mb
@@ -63,7 +64,7 @@ async function main() {
   if (!command || command === "--help" || command === "help") { console.log(HELP); return; }
   const parsed = parseArgs({ args: process.argv.slice(3), allowPositionals: true, options: {
     run: { type: "string" }, seed: { type: "string" }, "max-gap": { type: "string" },
-    month: { type: "string" }, gb: { type: "string" }, limit: { type: "string" }, engine: { type: "string" }, period: { type: "string" }, split: { type: "string" }, reuse: { type: "string", multiple: true }, from: { type: "string", multiple: true }, pool: { type: "string" }, k: { type: "string" }, db: { type: "string" }, count: { type: "string" }, game: { type: "string" }, curve: { type: "string" }, follow: { type: "string" }, calls: { type: "string" }, "min-group": { type: "string" }, "last-move": { type: "string" }, "ask-from": { type: "string" }, "min-games": { type: "string" }, "k-run": { type: "string" }, "per-move": { type: "string" }, explorer: { type: "string" }, help: { type: "boolean" },
+    month: { type: "string" }, gb: { type: "string" }, limit: { type: "string" }, engine: { type: "string" }, period: { type: "string" }, split: { type: "string" }, reuse: { type: "string", multiple: true }, from: { type: "string", multiple: true }, pool: { type: "string" }, k: { type: "string" }, db: { type: "string" }, count: { type: "string" }, game: { type: "string" }, curve: { type: "string" }, follow: { type: "string" }, calls: { type: "string" }, "min-group": { type: "string" }, "last-move": { type: "string" }, "ask-from": { type: "string" }, "min-games": { type: "string" }, "k-run": { type: "string" }, months: { type: "string" }, rating: { type: "string" }, "per-move": { type: "string" }, explorer: { type: "string" }, help: { type: "boolean" },
   } });
   const { values, positionals } = parsed;
   if (values.help) { console.log(HELP); return; }
@@ -76,6 +77,8 @@ async function main() {
   if (command !== "pool" && command !== "sample" && values.from) throw new Error("--from belongs to pool and sample.");
   if (command !== "sample" && (values["min-games"] || values["per-move"])) throw new Error("--min-games and --per-move belong to sample.");
   if (command !== "select" && (values.pool || values.k || values["k-run"] || values.db)) throw new Error("--pool, --k, --k-run and --db belong to select.");
+  if (command !== "select" && command !== "check" && values.months) throw new Error("--months belongs to select and check.");
+  if (command !== "check" && values.rating) throw new Error("--rating belongs to check.");
   if (command !== "k" && values.curve) throw new Error("--curve belongs to k.");
   if (command !== "explorer" && (values.follow || values.calls || values["min-group"] || values["last-move"] || values["ask-from"] || values.explorer))
     throw new Error("--follow, --calls, --min-group, --last-move, --ask-from and --explorer belong to explorer.");
@@ -120,9 +123,15 @@ async function main() {
     if (!values.engine || !values.pool || (values.k !== "low" && values.k !== "best"))
       throw new Error("Select needs --engine, --pool and --k low or --k best.");
     if (positionals.length || values.seed || values["max-gap"] || values.limit || values.split || values.count || values.period)
-      throw new Error("Select takes only --run, --pool, --k, --k-run, --engine and --db.");
+      throw new Error("Select takes only --run, --pool, --k, --k-run, --months, --engine and --db.");
     console.log(JSON.stringify(await selectMoves(values.run, values.pool, values.k, resolveInputPath(values.engine),
-      values.db ? resolveInputPath(values.db) : undefined, undefined, values["k-run"]), null, 2));
+      values.db ? resolveInputPath(values.db) : undefined, undefined, values["k-run"], values.months ? parseMonths(values.months) : undefined), null, 2));
+  } else if (command === "check") {
+    if (!values.months) throw new Error("Check needs --months, e.g. 2025-01..2025-12.");
+    if (positionals.length || values.seed || values["max-gap"] || values.engine || values.limit || values.split || values.count || values.period)
+      throw new Error("Check takes only --run, --months and --rating.");
+    console.log(JSON.stringify(await checkSelection(values.run, parseMonths(values.months), undefined, undefined,
+      values.rating === undefined ? undefined : Number(values.rating)), null, 2));
   } else if (command === "curve") {
     if (positionals.length || values.seed || values["max-gap"] || values.engine || values.limit || values.split || values.count || values.period)
       throw new Error("Curve takes only --run.");

@@ -13,7 +13,7 @@ import { basis, chances, fit, random } from "../curve";
 import { fitK, fitKTrend, logGamma, type KGroup } from "../scatter";
 import { sampledMoves } from "../dots";
 import { poolRuns } from "../pool";
-import { choose, couldPass, DIALS, judge, safeGain, scoreDraws, type Curve } from "../select";
+import { checkSelection, choose, couldPass, DIALS, judge, safeGain, scoreDraws, type Curve } from "../select";
 import { DATA_ROOT, assertDataDirectory, runPath } from "../paths";
 import { sampleGroups, walkExplorer, type ExplorerAnswer } from "../explorer";
 import type { Observation } from "../types";
@@ -550,5 +550,47 @@ test("the Explorer walk writes Black's moves as groups and follows only big move
   } finally {
     for (const name of names) await rm(runPath(name), { recursive: true, force: true });
     await rm(cache, { recursive: true }); await rm(cache + "-capped", { recursive: true, force: true });
+  }
+});
+
+test("the later-months check scores each switch on new games, and refuses the same months (HES.90)", async () => {
+  // Black to move with castling open: the Explorer names O-O e8h8, the tree e8g8.
+  const castle = "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQ1RK1 b kq - 5 5";
+  const name = "test-check-" + process.pid, directory = path.join(DATA_ROOT, "selections", name);
+  const cache = await mkdtemp(path.join(DATA_ROOT, "test-check-cache-"));
+  const row = { line: "test", fullFen: castle, cumProb: 0.01, moveNumber: 5, champion: "d6", chosen: "O-O", switched: true,
+    championInfo: { games: 100, score: 0.5, cpWhite: 20, mateWhite: null, top2M: null },
+    contenders: [{ uci: "e8g8", san: "O-O", games: 100, score: 0.6, verdict: "passes", safeGain: 0.02 }] };
+  const answer: ExplorerAnswer = { white: 0, draws: 0, black: 0, moves: [
+    { uci: "e8h8", san: "O-O", white: 30, draws: 20, black: 50 },     // 60%
+    { uci: "d7d6", san: "d6", white: 50, draws: 20, black: 30 } ] };  // 40%
+  const urls: string[] = [];
+  try {
+    await assertDataDirectory(directory);
+    await writeFile(path.join(directory, "selections.jsonl"), JSON.stringify(row) + "\n" + JSON.stringify({ ...row, line: "kept", switched: false }) + "\n");
+    await writeFile(path.join(directory, "selections-summary.json"), JSON.stringify({ counts: { since: "2023-01", until: "2024-12" } }));
+    await assert.rejects(checkSelection(name, { since: "2024-06", until: "2025-12" }, async () => answer, cache));
+    const result = await checkSelection(name, { since: "2025-01", until: "2025-12" }, async url => { urls.push(url); return answer; }, cache);
+    assert.equal(new URL(urls[0]).searchParams.get("since"), "2025-01");
+    assert.deepEqual([result.switches, result.measured, result.better], [1, 1, 1]);
+    const [only] = result.details;
+    assert.deepEqual([only.check.champion.games, only.check.chosen.games], [100, 100]);
+    assert.ok(Math.abs(only.check.gain!.value - 0.2) < 1e-12);
+    // Each score's standard error: √((wins + draws/4)/n − score²)/√n.
+    assert.ok(Math.abs(only.check.gain!.se - Math.hypot(Math.sqrt(0.55 - 0.36) / 10, Math.sqrt(0.35 - 0.16) / 10)) < 1e-12);
+    assert.ok(Math.abs(result.meanGain.fit - 0.1) < 1e-12);
+    // One rating group: asked apart, cached apart, written apart.
+    const byGroup = await checkSelection(name, { since: "2025-01", until: "2025-12" }, async url => { urls.push(url); return answer; }, cache, 1800);
+    assert.deepEqual([urls.length, new URL(urls[1]).searchParams.get("ratings"), byGroup.checkedOn.ratings], [2, "1800", [1800]]);
+    await assert.rejects(checkSelection(name, { since: "2025-01", until: "2025-12" }, async () => answer, cache, 1700), /Rating/);
+    // A rerun reads the cache; the result file is never overwritten.
+    await assert.rejects(checkSelection(name, { since: "2025-01", until: "2025-12" }, async () => { throw new Error("called"); }, cache), /EEXIST/);
+    const app = name + "-app";
+    await assertDataDirectory(path.join(DATA_ROOT, "selections", app));
+    await writeFile(path.join(DATA_ROOT, "selections", app, "selections-summary.json"), JSON.stringify({ counts: { database: "x" } }));
+    await assert.rejects(checkSelection(app, { since: "2025-01", until: "2025-12" }, async () => answer, cache), /every year/);
+    await rm(path.join(DATA_ROOT, "selections", app), { recursive: true });
+  } finally {
+    await rm(directory, { recursive: true, force: true }); await rm(cache, { recursive: true, force: true });
   }
 });
