@@ -2,7 +2,7 @@
 
 import { PrismaClient } from "@prisma/client";
 import { Chess } from "chess.js";
-import { fsrs, createEmptyCard, Rating, Card, State } from "ts-fsrs";
+import { fsrs, createEmptyCard, Rating, Card, State, type Grade } from "ts-fsrs";
 import { lineEvals, lineOpenings } from "../lib/line-details";
 
 const prisma = new PrismaClient();
@@ -150,7 +150,7 @@ export async function fetchDemoLines(repertoireId: string) {
 export async function updateSrsStats(statId: string, quality: number) {
   // quality: 0 (Again), 1 (Hard), 2 (Good), 3 (Easy)
   // FSRS expects Rating enums: 1=Again, 2=Hard, 3=Good, 4=Easy
-  const fsrsRatingMap = [Rating.Again, Rating.Hard, Rating.Good, Rating.Easy];
+  const fsrsRatingMap: Grade[] = [Rating.Again, Rating.Hard, Rating.Good, Rating.Easy];
   const fsrsRating = fsrsRatingMap[quality];
 
   const stat = await prisma.repertoirePositionStat.findUnique({ where: { id: statId } });
@@ -166,7 +166,9 @@ export async function updateSrsStats(statId: string, quality: number) {
     reps: stat.reps,
     lapses: stat.lapses,
     state: stat.state as State,
-    last_review: stat.last_review || undefined
+    last_review: stat.last_review || undefined,
+    // Not stored; ts-fsrs reads a missing value as 0 too.
+    learning_steps: 0
   };
 
   // Run the algorithm

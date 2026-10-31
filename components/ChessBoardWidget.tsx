@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Chessground from "@react-chess/chessground";
+import type { Key } from "chessground/types";
 import "chessground/assets/chessground.base.css";
 import { Chess } from "chess.js";
 import LichessMoveList from "./LichessMoveList";
@@ -125,13 +126,12 @@ export default function ChessBoardWidget({ initialFen, pgn, onMove }: ChessBoard
     }}>
       <div className="board-themed" style={{ width: "560px", height: "560px" }}>
         <Chessground
-          width="100%"
-          height="100%"
+          contained
           config={{
             fen: fen,
             orientation: orientation,
             turnColor: calcTurnColor(),
-            lastMove: lastMove,
+            lastMove: lastMove as Key[] | undefined,
             highlight: { lastMove: true, check: true },
             drawable: { enabled: true, visible: true },
             coordinates: true,

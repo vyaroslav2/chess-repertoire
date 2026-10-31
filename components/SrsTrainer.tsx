@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import Chessground from "@react-chess/chessground";
+import type { Config } from "chessground/config";
+import type { Key } from "chessground/types";
 import "chessground/assets/chessground.base.css";
 import { Chess } from "chess.js";
 import LichessMoveList from "./LichessMoveList";
@@ -651,7 +653,7 @@ export default function SrsTrainer({
       : [],
   );
 
-  const calcMovable = () => {
+  const calcMovable = (): NonNullable<Config["movable"]> => {
     // Only allow moves if we are idle or wrong (let them try again)
     // Completely lock the board during browsing or initialization
     if (
@@ -971,13 +973,12 @@ export default function SrsTrainer({
           }}
         >
           <Chessground
-            width="100%"
-            height="100%"
+            contained
             config={{
               fen: fen,
               orientation: orientation,
               turnColor: calcTurnColor(),
-              lastMove: lastMove,
+              lastMove: lastMove as Key[] | undefined,
               check: inCheck,
               highlight: { lastMove: true, check: true },
               drawable: { enabled: true, visible: true },

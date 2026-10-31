@@ -192,7 +192,7 @@ export default function StatusPage() {
           )}
         </div>
         <div className="board-themed" style={{ width: "100%", height: "100%", boxShadow: "var(--glass-shadow)" }}>
-          <Chessground width="100%" height="100%" config={{ coordinates: true, viewOnly: true }} />
+          <Chessground contained config={{ coordinates: true, viewOnly: true }} />
         </div>
       </div>
 
