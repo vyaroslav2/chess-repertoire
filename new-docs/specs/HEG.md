@@ -39,7 +39,7 @@ HEG.20 **Move counts from recent months.** Explorer, at the position with Black 
 * Why recent months: edges fade a little year by year (HES.112), and one line lost its edge in 2026 (HES.114).
 * `selectorMonths` is written out (since, until), not relative to today, so a cache profile never changes under a run. Moving it forward is a deliberate step (HEG.63).
 * Proposed: the last three full years the Explorer has. Today that is 2023-06 to 2026-05 (the Explorer had nothing after May 2026 on 2026-10-31).
-* #question Or all years, with no extra calls? Then edges that faded count as much as current ones. Recommend recent months.
+* Decided 2026-10-31: recent months, not all years. It is the cautious side: deep moves with thin data have a weaker case, so they stay with Stockfish's move more often.
 
 HEG.21 **Evals at 2M nodes, as the curve was fitted.** Threads 1, Hash 64 MB, MultiPV 1, Stockfish 19 ([[HE]] item 4). A 2M eval is the only kind the curve can turn into a prior. It gets its own `EngineCache` profile ([[DB]] DB.32). The generator's 200M search still picks the champion and gives every stored eval.
 * #question The curve's evals came from HE's engine code, which takes the stop line ([[EW]] EW.09 note). The generator's engine drops it. On most positions the two agree. Proposed: use the generator's engine, and check on a sample of 200 HE jobs that the evals match, or almost always match, before the first build.
@@ -59,7 +59,7 @@ HEG.30 **Settings**, added to [[generation-config]]:
 | `selectorConfidence` | 90% | HES.104 |
 | `selectorMargin` | 1 point of score | HES.104 |
 | `selectorCpLimit` | 30 cp | HES.20 |
-| `selectorLineBudget` | 50 cp (proposed) | HEG.31 |
+| `selectorLineBudget` | 50 cp | HEG.31 |
 | `selectorNearTie` | 0.5 point | HES.18 |
 | `selectorDraws` | 20,000 | samples per cloud; fixed seed per position and move |
 | `selectorNodes` | 2,000,000 | HEG.21; its own engine cache profile |
@@ -68,14 +68,14 @@ The curve and k are not settings: they are measured, and change only with a new 
 
 HEG.31 **The line budget** ([[HES]] HES.19). The cp losses of the switches along a route add up. Only losses count; a switch to a move the 2M search rates better spends nothing. A move passes only if the route's spend so far plus its own cp loss stays within `selectorLineBudget`.
 * Why: in a deep line, many small losses could add up to a bad position. The per-move limit can't see that.
-* #question The value is your taste, like the cp limit. Today's switches lose 0–15 cp each. The report could never put two on one line (HES.19), so there is no data on how they add up yet. Proposed: 50 cp, so a line can take three or four typical switches.
+* Decided 2026-10-31: 50 cp for a line, with 30 cp for one move. Today's switches lose 0–15 cp each, so a line can take three or four typical ones. The report could never put two on one line (HES.19), so how they add up is still to be seen.
 
 ## What it records
 
 HEG.40 **On a switched Black move** ([[DB]] DB.14):
 * `selectionMethod`: `Human evidence`. `moveOrigin`: `Human Move`. `engineRank`: `null`.
 * New fields: the champion's SAN, both 2M evals, the cp loss, the move's games and score, its safe gain, and the line budget spent after it.
-* #question Store every judged contender too (as JSON on the node), for the UI and for audits? Proposed: yes; it is small, and it is what explains a choice later.
+* Every judged contender too, as JSON on the node, and in the log (HEG.41): its games, score, eval, safe gain and verdict. Decided 2026-10-31: it is small, and it explains a choice later.
 
 HEG.41 **The log** ([[TGL]]): one line per switch: the line, champion → chosen, games, safe gain, cp loss, budget spent. The run summary adds: positions judged, switches, their share by cumProb, and 2M searches made.
 
@@ -103,9 +103,8 @@ HEG.81 **Notes that change with it:** [[OV]] OV.02 and OV.12, [[EW]] (its openin
 
 ## Open questions
 
-HEG.90 For you to decide:
-* Recent months or all years (HEG.20). Proposed: recent.
-* The line budget's value (HEG.31). Proposed: 50 cp.
-* The engine rule for 2M evals (HEG.21). Proposed: the generator's, after a sample check.
-* Store every judged contender (HEG.40). Proposed: yes.
-* `humanEvidence` default (HEG.50). Proposed: off until HEG.60 passes.
+HEG.90 Decided 2026-10-31: recent months (HEG.20), a 50 cp line budget (HEG.31), every judged contender stored (HEG.40).
+
+Still open:
+* The engine rule for 2M evals (HEG.21). Proposed: the generator's, after a 200-position check. Settled by that check, before the first build.
+* `humanEvidence` default (HEG.50). Proposed: off until HEG.60 passes, then on.
