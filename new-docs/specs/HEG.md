@@ -28,7 +28,7 @@ HEG.11 **The steps for one position**, as [[HES]] HES.11–18:
 3. For each other legal move with games: the best-case filter (HES.13). A move that couldn't pass even with the champion's eval as its prior is not searched.
 4. Search the rest at 2M nodes. Prior centre: the curve at the move's eval, capped at the champion's eval (HES.14). Prior strength: k for this move number (HEG.23).
 5. Safe gain at `selectorConfidence` (HES.16). It must exceed `selectorMargin`.
-6. cp loss against the champion must be within `selectorCpLimit`, and within what the line budget has left (HEG.31).
+6. cp loss against the champion, measured at 200M (HEG.32), must be within `selectorCpLimit`, and within what the line budget has left (HEG.31).
 7. Of the moves that pass, the highest safe gain wins; a near-tie goes to the better eval (HES.18).
 
 HEG.12 **What follows a switch is built like any other line.** The position after the chosen move goes on the queue as usual ([[S3]]). Transpositions, `minCumProb`, `depthCap` and the probability cascade are unchanged. A position is judged once, by the route that owns it ([[TR.excalidraw|TR]]).
@@ -66,17 +66,17 @@ HEG.30 **Settings**, added to [[generation-config]]:
 
 The curve and k are not settings: they are measured, and change only with a new measurement (HEG.22–23).
 
-HEG.31 **The line budget** ([[HES]] HES.19). The cp losses of the switches along a route add up. Only losses count; a switch to a move the 2M search rates better spends nothing. A move passes only if the route's spend so far plus its own cp loss stays within `selectorLineBudget`.
+HEG.31 **The line budget** ([[HES]] HES.19). The cp losses of the switches along a route add up. Only losses count; a switch to a move the 200M search rates better spends nothing. A move passes only if the route's spend so far plus its own cp loss stays within `selectorLineBudget`.
 * Why: in a deep line, many small losses could add up to a bad position. The per-move limit can't see that.
 * Decided 2026-10-31: 50 cp for a line, with 30 cp for one move. Today's switches lose 0–15 cp each, so a line can take three or four typical ones. The report could never put two on one line (HES.19), so how they add up is still to be seen.
 
-HEG.32 **cp loss at 200M (proposed).** The prior needs 2M evals, because the curve was measured on them. The cp limit and the line budget are about soundness, and there the generator's deeper search is better. So a contender that passes the safe gain gets a 200M search, and its cp loss is measured against EW.09's eval. The winner needs that search anyway (EW.11), so only the other passing contenders cost extra, a few minutes each.
+HEG.32 **cp loss at 200M.** Decided 2026-10-31. The prior needs 2M evals, because the curve was measured on them. The cp limit and the line budget are about soundness, and there the generator's deeper search is better. So a contender that passes the safe gain gets a 200M search, and its cp loss is measured against EW.09's eval. The winner needs that search anyway (EW.11), so only the other passing contenders cost extra, a few minutes each.
 
 ## What it records
 
 HEG.40 **On a switched Black move** ([[DB]] DB.14):
 * `selectionMethod`: `Human evidence`. `moveOrigin`: `Human Move`. `engineRank`: `null`.
-* New fields: the champion's SAN, both 2M evals, the cp loss, the move's games and score, its safe gain, and the line budget spent after it.
+* New fields: the champion's SAN, both 2M evals, the 200M cp loss, the move's games and score, its safe gain, and the line budget spent after it.
 * Every judged contender too, as JSON on the node, and in the log (HEG.41): its games, score, eval, safe gain and verdict. Decided 2026-10-31: it is small, and it explains a choice later.
 
 HEG.41 **The log** ([[TGL]]): one line per switch: the line, champion → chosen, games, safe gain, cp loss, budget spent. The run summary adds: positions judged, switches, their share by cumProb, and 2M searches made.
@@ -85,7 +85,7 @@ HEG.41 **The log** ([[TGL]]): one line per switch: the line, champion → chosen
 
 HEG.50 **`humanEvidence` off rebuilds today's tree.** Decided 2026-10-31: off by default until HEG.60 passes, then on.
 
-HEG.60 **First build at today's depth, against the report.** With `minCumProb` unchanged, the switches must match `select` on the same tree, months and dials. That checks HE's code against the generator's. Any difference is explained before going on.
+HEG.60 **First build at today's depth, against the report.** With `minCumProb` unchanged, the switches must match `select` on the same tree, months and dials. That checks HE's code against the generator's. Any difference is explained before going on. One kind is expected: `select` measures cp loss at 2M, the generator at 200M (HEG.32), so a move near 30 cp may pass in one and not the other. Today none of the blocked moves loses 30–36 cp at 2M, so few should differ.
 
 HEG.61 **Tests.** The selector's maths moves out of HE with its tests (HES.40). Plus one generator test with a fake Explorer and engine: a switch is recorded with its fields; the budget blocks a second switch on the same line; the hardcoded first move is never judged; `off` gives the old tree.
 
@@ -105,7 +105,6 @@ HEG.81 **Notes that change with it:** [[OV]] OV.02 and OV.12, [[EW]] (its openin
 
 ## Open questions
 
-HEG.90 Decided 2026-10-31: recent months (HEG.20), HE's way of reading 2M evals (HEG.21), a 50 cp line budget (HEG.31), every judged contender stored (HEG.40), `humanEvidence` off until HEG.60 passes (HEG.50).
+HEG.90 Decided 2026-10-31: recent months (HEG.20), HE's way of reading 2M evals (HEG.21), a 50 cp line budget (HEG.31), every judged contender stored (HEG.40), `humanEvidence` off until HEG.60 passes (HEG.50), cp loss measured at 200M (HEG.32).
 
-Still open:
-* Measure the cp loss at 200M, not 2M (HEG.32). Proposed: yes.
+Nothing is open.
