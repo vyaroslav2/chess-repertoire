@@ -81,8 +81,9 @@ Exceptions:
 DB.12 **Mate is never zero.** `mate = 0` is invalid: there is always at least one move left in which to deliver the mate. A negative `mate` means Black mates, a positive one means White does.
 
 DB.14 **Black move fields — the engine evidence.** The eval (DB.11), and alongside it:
-* `selectionMethod` — which path through [[EW]] produced it: Stockfish's baseline ([[EW|EW.09]]) or a hardcoded response ([[EW|EW.13]]).
-* `moveOrigin` — `Engine Move` or `Hardcoded Move`.
+* `selectionMethod` — which path through [[EW]] produced it: Stockfish's baseline ([[EW|EW.09]]), a hardcoded response ([[EW|EW.13]]) or human evidence ([[EW|EW.14]]).
+* `moveOrigin` — `Engine Move`, `Hardcoded Move` or `Human Move`.
+* Where the selector ran ([[HEG|HEG.40]]): `championSan`, `championCp2M`, `lineCpSpent` and `selectorJudged` (JSON of every judged move and its verdict, or why nothing was judged). A switch adds `chosenCp2M`, `selectorCpLoss` (at 200M), `selectorGames`, `selectorScore` and `safeGain`. All null where the selector did not run.
 * `engineRank` — `1` if the move is Stockfish's baseline, otherwise `null`.[^4]
 
 DB.15 **`cp` is always from White's point of view.**[^5] A negative `cp` is good for Black. Stockfish's figures are converted to this convention *before* they are stored.[^6]

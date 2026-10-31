@@ -8,7 +8,7 @@ tags:
 
 A standalone project inside chess-repertoire. It must not change or break the existing code.
 - All code lives in its own folder: `experiments/he/`.
-- It may read existing code and the DB, but never writes to them. No edits to `src/`, `config.ts` or the tree generator.
+- It may read existing code and the DB, but never writes to them. No edits to `src/`, `config.ts` or the tree generator. One exception since 2026-10-31: the selector's maths lives in `src/lib/core/selector.ts`, which HE imports, so the report and the generator share one copy ([[HEG]] HEG.80).
 - Its data (game files, eval cache, results) stays in `experiments/he/data/`, which is git-ignored.
 - It uses its own Stockfish 19 calls and cache, separate from the tree generator's.
 

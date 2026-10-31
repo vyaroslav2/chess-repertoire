@@ -157,7 +157,7 @@ HEK.81 **Per-move k.** `k --run explorer-k --curve 2024-02-03`. Beside it, the p
 
 HEK.82 **Every range is closed.** Big groups pin k down at every move, which our own games never did. k falls steadily, from about 220 at moves 2–5 to about 80 at move 11. Moves 13–15 are too few to say more than "about 70–90".
 
-HEK.83 **The trend fits.** k(move) = 265 × 0.879^(move − 2), and the check holds (χ² 19.3 on 12 df, limit 21.0). It gives 265 at move 2, 120 at move 8 and 50 at move 15.
+HEK.83 **The trend fits.** k(move) = 265 × 0.879^(move − 2), and the check holds (χ² 19.3 on 12 df, limit 21.0). It gives 265 at move 2, 122 at move 8 and 50 at move 15.
 
 HEK.84 **Against the pool.** At moves 4–10 the Explorer's k lies inside the pool's ranges. At moves 2–3 it is below them: the Explorer finds more scatter (about 3.3 points of true spread at k 224, against under 3 at the pool's low end). Likely causes are the Explorer's lack of a gap filter, its two years, and the bias in who plays a move (HEK.30–31); huge groups (millions of games at move 2) see even a small systematic stray.
 

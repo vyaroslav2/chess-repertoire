@@ -45,3 +45,9 @@ tags:
 ## 2026-10-25
 
 - HE: March's jobs-a is split in two, so a third person can search part c. results, recheck, the dot page and MySQL read it.
+
+## 2026-10-31
+
+- HE: the 2025 check, the per-rating-group check, the dial tuning and the final 2026 test of the selector ([[HES|HES.90–116]]). Default confidence now 90%.
+- Specs: [[HEG]], the selector in the generator.
+- Generator: built the selector behind `humanEvidence` (off by default): EW.14, the 2M prior searches, month-limited counts, the line budget, the new fields on Black's move ([[HEG]], [[EW|EW.14]], [[DB|DB.14]]). Not yet run on the real tree.

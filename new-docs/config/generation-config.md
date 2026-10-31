@@ -24,6 +24,16 @@ tags:
 | `localStockfishHashMb`        | 1024                                             | related to local Stockfish  cache profile                   |
 | `localStockfishMultiPv`       | 1                                                | related to local Stockfish  cache profile                   |
 | `hardcodedBlackResponses`[^4] | 1. e4 c6,  1. d4 d5                              |                                                             |
+| `humanEvidence`               | off                                              | the selector in EW.14; [[HEG]] HEG.50                       |
+| `selectorMonths`              | 2023-06 to 2026-05                               | its own Explorer cache profile; [[HEG]] HEG.20              |
+| `selectorConfidence`          | 90%                                              | [[HES]] HES.104                                             |
+| `selectorMargin`              | 1 point of score (0.01 as a fraction)            | [[HES]] HES.104                                             |
+| `selectorCpLimit`             | 30 cp, at `localStockfishNodes`                  | [[HEG]] HEG.32                                              |
+| `selectorLineBudget`          | 50 cp along one route                            | [[HEG]] HEG.31                                              |
+| `selectorNearTie`             | 0.5 point                                        | [[HES]] HES.18                                              |
+| `selectorDraws`               | 20 000 samples per cloud                         |                                                             |
+| `selectorNodes`               | 2 000 000; Threads 1, MultiPV 1                  | its own engine cache profile; [[HEG]] HEG.21                |
+| `selectorHashMb`              | 64                                               | its own engine cache profile                                |
 
 
 

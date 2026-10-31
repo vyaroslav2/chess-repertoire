@@ -10,7 +10,7 @@ The selector in [[HE]]'s algorithm: the step that picks Black's move in a positi
 
 HES.01 **One job.** For a position with Black to move, it decides whether a move other than the engine's top move has strong enough human evidence to be chosen instead. It does this with the curve and k already measured ([[HEV]]).
 
-HES.02 **Standalone, like all of HE.** It lives in `experiments/he/`, as a new command, `select`. It reads the app's database but never writes to it, and it doesn't change the tree generator. Its output is a report under `experiments/he/data/`. Putting it into the generator is a later, separate decision.
+HES.02 **Standalone, like all of HE.** It lives in `experiments/he/`, as a new command, `select`. It reads the app's database but never writes to it, and it doesn't change the tree generator. Its output is a report under `experiments/he/data/`. Putting it into the generator was a later, separate decision: [[HEG]], built 2026-10-31.
 
 HES.03 **What it reads.**
 

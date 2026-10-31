@@ -12,7 +12,7 @@ OV.01 The generator builds one opening repertoire tree for one side. The side is
 
 OV.02 The two sides are treated differently, and this asymmetry is the whole design:
 * **White** — every move Explorer returns goes on to the checks, however rare. A move that leaves its route less likely than `minCumProb` gets no Black reply. One position, many White moves ([[HM]]).
-* **Black** — exactly one move is chosen, the move that goes into the repertoire: local Stockfish 19's top move. One position, one Black move ([[EW]]).
+* **Black** — exactly one move is chosen, the move that goes into the repertoire: local Stockfish 19's top move. With `humanEvidence` on, human games can replace it with a move that scores better, within cp limits ([[HEG]]). One position, one Black move ([[EW]]).
 
 OV.03 A run reads from two kinds of source and writes to one place. It reads human game statistics (Lichess Explorer) and engine evaluations (local Stockfish 19); it writes [[node|nodes]] and moves into the database ([[DB]]). Everything fetched or evaluated is cached and never fetched or evaluated twice ([[DB|DB.30]]).
 
@@ -60,7 +60,7 @@ OV.11 **Place the child.** If that position has already been reached by an earli
 
 OV.24 **Drop the rare ones.** A child the tree owns whose `cumProb` is below `minCumProb` ([[generation-config]]) is too rare. Its probability goes to `rareDropped`, and Black does not reply ([[HM]]). So a line stops once it is less likely than 1 in 1000, at whatever depth. If later routes lift it to `minCumProb`, a sweep expands it after all ([[DRS]]).
 
-OV.12 **Choose Black's move.** For a child the tree owns, take local Stockfish 19's top move, unless a hardcoded response applies ([[EW]]).
+OV.12 **Choose Black's move.** For a child the tree owns, take local Stockfish 19's top move, unless a hardcoded response applies ([[EW]]), or, with `humanEvidence` on, the selector finds a better-scoring human move ([[HEG]]).
 
 OV.13 **Push what comes next.** Playing Black's move gives a position with White to move again. That position is checked before it goes anywhere ([[RE.excalidraw|RE]]): if the game is over, or the route has reached `depthCap` ([[generation-config]]), the route ends here and nothing is queued. Otherwise it goes back on the queue. Every ending is recorded with a reason ([[DB|DB.20]]).
 
