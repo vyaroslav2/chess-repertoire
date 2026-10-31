@@ -42,7 +42,7 @@ HEG.20 **Move counts from recent months.** Explorer, at the position with Black 
 * Decided 2026-10-31: recent months, not all years. It is the cautious side: deep moves with thin data have a weaker case, so they stay with Stockfish's move more often.
 
 HEG.21 **Evals at 2M nodes, as the curve was fitted.** Threads 1, Hash 64 MB, MultiPV 1, Stockfish 19 ([[HE]] item 4). A 2M eval is the only kind the curve can turn into a prior. It gets its own `EngineCache` profile ([[DB]] DB.32). The generator's 200M search still picks the champion and gives every stored eval.
-* #question The curve's evals came from HE's engine code, which takes the stop line ([[EW]] EW.09 note). The generator's engine drops it. On most positions the two agree. Proposed: use the generator's engine, and check on a sample of 200 HE jobs that the evals match, or almost always match, before the first build.
+* Decided 2026-10-31: the selector's 2M evals are read HE's way, taking the stop line, as the curve's were ([[EW]] EW.09 note). The generator's own 200M searches keep dropping it.
 
 HEG.22 **The curve, frozen.** The pool's chosen curve (`experiments/he/data/runs/2024-02-03/curve.json`: its name, parameters and knots) is copied into a file under `src/`, with where it came from. The generator never reads `experiments/`.
 
@@ -70,6 +70,8 @@ HEG.31 **The line budget** ([[HES]] HES.19). The cp losses of the switches along
 * Why: in a deep line, many small losses could add up to a bad position. The per-move limit can't see that.
 * Decided 2026-10-31: 50 cp for a line, with 30 cp for one move. Today's switches lose 0–15 cp each, so a line can take three or four typical ones. The report could never put two on one line (HES.19), so how they add up is still to be seen.
 
+HEG.32 **cp loss at 200M (proposed).** The prior needs 2M evals, because the curve was measured on them. The cp limit and the line budget are about soundness, and there the generator's deeper search is better. So a contender that passes the safe gain gets a 200M search, and its cp loss is measured against EW.09's eval. The winner needs that search anyway (EW.11), so only the other passing contenders cost extra, a few minutes each.
+
 ## What it records
 
 HEG.40 **On a switched Black move** ([[DB]] DB.14):
@@ -81,7 +83,7 @@ HEG.41 **The log** ([[TGL]]): one line per switch: the line, champion → chosen
 
 ## Rollout
 
-HEG.50 **`humanEvidence` off rebuilds today's tree.** Proposed: off by default until HEG.60 passes, then on.
+HEG.50 **`humanEvidence` off rebuilds today's tree.** Decided 2026-10-31: off by default until HEG.60 passes, then on.
 
 HEG.60 **First build at today's depth, against the report.** With `minCumProb` unchanged, the switches must match `select` on the same tree, months and dials. That checks HE's code against the generator's. Any difference is explained before going on.
 
@@ -103,8 +105,7 @@ HEG.81 **Notes that change with it:** [[OV]] OV.02 and OV.12, [[EW]] (its openin
 
 ## Open questions
 
-HEG.90 Decided 2026-10-31: recent months (HEG.20), a 50 cp line budget (HEG.31), every judged contender stored (HEG.40).
+HEG.90 Decided 2026-10-31: recent months (HEG.20), HE's way of reading 2M evals (HEG.21), a 50 cp line budget (HEG.31), every judged contender stored (HEG.40), `humanEvidence` off until HEG.60 passes (HEG.50).
 
 Still open:
-* The engine rule for 2M evals (HEG.21). Proposed: the generator's, after a 200-position check. Settled by that check, before the first build.
-* `humanEvidence` default (HEG.50). Proposed: off until HEG.60 passes, then on.
+* Measure the cp loss at 200M, not 2M (HEG.32). Proposed: yes.
