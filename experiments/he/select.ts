@@ -3,88 +3,16 @@ import { open, readFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import { Chess } from "chess.js";
 import { computeExplorerCacheProfile, defaultConfig } from "../../src/lib/core/config";
-import { chances, random } from "./curve";
+import { chances, choose, DIALS, games, judge, score, scoreDraws, type Curve, type Dials, type Judged, type Record3 } from "../../src/lib/core/selector";
 import { HeEngine, type Evaluation } from "./engine";
 import { assertDataDirectory, DATA_ROOT, HE_ROOT, runPath } from "./paths";
 import { explorerCounts, httpFetcher, DEFAULT_BASE, EXPLORER, type ExplorerAnswer, type Fetcher, type Months } from "./explorer";
 
-// The selector (HES): in a position with Black to move, the tree's move (the champion) stays
-// unless another move's human games show, at the chosen confidence, that it scores better by
-// more than the margin, within the per-move cp limit.
-export type Record3 = { wins: number; draws: number; losses: number };   // Black's view
-export type Dials = { confidence: number; margin: number; cpLimit: number; draws: number; nearTie: number };
-// HES.20. Score is a fraction: a margin of 0.01 is 1 point.
-export const DIALS: Dials = { confidence: 0.9, margin: 0.01, cpLimit: 30, draws: 20_000, nearTie: 0.005 };
-export type Curve = (cpWhite: number) => { win: number; draw: number; loss: number; score: number };
-
-// Marsaglia and Tsang; a shape below 1 is lifted by one and scaled back.
-function gamma(next: () => number, shape: number): number {
-  if (shape < 1) return gamma(next, shape + 1) * Math.pow(next(), 1 / shape);
-  const d = shape - 1 / 3, c = 1 / Math.sqrt(9 * d);
-  for (;;) {
-    const z = Math.sqrt(-2 * Math.log(1 - next())) * Math.cos(2 * Math.PI * next()), v = (1 + c * z) ** 3;
-    if (v > 0 && Math.log(next()) < z * z / 2 + d - d * v + d * Math.log(v)) return d * v;
-  }
-}
-
-// HES.15: draws of a move's score from its cloud, Dirichlet(k × the curve's chances + its games).
-export function scoreDraws(curve: Curve, cpWhite: number, k: number, record: Record3, count: number, seed: string) {
-  const centre = curve(cpWhite), next = random(seed), draws = new Float64Array(count);
-  const alpha = [k * centre.loss + record.losses, k * centre.draw + record.draws, k * centre.win + record.wins];
-  for (let i = 0; i < count; i++) {
-    const [loss, draw, win] = alpha.map(a => gamma(next, a));
-    draws[i] = (win + draw / 2) / (loss + draw + win);
-  }
-  return draws;
-}
-
-// HES.16: the gain at the unlucky end, e.g. its 5th percentile for 95%.
-export function safeGain(contender: Float64Array, champion: Float64Array, confidence: number) {
-  const gains = contender.map((score, i) => score - champion[i]).sort();
-  return { mean: gains.reduce((sum, gain) => sum + gain, 0) / gains.length, safe: gains[Math.floor((1 - confidence) * gains.length)] };
-}
-
-const score = (r: Record3) => (r.wins + r.draws / 2) / (r.wins + r.draws + r.losses);
-const games = (r: Record3) => r.wins + r.draws + r.losses;
-
-// HES.13: whether a contender could pass at all, before its search: its real games with the best
-// prior a contender can have, the champion's (HES.21). A worse eval only lowers its belief, so a
-// contender this drops would fail its full search too. The slack covers the draws' own noise.
-const BOUND_SLACK = 0.005;
-export function couldPass(curve: Curve, championCp: number, champion: Float64Array, k: number, record: Record3, dials: Dials, seed: string) {
-  const best = scoreDraws(curve, championCp, k, record, dials.draws, seed);
-  return safeGain(best, champion, dials.confidence).safe > dials.margin - BOUND_SLACK;
-}
-
-export type Verdict = "passes" | "best-case" | "safe-gain" | "cp-limit" | "mate";
-export type Judged = { uci: string; san: string; games: number; score: number; verdict: Verdict;
-  cpWhite?: number | null; mateWhite?: number | null; cpLoss?: number; priorScore?: number; belief?: number; safeGain?: number };
-
-// HES.14–17 for one contender. evaluate is called only when the contender could pass.
-export async function judge(contender: { uci: string; san: string; record: Record3 }, champion: { cpWhite: number; draws: Float64Array },
-  curve: Curve, k: number, dials: Dials, seed: string, evaluate: () => Promise<Evaluation>): Promise<Judged> {
-  const base = { uci: contender.uci, san: contender.san, games: games(contender.record), score: score(contender.record) };
-  if (!couldPass(curve, champion.cpWhite, champion.draws, k, contender.record, dials, seed)) return { ...base, verdict: "best-case" };
-  const evaluation = await evaluate();
-  if (evaluation.cpWhite === null) return { ...base, verdict: "mate", cpWhite: null, mateWhite: evaluation.mateWhite };
-  // Black's view: a higher cpWhite is worse for Black. The champion is the engine's top move, so
-  // a contender's prior is never better than its: a switch must come from the games, not from
-  // the 2M search rating a move above the tree's deeper choice.
-  const priorCp = Math.max(evaluation.cpWhite, champion.cpWhite), cpLoss = evaluation.cpWhite - champion.cpWhite;
-  const draws = scoreDraws(curve, priorCp, k, contender.record, dials.draws, seed);
-  const gain = safeGain(draws, champion.draws, dials.confidence);
-  const verdict = gain.safe <= dials.margin ? "safe-gain" : cpLoss > dials.cpLimit ? "cp-limit" : "passes";
-  return { ...base, verdict, cpWhite: evaluation.cpWhite, mateWhite: null, cpLoss, priorScore: curve(priorCp).score,
-    belief: draws.reduce((sum, d) => sum + d, 0) / draws.length, safeGain: gain.safe };
-}
-
-// HES.18: the highest safe gain wins; a near-tie goes to the better eval.
-export function choose(judged: Judged[], dials: Dials) {
-  const passing = judged.filter(j => j.verdict === "passes").sort((x, y) => y.safeGain! - x.safeGain!);
-  if (!passing.length) return null;
-  return passing.filter(j => passing[0].safeGain! - j.safeGain! <= dials.nearTie)
-    .sort((x, y) => x.cpWhite! - y.cpWhite! || y.safeGain! - x.safeGain!)[0];
-}
+// The selector (HES). Its maths lives in the app, so this report and the generator share one copy
+// (HEG.80): in a position with Black to move, the tree's move (the champion) stays unless another
+// move's human games show, at the chosen confidence, that it scores better by more than the margin,
+// within the per-move cp limit.
+export { choose, couldPass, DIALS, judge, safeGain, scoreDraws, type Curve, type Dials, type Judged, type Record3, type Verdict } from "../../src/lib/core/selector";
 
 type TreeRow = { id: string; positionKey: string; fullFen: string; cumProb: number; displayPgn: string;
   san: string; uci: string; selectionMethod: string | null };

@@ -13,7 +13,7 @@ import {
 import { parseFullFen, positionKeyFromFen } from "./fen";
 import { fetchExplorer, fetchOpeningMetadata as fetchAmateurOpeningMetadata, type ExplorerOpening } from "../api/lichess";
 import { defaultConfig, createRuntimeConfig, type Config } from "../core/config";
-import { selectWhiteCandidates, evaluateBlackMove } from "./evaluator";
+import { selectWhiteCandidates, evaluateBlackMove, type SelectorRecord } from "./evaluator";
 import { runCascade, probabilityBalance, type CascadeRunState } from "./cascade";
 import { delay } from "../api/retry";
 import { UserRequestedStopError } from "../api/retry";
@@ -237,6 +237,8 @@ export async function evaluateCanonicalResponse(input: {
   responseNode: { id: string; fullFen: string; displayPgn: string };
   routePgn: string;
   evaluator?: ResponseEvaluator;
+  /** HEG: the run's config and the route's line budget spend so far. */
+  evaluatorDependencies?: { config: Config; lineCpSpent: number };
 }) {
   const canonicalHistory = historyFromCanonicalPgn(input.responseNode.displayPgn);
   const canonicalChess = new Chess(input.responseNode.fullFen);
@@ -244,7 +246,8 @@ export async function evaluateCanonicalResponse(input: {
   const result = await evaluator(
     input.responseNode.fullFen,
     canonicalChess,
-    canonicalHistory
+    canonicalHistory,
+    input.evaluatorDependencies
   );
   const selectedMove = canonicalChess.move({
     from: result.selectedUci.slice(0, 2),
@@ -261,6 +264,39 @@ export async function evaluateCanonicalResponse(input: {
     selectedSan: selectedMove.san,
     selectedDestinationFullFen: parseFullFen(canonicalChess.fen())
   };
+}
+
+/**
+ * HEG.31: the cp the switches on this route have given up so far. The position after White's
+ * move was reached from the position before it, and that one by a Black move, which carries the
+ * spend after it. The root, and a move stored without the selector, have spent nothing.
+ */
+export async function routeLineCpSpent(posAfterWhiteNodeId: string): Promise<number> {
+  const whiteMove = await prisma.repertoireMove.findFirst({ where: { toNodeId: posAfterWhiteNodeId, playerTurn: "OPPONENT" } });
+  if (!whiteMove) return 0;
+  const blackMove = await prisma.repertoireMove.findFirst({ where: { toNodeId: whiteMove.fromNodeId, playerTurn: "RESPONSE" } });
+  return blackMove?.lineCpSpent ?? 0;
+}
+
+/** HEG.41: the selector's log lines for one position. */
+export function selectorLogLines(route: string, selector: SelectorRecord, config: Pick<Config, "selectorLineBudget">): string[] {
+  const percent = (fraction: number) => (fraction * 100).toFixed(1);
+  if (selector.skipped) return [`[HUMAN EVIDENCE] route=${route}; nothing judged: ${selector.skipped === "no-games" ? "no games" : "a mate score"}`];
+  const lines = selector.judged.map(move => {
+    const facts = [`games=${move.games}`, `score=${percent(move.score)}%`];
+    if (move.cpWhite !== undefined) facts.push(`eval2M=${move.cpWhite ?? "mate"}`);
+    if (move.safeGain !== undefined) facts.push(`safeGain=${percent(move.safeGain)}`);
+    if (move.cpLoss !== undefined) facts.push(`cpLoss=${move.cpLoss ?? "mate"}`);
+    return `[JUDGED] route=${route}; ${move.san}: ${move.verdict}; ${facts.join("; ")}`;
+  });
+  if (selector.chosen) {
+    const { san, games, score, safeGain, cpLoss } = selector.chosen;
+    lines.push(`[HUMAN EVIDENCE] route=${route}; ${selector.championSan} -> ${san}; games=${games}; score=${percent(score)}%; ` +
+      `safeGain=${percent(safeGain)}; cpLoss=${cpLoss}; budget spent=${selector.lineCpSpent} of ${config.selectorLineBudget}`);
+  } else {
+    lines.push(`[HUMAN EVIDENCE] route=${route}; ${selector.championSan} stays; ${selector.judged.length} moves judged`);
+  }
+  return lines;
 }
 
 /**
@@ -508,6 +544,12 @@ export async function generateRepertoire(
   let maximumQueueSize = 1;
   let totalSweeps = 0;
   let totalReopenedRoutes = 0;
+  // HEG.41
+  let totalSelectorJudged = 0;
+  let totalSelectorSwitches = 0;
+  let selectorJudgedCumProb = 0;
+  let selectorSwitchedCumProb = 0;
+  let totalSelectorSearches = 0;
 
   const fetchDatabases = dependencies.fetchDatabases ?? fetchExplorer;
   const fetchOpeningMetadata = dependencies.fetchOpeningMetadata ?? fetchAmateurOpeningMetadata;
@@ -588,9 +630,23 @@ export async function generateRepertoire(
     const canonicalSelection = await evaluateCanonicalResponse({
         responseNode: posAfterWhiteNode,
         routePgn: posAfterWhiteNode.displayPgn,
-        evaluator: dependencies.responseEvaluator
+        evaluator: dependencies.responseEvaluator,
+        evaluatorDependencies: { config: runtime.config, lineCpSpent: await routeLineCpSpent(posAfterWhiteNode.id) }
     });
     const algoResult = canonicalSelection.result;
+    const selector = algoResult.selector ?? null;
+    if (selector) {
+      for (const line of selectorLogLines(posAfterWhiteNode.displayPgn, selector, runtime.config)) console.log(line);
+      totalSelectorSearches += selector.searches;
+      if (!selector.skipped) {
+        totalSelectorJudged++;
+        selectorJudgedCumProb += effectiveCanonicalProb;
+      }
+      if (selector.chosen) {
+        totalSelectorSwitches++;
+        selectorSwitchedCumProb += effectiveCanonicalProb;
+      }
+    }
     // HM.09: the White move takes the eval of EW.09's search of the position it reaches, even under a hardcoded reply.
     await recordOpponentMoveEval(whiteMoveId, { cp: algoResult.baselineCp, mate: algoResult.baselineMate, depth: algoResult.baselineDepth });
     await attemptCanonicalNodeWikibooks(posAfterWhiteNode.id, wikibooksAttemptedNodeIds, ensureNodeWikibooks);
@@ -652,7 +708,17 @@ export async function generateRepertoire(
         source: algoResult.source,
         selectionMethod: algoResult.selectionMethod,
         moveOrigin: algoResult.moveOrigin,
-        engineRank: algoResult.engineRank
+        engineRank: algoResult.engineRank,
+        // HEG.40
+        selector: selector && {
+          championSan: selector.championSan,
+          championCp2M: selector.championCp2M,
+          chosen: selector.chosen && { cp2M: selector.chosen.cp2M, cpLoss: selector.chosen.cpLoss, games: selector.chosen.games,
+            score: selector.chosen.score, safeGain: selector.chosen.safeGain },
+          lineCpSpent: selector.lineCpSpent,
+          judged: JSON.stringify({ moveNumber: selector.moveNumber, k: selector.k, championGames: selector.championGames,
+            championScore: selector.championScore, skipped: selector.skipped ?? null, judged: selector.judged })
+        }
     });
     responseId = createdResponse.id;
 
@@ -953,6 +1019,13 @@ export async function generateRepertoire(
   console.log(`Rare Dropped Moves Total: ${rareDroppedMovesTotal}`);
   console.log(`Sweeps:                   ${totalSweeps}`);
   console.log(`Reopened Routes:          ${totalReopenedRoutes}`);
+  if (runtime.config.humanEvidence) {
+    // HEG.41
+    const share = selectorJudgedCumProb > 0 ? (100 * selectorSwitchedCumProb / selectorJudgedCumProb).toFixed(1) : "0.0";
+    console.log(`Human Evidence Judged:    ${totalSelectorJudged}`);
+    console.log(`Human Evidence Switches:  ${totalSelectorSwitches} (${share}% of judged cumProb)`);
+    console.log(`Human Evidence Searches:  ${totalSelectorSearches} at ${runtime.config.selectorNodes} nodes`);
+  }
   console.log("========================================================\n");
 
   // S3.11 - S3.15

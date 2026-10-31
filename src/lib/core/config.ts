@@ -21,6 +21,22 @@ export interface Config {
   localStockfishHashMb: number;
   localStockfishMultiPv: number;
   hardcodedBlackResponses: string[];
+  // HEG.30: the selector. Off rebuilds the tree with Stockfish's move only (HEG.50).
+  humanEvidence: boolean;
+  /** HEG.20: the months of Explorer counts, written out so a cache profile never moves under a run. */
+  selectorMonths: { since: string; until: string };
+  selectorConfidence: number;
+  /** A fraction of score: 0.01 is 1 point. */
+  selectorMargin: number;
+  /** cp, measured at localStockfishNodes (HEG.32). */
+  selectorCpLimit: number;
+  /** HEG.31: the most cp the switches along one route may give up between them. */
+  selectorLineBudget: number;
+  selectorNearTie: number;
+  selectorDraws: number;
+  /** HEG.21: the prior's evals, searched as the curve's were. */
+  selectorNodes: number;
+  selectorHashMb: number;
   // Not in generation-config: the request shapes. Retries, gaps and timeouts follow AR.
   api: {
     wikibooks: {
@@ -49,6 +65,16 @@ export const defaultConfig: Config = {
   localStockfishHashMb: 1024,
   localStockfishMultiPv: 1,
   hardcodedBlackResponses: ["1. e4 c6", "1. d4 d5"],
+  humanEvidence: false,
+  selectorMonths: { since: "2023-06", until: "2026-05" },
+  selectorConfidence: 0.9,
+  selectorMargin: 0.01,
+  selectorCpLimit: 30,
+  selectorLineBudget: 50,
+  selectorNearTie: 0.005,
+  selectorDraws: 20_000,
+  selectorNodes: 2_000_000,
+  selectorHashMb: 64,
 
   api: {
     wikibooks: {
@@ -149,6 +175,22 @@ export function validateConfig(config: Config) {
   )
     throw new Error("Invalid hardcodedBlackResponses");
 
+  // HEG.30
+  if (typeof config.humanEvidence !== "boolean") throw new Error("Invalid humanEvidence");
+  const month = /^\d{4}-(0[1-9]|1[0-2])$/;
+  const months = config.selectorMonths;
+  if (!months || !month.test(months.since) || !month.test(months.until) || months.since > months.until)
+    throw new Error("Invalid selectorMonths");
+  if (!(typeof config.selectorConfidence === "number" && config.selectorConfidence > 0.5 && config.selectorConfidence < 1))
+    throw new Error("Invalid selectorConfidence");
+  if (!(isFraction(config.selectorMargin) && config.selectorMargin < 0.5)) throw new Error("Invalid selectorMargin");
+  if (!isNonNegative(config.selectorCpLimit)) throw new Error("Invalid selectorCpLimit");
+  if (!isNonNegative(config.selectorLineBudget)) throw new Error("Invalid selectorLineBudget");
+  if (!isFraction(config.selectorNearTie)) throw new Error("Invalid selectorNearTie");
+  if (!isPositiveInteger(config.selectorDraws)) throw new Error("Invalid selectorDraws");
+  if (!isPositiveInteger(config.selectorNodes)) throw new Error("Invalid selectorNodes");
+  if (!isPositiveInteger(config.selectorHashMb)) throw new Error("Invalid selectorHashMb");
+
   const wikibooks = config.api?.wikibooks;
   if (!isPositiveInteger(wikibooks?.maxLagSeconds))
     throw new Error("Invalid api.wikibooks.maxLagSeconds");
@@ -205,6 +247,41 @@ export function computeLocalEngineEvaluationProfile(config: Config): string {
     threads: config.localStockfishThreads,
     hashMb: config.localStockfishHashMb,
     multiPv: config.localStockfishMultiPv,
+  };
+  return createHash("sha256")
+    .update(canonicalStringify(searchShape))
+    .digest("hex");
+}
+
+// HEG.20: the selector's counts: the generator's speeds and ratings, but only selectorMonths, and
+// every move (HE asked for 100). A profile of its own, so the generator's Explorer cache stays as it is.
+export const SELECTOR_EXPLORER_MOVES = 100;
+export function computeSelectorExplorerCacheProfile(config: Config): string {
+  const requestShape = {
+    dataset: "AMATEUR",
+    source: "lichess",
+    speeds: config.explorerSpeeds,
+    ratings: config.explorerRatings,
+    since: config.selectorMonths.since,
+    until: config.selectorMonths.until,
+    moves: SELECTOR_EXPLORER_MOVES,
+  };
+  return createHash("sha256")
+    .update(canonicalStringify(requestShape))
+    .digest("hex");
+}
+
+// HEG.21: the prior's evals. HE's search: one root move (searchmoves), the last exact score,
+// the stop line included, as the curve's evals were read. Never mixed with the generator's own.
+export function computeSelectorEngineProfile(config: Config): string {
+  const searchShape = {
+    role: "he-prior",
+    version: config.localStockfishVersion,
+    nodes: config.selectorNodes,
+    threads: 1,
+    hashMb: config.selectorHashMb,
+    multiPv: 1,
+    read: "last-exact-line",
   };
   return createHash("sha256")
     .update(canonicalStringify(searchShape))

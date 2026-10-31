@@ -209,6 +209,17 @@ model RepertoireMove {
   moveOrigin      String?
   engineRank      Int?
 
+  // HEG.40 the selector, on a Black move it judged; null where it did not run
+  championSan    String? // Stockfish's move, the champion
+  championCp2M   Float? // the champion's 2M eval (HEG.21)
+  chosenCp2M     Float? // a switch: the chosen move's 2M eval
+  selectorCpLoss Float? // a switch: its cp loss at 200M (HEG.32)
+  selectorGames  Int? // a switch: its games in selectorMonths
+  selectorScore  Float? // a switch: Black's score in them
+  safeGain       Float? // a switch: its safe gain (HES.16)
+  lineCpSpent    Float? // HEG.31: the route's spend after this move
+  selectorJudged String? // JSON: every judged move and its verdict, or why nothing was judged
+
   fromNode   RepertoireNode           @relation("OutgoingMoves", fields: [fromNodeId], references: [id], onDelete: Cascade)
   toNode     RepertoireNode?          @relation("IncomingMoves", fields: [toNodeId], references: [id], onDelete: Cascade)
   repertoire Repertoire               @relation(fields: [repertoireId], references: [id], onDelete: Cascade)

@@ -245,7 +245,8 @@ overall fit and the trend count a game once for each position it passes.
 
 ## The selector
 
-`select` runs HE's selector (`new-docs/specs/HES.md`) over the app's tree, read-only:
+`select` runs HE's selector (`new-docs/specs/HES.md`) over the app's tree, read-only. Its maths, and the curve's
+spline, live in the app (`src/lib/core/selector.ts`), which the generator uses too (`new-docs/specs/HEG.md`):
 
 ```powershell
 npm --prefix experiments/he run select -- --run tree-low --pool 2024-02-03 --k low --engine stockfish-windows-x86-64-universal/stockfish/stockfish-windows-x86-64-universal.exe

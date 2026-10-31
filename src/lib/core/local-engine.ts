@@ -3,12 +3,14 @@ import { Chess } from 'chess.js';
 import { spawn } from 'child_process';
 import * as path from 'path';
 
-import { defaultConfig, computeLocalEngineEvaluationProfile, type Config } from './config';
+import { defaultConfig, computeLocalEngineEvaluationProfile, computeSelectorEngineProfile, type Config } from './config';
 import { parseFullFen } from './fen';
 import { isValidUciMove } from './uci';
 import {
   readLocalEngineBaseline,
+  readLocalEngineCandidate,
   saveLocalEngineBaseline,
+  saveLocalEngineCandidate,
   type LocalEngineEvaluation
 } from '../db/operations';
 
@@ -71,6 +73,12 @@ export class ConsoleDetachedEngine extends Engine {
       stdout.off('data', listener);
       progress.finish();
     }
+  }
+
+  /** HEG.21: one root move's search, as raw lines, for the selector's HE-style read. */
+  async goSearchmoves(nodes: number, uci: string): Promise<string[]> {
+    this.write(`go nodes ${nodes} searchmoves ${uci}`);
+    return this.getBufferUntil(line => line.startsWith('bestmove '));
   }
 }
 
@@ -323,6 +331,90 @@ function deepLocalSettings(config: Config): LocalSearchSettings {
     hashMb: config.localStockfishHashMb,
     multiPv: config.localStockfishMultiPv
   };
+}
+
+// --- HEG.21: the selector's prior evals, searched and read as HE's were ---
+
+export type SelectorEvaluation = { cp: number | null; mate: number | null; depth: number | null };
+export type SelectorSearchSettings = { nodes: number; hashMb: number };
+export type SelectorSearchRunner = (fullFen: string, uci: string, settings: SelectorSearchSettings) => Promise<SelectorEvaluation>;
+
+/**
+ * HE's read (`experiments/he/engine.ts`): the last exact, unbounded score whose first move is the
+ * searched one. Unlike EW.09 it keeps the stop line, because the curve was fitted on evals read
+ * this way. White's point of view, as DB.15.
+ */
+export function parseSelectorSearch(lines: readonly string[], fullFen: string, uci: string): SelectorEvaluation {
+  const best = /^bestmove ([a-h][1-8][a-h][1-8][qrbn]?)(?:\s|$)/.exec(lines.at(-1) ?? '')?.[1];
+  if (best !== uci) throw new Error(`Selector search did not return the requested root move ${uci} at ${fullFen}`);
+  const multiplier = fullFen.split(' ')[1] === 'b' ? -1 : 1;
+  for (const line of [...lines].reverse()) {
+    if (!line.startsWith('info ') || /\b(?:lowerbound|upperbound)\b/.test(line)) continue;
+    const depth = Number(/\bdepth (\d+)\b/.exec(line)?.[1]);
+    const score = /\bscore (cp|mate) (-?\d+)\b/.exec(line);
+    const pv = /\bpv (\S+)/.exec(line)?.[1];
+    const multiPv = Number(/\bmultipv (\d+)\b/.exec(line)?.[1] ?? '1');
+    if (!depth || !score || !pv || multiPv !== 1) continue;
+    if (pv !== uci) break;
+    const value = Number(score[2]) * multiplier;
+    if (score[1] === 'mate' && value === 0) throw new Error(`Invalid selector mate score at ${fullFen}`);
+    return { cp: score[1] === 'cp' ? (value === 0 ? 0 : value) : null, mate: score[1] === 'mate' ? value : null, depth };
+  }
+  throw new Error(`Selector search gave no exact score for ${uci} at ${fullFen}`);
+}
+
+type SelectorEngine = {
+  init(): Promise<void>;
+  setoption(name: string, value: string): Promise<void>;
+  position(fen: string): Promise<void>;
+  goSearchmoves(nodes: number, uci: string): Promise<string[]>;
+  quit(): Promise<void>;
+};
+
+export async function runSelectorSearch(
+  fullFenInput: string,
+  uci: string,
+  settings: SelectorSearchSettings,
+  engineFactory: (enginePath: string) => SelectorEngine = enginePath => new ConsoleDetachedEngine(enginePath) as unknown as SelectorEngine
+): Promise<SelectorEvaluation> {
+  const fullFen = parseFullFen(fullFenInput);
+  if (fullFen !== fullFenInput) throw new Error('Selector search requires canonical FullFen');
+  assertLegalRoot(fullFen, uci);
+  const engine = engineFactory(path.resolve(process.cwd(), 'bin', 'stockfish.exe'));
+  let primaryError: unknown = null;
+  try {
+    await engine.init();
+    // A new process per search, so the hash starts empty, as HE's ucinewgame and Clear Hash did.
+    await engine.setoption('Threads', '1');
+    await engine.setoption('Hash', settings.hashMb.toString());
+    await engine.setoption('MultiPV', '1');
+    await engine.position(fullFen);
+    return parseSelectorSearch(await engine.goSearchmoves(settings.nodes, uci), fullFen, uci);
+  } catch (error) {
+    primaryError = error;
+    throw error;
+  } finally {
+    try {
+      await engine.quit();
+    } catch (cleanupError) {
+      if (primaryError === null) throw cleanupError;
+    }
+  }
+}
+
+/** HEG.21: a move's 2M eval, from EngineCache under the selector's profile, or searched once. */
+export async function getOrCreateSelectorEval(
+  fullFen: string,
+  uci: string,
+  config: Config = defaultConfig,
+  runner: SelectorSearchRunner = runSelectorSearch
+): Promise<SelectorEvaluation & { reused: boolean }> {
+  const profile = computeSelectorEngineProfile(config);
+  const cached = await readLocalEngineCandidate(fullFen, uci, profile);
+  if (cached) return { cp: cached.cp, mate: cached.mate, depth: cached.depth ?? null, reused: true };
+  const evaluation = await runner(fullFen, uci, { nodes: config.selectorNodes, hashMb: config.selectorHashMb });
+  await saveLocalEngineCandidate(fullFen, uci, profile, { uci, cp: evaluation.cp, mate: evaluation.mate, depth: evaluation.depth });
+  return { ...evaluation, reused: false };
 }
 
 export async function getOrCreateLocalBaseline(

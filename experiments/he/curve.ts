@@ -18,28 +18,12 @@ export const MODELS: Model[] = [
 ];
 const CLIP = 10;
 export type Group = { basis: number[]; losses: number; draws: number; wins: number };
-export type Chances = { win: number; draw: number; loss: number; score: number };
 
+// The spline and the curve's chances live in the app, which reads the frozen curve (HEG.22, HEG.80).
+import { basis, chances, random, type Chances } from "../../src/lib/core/selector";
+export { basis, chances, random, type Chances };
 const sigmoid = (z: number) => 1 / (1 + Math.exp(-z));
-const cube = (z: number) => z > 0 ? z * z * z : 0;
-// Harrell's restricted cubic spline: x, then one curved term per inner knot.
-export function basis(x: number, knots: number[]): number[] {
-  const k = knots.length, terms = [x];
-  for (let j = 0; j < k - 2; j++) {
-    const last = knots[k - 1], before = knots[k - 2], scale = (last - knots[0]) ** 2;
-    terms.push((cube(x - knots[j]) - cube(x - before) * (last - knots[j]) / (last - before) +
-      cube(x - last) * (before - knots[j]) / (last - before)) / scale);
-  }
-  return terms;
-}
 const pawns = (cpWhite: number) => Math.max(-CLIP, Math.min(CLIP, cpWhite / 100));
-
-export function chances(params: number[], knots: number[], cpWhite: number): Chances {
-  const terms = basis(pawns(cpWhite), knots);
-  const f = terms.reduce((sum, term, j) => sum + term * params[2 + j], 0);
-  const loss = sigmoid(params[0] + f), lossOrDraw = sigmoid(params[1] + f);
-  return { win: 1 - lossOrDraw, draw: lossOrDraw - loss, loss, score: 1 - lossOrDraw + (lossOrDraw - loss) / 2 };
-}
 
 // Log-likelihood and its gradient, each group counted `weight` times.
 function logLikelihood(params: number[], groups: Group[], weights?: number[]): { value: number; gradient: number[] } {
@@ -107,17 +91,6 @@ export function fit(groups: Group[], knots: number[], weights?: number[], start?
   return { params, logLikelihood: current.value };
 }
 
-// A small seeded random generator, so the bootstrap gives the same figures every run.
-export function random(seed: string) {
-  let state = createHash("sha256").update(seed).digest().readUInt32LE(0);
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let t = state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 const percentile = (values: number[], p: number) => {
   const sorted = [...values].sort((x, y) => x - y);

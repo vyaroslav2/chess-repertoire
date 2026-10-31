@@ -1,11 +1,17 @@
 import { Chess } from "chess.js";
 import {
   getOrCreateLocalBaseline,
+  getOrCreateSelectorEval,
+  runSelectorSearch,
   runTrustedLocalSearch,
-  type LocalSearchRunner
+  type LocalSearchRunner,
+  type SelectorSearchRunner
 } from "./local-engine";
-import { parseFullFen } from "./fen";
-import { defaultConfig } from "./config";
+import { parseFullFen, positionKeyFromFen } from "./fen";
+import { defaultConfig, type Config } from "./config";
+import { choose, games, judge, score, scoreDraws, type Dials, type Judged, type Record3 } from "./selector";
+import { selectorCurve, selectorK } from "./selector-evidence";
+import { fetchSelectorCounts as fetchSelectorCountsFromLichess } from "../api/lichess";
 import type { ResponseEvaluationSource, ResponseMoveOrigin, ResponseSelectionMethod } from "../db/operations";
 
 /** HM.03: a move's share of the position's games, and its Amateur results. */
@@ -52,6 +58,32 @@ export function findHardcodedResponse(routeSan: readonly string[], lines: readon
 
 export type EvaluateBlackMoveDependencies = {
   localSearchRunner?: LocalSearchRunner;
+  /** HEG: the run's config; a run passes its runtime config, which is defaultConfig. */
+  config?: Config;
+  /** HEG.31: the cp the switches earlier on this route gave up between them. */
+  lineCpSpent?: number;
+  selectorSearchRunner?: SelectorSearchRunner;
+  fetchSelectorCounts?: (fen: string, config: Config) => Promise<{ moves: { uci: string; san: string; white: number; draws: number; black: number }[] }>;
+};
+
+/** HEG.40: what the selector did at this position, stored on Black's move. */
+export type SelectorRecord = {
+  moveNumber: number;
+  k: number;
+  championSan: string;
+  championGames: number;
+  championScore: number | null;
+  /** The champion's 2M eval (HEG.21); null when the selector stopped before searching it. */
+  championCp2M: number | null;
+  /** Why nothing was judged: no games for these months, or a mate score (HES.10, HES.11). */
+  skipped?: "no-games" | "mate";
+  judged: Judged[];
+  /** The switch, if any: the chosen move's 2M eval, its 200M cp loss, games, score and safe gain. */
+  chosen: { san: string; cp2M: number; cpLoss: number; games: number; score: number; safeGain: number } | null;
+  /** HEG.31: the route's spend after this move. */
+  lineCpSpent: number;
+  /** 2M searches made here, not read from the cache. */
+  searches: number;
 };
 
 export type SelectedResponseResult = {
@@ -70,6 +102,8 @@ export type SelectedResponseResult = {
   baselineCp: number | null;
   baselineMate: number | null;
   baselineDepth: number | null;
+  /** HEG.40: null when `humanEvidence` is off or a hardcoded move applies. */
+  selector?: SelectorRecord | null;
 };
 
 function legalSan(chess: Chess, uci: string): string {
@@ -91,7 +125,8 @@ function legalSan(chess: Chess, uci: string): string {
 async function evaluateBlackMoveResult(
   chess: Chess,
   uci: string,
-  runner: LocalSearchRunner
+  runner: LocalSearchRunner,
+  config: Config = defaultConfig
 ): Promise<{ cp: number | null; mate: number | null; depth: number | null }> {
   chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci.length === 5 ? uci[4] : undefined });
   const afterFen = parseFullFen(chess.fen());
@@ -100,11 +135,80 @@ async function evaluateBlackMoveResult(
   chess.undo();
   if (checkmate) return { cp: null, mate: -1, depth: null };
   if (stalemate) return { cp: 0, mate: null, depth: null };
-  const { cp, mate, depth } = (await getOrCreateLocalBaseline(afterFen, defaultConfig, runner)).evaluation;
+  const { cp, mate, depth } = (await getOrCreateLocalBaseline(afterFen, config, runner)).evaluation;
   return { cp, mate, depth };
 }
 
-/** EW: Black's move is local Stockfish's top move (EW.09), unless a hardcoded response applies (EW.13). */
+/**
+ * HEG.11: the selector at one position. The champion is Stockfish's move (EW.09). Each other move
+ * with games is judged as HES does, with its cp loss measured at 200M (HEG.32) and allowed no more
+ * than the cp limit or what the route's budget has left (HEG.31).
+ */
+async function runSelector(input: {
+  fullFen: string;
+  chess: Chess;
+  baseline: { uci: string; san: string; cp: number | null; mate: number | null };
+  config: Config;
+  lineCpSpent: number;
+  runner: LocalSearchRunner;
+  selectorRunner: SelectorSearchRunner;
+  fetchCounts: NonNullable<EvaluateBlackMoveDependencies["fetchSelectorCounts"]>;
+}): Promise<SelectorRecord> {
+  const { fullFen, chess, baseline, config, lineCpSpent } = input;
+  const moveNumber = Number(fullFen.split(" ")[5]);
+  const k = selectorK(moveNumber);
+  const dials: Dials = { confidence: config.selectorConfidence, margin: config.selectorMargin, cpLimit: config.selectorCpLimit,
+    draws: config.selectorDraws, nearTie: config.selectorNearTie };
+  const counts = await input.fetchCounts(fullFen, config);
+  // Explorer names castling e8h8; its SAN gives the move as the tree and the engine name it.
+  const moves = counts.moves.map(move => {
+    const played = chess.move(move.san);
+    chess.undo();
+    return { uci: played.lan, san: played.san, record: { wins: move.black, draws: move.draws, losses: move.white } as Record3 };
+  });
+  const championRecord = moves.find(move => move.uci === baseline.uci)?.record ?? { wins: 0, draws: 0, losses: 0 };
+  const base = { moveNumber, k, championSan: baseline.san, championGames: games(championRecord),
+    championScore: games(championRecord) ? score(championRecord) : null, judged: [] as Judged[], chosen: null, lineCpSpent };
+  if (!moves.some(move => games(move.record))) return { ...base, championCp2M: null, skipped: "no-games", searches: 0 };
+
+  let searches = 0;
+  const eval2M = async (uci: string) => {
+    const evaluation = await getOrCreateSelectorEval(fullFen, uci, config, input.selectorRunner);
+    if (!evaluation.reused) searches++;
+    return { cpWhite: evaluation.cp, mateWhite: evaluation.mate };
+  };
+  const championEval = await eval2M(baseline.uci);
+  if (championEval.cpWhite === null || baseline.cp === null) {
+    return { ...base, championCp2M: championEval.cpWhite, skipped: "mate", searches };
+  }
+  const seed = "select:" + positionKeyFromFen(parseFullFen(fullFen));
+  const champion = { cpWhite: championEval.cpWhite,
+    draws: scoreDraws(selectorCurve, championEval.cpWhite, k, championRecord, dials.draws, seed + ":" + baseline.uci) };
+  const cpAllowed = Math.min(config.selectorCpLimit, config.selectorLineBudget - lineCpSpent);
+  const judged: Judged[] = [];
+  for (const move of moves) {
+    if (move.uci === baseline.uci || !games(move.record)) continue;
+    judged.push(await judge(move, champion, selectorCurve, k, dials, seed + ":" + move.uci, () => eval2M(move.uci), {
+      cpAllowed,
+      // HEG.32: against EW.09's eval, from the generator's own search of the position the move reaches.
+      cpLoss: async () => {
+        const after = await evaluateBlackMoveResult(chess, move.uci, input.runner, config);
+        return after.cp === null ? null : after.cp - baseline.cp!;
+      }
+    }));
+  }
+  const winner = choose(judged, dials);
+  return { ...base, championCp2M: championEval.cpWhite, judged, searches,
+    chosen: winner ? { san: winner.san, cp2M: winner.cpWhite!, cpLoss: winner.cpLoss!, games: winner.games, score: winner.score,
+      safeGain: winner.safeGain! } : null,
+    // Only losses spend the budget (HEG.31).
+    lineCpSpent: winner ? lineCpSpent + Math.max(0, winner.cpLoss!) : lineCpSpent };
+}
+
+/**
+ * EW: Black's move is local Stockfish's top move (EW.09), unless a hardcoded response applies (EW.13),
+ * or, with `humanEvidence` on, the selector finds a better-scoring human move (HEG.10).
+ */
 export async function evaluateBlackMove(
   fen: string,
   chess: Chess,
@@ -112,11 +216,12 @@ export async function evaluateBlackMove(
   dependencies: EvaluateBlackMoveDependencies = {}
 ): Promise<SelectedResponseResult> {
   const fullFen = parseFullFen(fen);
+  const config = dependencies.config ?? defaultConfig;
   const runner = dependencies.localSearchRunner ?? runTrustedLocalSearch;
-  const baseline = (await getOrCreateLocalBaseline(fullFen, defaultConfig, runner)).evaluation;
+  const baseline = (await getOrCreateLocalBaseline(fullFen, config, runner)).evaluation;
 
   // EW.13: a hardcoded response. Stockfish never rejects it.
-  const hardcodedSan = findHardcodedResponse(previousMovesSan, defaultConfig.hardcodedBlackResponses);
+  const hardcodedSan = findHardcodedResponse(previousMovesSan, config.hardcodedBlackResponses);
   let uci = baseline.uci;
   if (hardcodedSan !== null) {
     let hardcodedMove;
@@ -125,8 +230,17 @@ export async function evaluateBlackMove(
     chess.undo();
     uci = hardcodedMove.lan;
   }
+  // HEG.10: a hardcoded move wins, and Black's first move is never judged (HES.10).
+  let selector: SelectorRecord | null = null;
+  if (config.humanEvidence && hardcodedSan === null && Number(fullFen.split(" ")[5]) > 1) {
+    selector = await runSelector({ fullFen, chess, baseline: { ...baseline, san: legalSan(chess, baseline.uci) }, config,
+      lineCpSpent: dependencies.lineCpSpent ?? 0, runner,
+      selectorRunner: dependencies.selectorSearchRunner ?? runSelectorSearch,
+      fetchCounts: dependencies.fetchSelectorCounts ?? fetchSelectorCountsFromLichess });
+    if (selector.chosen) uci = selector.judged.find(move => move.san === selector!.chosen!.san)!.uci;
+  }
   const selectedMoveSan = legalSan(chess, uci);
-  const evaluation = await evaluateBlackMoveResult(chess, uci, runner);
+  const evaluation = await evaluateBlackMoveResult(chess, uci, runner, config);
 
   // EW.12: exactly one of cp or mate.
   if ((evaluation.cp === null) === (evaluation.mate === null)) {
@@ -140,11 +254,12 @@ export async function evaluateBlackMove(
     mate: evaluation.mate,
     depth: evaluation.depth,
     source: "Local Stockfish 19",
-    selectionMethod: hardcodedSan !== null ? "Hardcoded" : "Baseline",
-    moveOrigin: hardcodedSan !== null ? "Hardcoded Move" : "Engine Move",
+    selectionMethod: hardcodedSan !== null ? "Hardcoded" : selector?.chosen ? "Human evidence" : "Baseline",
+    moveOrigin: hardcodedSan !== null ? "Hardcoded Move" : selector?.chosen ? "Human Move" : "Engine Move",
     engineRank: uci === baseline.uci ? 1 : null,
     baselineCp: baseline.cp,
     baselineMate: baseline.mate,
-    baselineDepth: baseline.depth
+    baselineDepth: baseline.depth,
+    ...(selector ? { selector } : {})
   };
 }

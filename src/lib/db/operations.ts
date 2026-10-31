@@ -349,9 +349,9 @@ export async function readLocalEngineCandidate(fullFen: string, candidateUci: st
 // --- DB.08 - DB.15 moves ---
 
 export const RESPONSE_EVALUATION_SOURCES = ["Local Stockfish 19"] as const;
-// DB.14: Stockfish's baseline (EW.09) or a hardcoded response (EW.13).
-export const RESPONSE_SELECTION_METHODS = ["Baseline", "Hardcoded"] as const;
-export const RESPONSE_MOVE_ORIGINS = ["Engine Move", "Hardcoded Move"] as const;
+// DB.14: Stockfish's baseline (EW.09), a hardcoded response (EW.13), or the selector's switch (HEG.40).
+export const RESPONSE_SELECTION_METHODS = ["Baseline", "Hardcoded", "Human evidence"] as const;
+export const RESPONSE_MOVE_ORIGINS = ["Engine Move", "Hardcoded Move", "Human Move"] as const;
 export type ResponseEvaluationSource = typeof RESPONSE_EVALUATION_SOURCES[number];
 export type ResponseSelectionMethod = typeof RESPONSE_SELECTION_METHODS[number];
 export type ResponseMoveOrigin = typeof RESPONSE_MOVE_ORIGINS[number];
@@ -364,6 +364,17 @@ export type ResponsePersistenceInput = {
   engineRank?: number | null;
   /** DB.11: null for checkmate, stalemate or an eval cached before depth was stored. */
   depth?: number | null;
+  /** HEG.40: what the selector did here; absent where it did not run. */
+  selector?: ResponseSelectorFields | null;
+};
+
+export type ResponseSelectorFields = {
+  championSan: string;
+  championCp2M: number | null;
+  chosen: { cp2M: number; cpLoss: number; games: number; score: number; safeGain: number } | null;
+  lineCpSpent: number;
+  /** JSON of every judged move and its verdict, or why nothing was judged. */
+  judged: string;
 };
 
 function isNonEmptyCanonicalString(value: unknown): value is string {
@@ -381,6 +392,12 @@ export function validateResponsePersistence(input: ResponsePersistenceInput): vo
   if (!((hasCp && input.mate === null) || (input.cp === null && hasMate))) throw new Error("Invalid RESPONSE evaluation: exactly one of finite cp or non-zero integer mate is required");
   if (input.engineRank !== undefined && input.engineRank !== null && input.engineRank !== 1) throw new Error("Invalid RESPONSE engineRank");
   if (!isValidDepth(input.depth)) throw new Error("Invalid RESPONSE depth");
+  // HEG.40: a switch, and only a switch, carries the chosen move's evidence.
+  const switched = input.selectionMethod === "Human evidence";
+  if (switched !== (input.moveOrigin === "Human Move")) throw new Error("Invalid RESPONSE: Human evidence and Human Move go together");
+  if (switched && (!input.selector?.chosen || input.engineRank !== null)) throw new Error("Invalid RESPONSE: a switch needs its evidence and no engineRank");
+  if (!switched && input.selector?.chosen) throw new Error("Invalid RESPONSE: only a switch carries chosen-move evidence");
+  if (input.selector && (!Number.isFinite(input.selector.lineCpSpent) || input.selector.lineCpSpent < 0)) throw new Error("Invalid RESPONSE lineCpSpent");
   const stopReason = input.stopReason ?? null;
   if (stopReason === "Repetition") {
     if (input.toNodeId !== null) throw new Error("Invalid RESPONSE repetition: toNodeId must be null");
@@ -564,7 +581,16 @@ export async function createResponseMove(input: ResponsePersistenceInput) {
     cp: input.cp, mate: input.mate, source: input.source,
     selectionMethod: input.selectionMethod, moveOrigin: input.moveOrigin,
     engineRank: input.engineRank ?? null,
-    depth: input.depth ?? null
+    depth: input.depth ?? null,
+    championSan: input.selector?.championSan ?? null,
+    championCp2M: input.selector?.championCp2M ?? null,
+    chosenCp2M: input.selector?.chosen?.cp2M ?? null,
+    selectorCpLoss: input.selector?.chosen?.cpLoss ?? null,
+    selectorGames: input.selector?.chosen?.games ?? null,
+    selectorScore: input.selector?.chosen?.score ?? null,
+    safeGain: input.selector?.chosen?.safeGain ?? null,
+    lineCpSpent: input.selector?.lineCpSpent ?? null,
+    selectorJudged: input.selector?.judged ?? null
   };
   return prisma.$transaction(async tx => {
     // DB.09: one RESPONSE per position.
