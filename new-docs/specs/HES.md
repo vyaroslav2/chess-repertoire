@@ -239,3 +239,47 @@ HES.103 **So the margin is a matter of taste:** how small a gain is worth leavin
 HES.104 **New dials, adopted 2026-10-31:** confidence 90%, margin 1 point. They are now the defaults in `select`. 90% adds one switch (Nbd7, also chosen on all years) at no visible cost. Keeping the 1-point margin leaves out gains too small to notice over a board. A tree with many deep positions on few games may need this check again: there, the confidence does the work that big samples do here.
 
 HES.105 **Limits.** 20 switches in one tree, all within Black's first four moves, is thin evidence. 2025 is now spent on tuning; 2026 stays frozen for the final test (HES.60).
+
+## The final test on 2026, 2026-10-31
+
+HES.110 **The method as adopted, on games it never saw.** `select --run final-2023-25 --months 2023-01..2025-12` with the adopted dials (90%, 1 point, cp limit 30; k from `explorer-k`), then `check --months 2026-01..2026-05`, overall and per rating group. The Explorer has no games after May 2026 yet (checked 2026-10-31). 2026 was not looked at before this run.
+
+HES.111 **The selection.** 16 switches of 84 positions, 10.9% by cumProb. The 14 of `tree-2023-24` all stay. Two are new: Nbd7 after 1. d4 d5 2. Nf3 Nf6 3. e3 c5 4. c3, as at 90% on 2023–24 (HES.101), and b6 after 1. d4 d5 2. c4 e6 3. e3 Nf6 4. a3.
+
+HES.112 **The result: it passes.**
+
+| Games, Jan–May 2026 | Better | Pooled gain |
+| --- | --- | --- |
+| All | 15 of 16 | 3.8 ± 0.2 |
+| 1600 | 16 of 16 | 4.2 ± 0.3 |
+| 1800 | 14 of 16 | 3.4 ± 0.3 |
+| 2000 | 10 of 16 | 4.0 ± 0.5 |
+
+Mean gain per switch: 4.6 points on 2023–25, 3.7 in 2026. The mean safe gain was 3.2, so the switches beat their promised floor on average. The 2026 gains are a fifth smaller than the fitted ones; the 2025 check showed none of that shrinkage (HES.92). Openings drift from year to year, so some of the gain fades with time.
+
+HES.113 **Per switch,** 2026 gain in points, overall and by group:
+
+| cumProb | Line | Champion → chosen | Safe gain | 2026 (champion / chosen games) | 2026 gain | 1600 / 1800 / 2000 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 5.92% | 1. d4 d5 2. c4 e6 3. Nc3 | Nf6 → Be7 | 2.0 | 164,640 / 3,482 | 1.8 ± 0.8 | 1.4 / 0.9 / 3.2 |
+| 2.88% | 1. e4 c6 2. Bc4 d5 3. exd5 cxd5 4. Bb3 | Bf5 → a5 | 1.7 | 8,620 / 966 | 3.3 ± 1.6 | 3.6 / 3.2 / −1.1 |
+| 2.23% | 1. d4 d5 2. c4 e6 3. Nc3 Nf6 4. Nf3 | Bb4 → c5 | 4.2 | 29,511 / 16,900 | 4.2 ± 0.5 | 5.7 / 3.3 / 3.3 |
+| 2.15% | 1. d4 d5 2. c4 e6 3. Nc3 Nf6 4. Bg5 | Be7 → Nbd7 | 3.1 | 55,965 / 8,633 | 2.9 ± 0.6 | 3.2 / 2.3 / 3.5 |
+| 2.05% | 1. e4 c6 2. d4 d5 3. e5 c5 4. Nf3 | cxd4 → Nc6 | 2.3 | 3,583 / 10,594 | −0.5 ± 0.9 | 0.4 / −2.9 / −0.3 |
+| 1.87% | 1. d4 d5 2. c4 e6 3. Nf3 | Nf6 → a6 | 1.4 | 66,254 / 2,858 | 2.2 ± 0.9 | 2.2 / 1.5 / 3.2 |
+| 1.39% | 1. d4 d5 2. Nc3 | Nf6 → c5 | 2.3 | 124,673 / 8,161 | 2.8 ± 0.6 | 2.9 / 2.6 / 3.4 |
+| 1.02% | 1. d4 d5 2. Bf4 c5 3. c3 | Nc6 → Qb6 | 3.3 | 6,064 / 754 | 8.5 ± 1.8 | 11.9 / 6.4 / 3.5 |
+| 0.89% | 1. d4 d5 2. Nf3 Nf6 3. Bf4 | e6 → c5 | 5.6 | 33,771 / 18,965 | 6.5 ± 0.4 | 6.6 / 6.6 / 7.0 |
+| 0.84% | 1. d4 d5 2. c4 e6 3. e3 | Nf6 → Be7 | 3.5 | 24,029 / 360 | 3.6 ± 2.6 | 3.8 / 2.6 / 6.1 |
+| 0.69% | 1. d4 d5 2. Bf4 c5 3. c3 Nc6 4. e3 | Bf5 → Qb6 | 3.7 | 2,125 / 2,130 | 2.5 ± 1.5 | 2.5 / 4.1 / −0.2 |
+| 0.32% | 1. d4 d5 2. Bf4 c5 3. Nf3 cxd4 4. Nxd4 | f6 → Nd7 | 4.8 | 144 / 75 | 7.2 ± 6.5 | 8.0 / −8.4 / 30.6 |
+| 0.28% | 1. d4 d5 2. Nf3 Nf6 3. e3 c5 4. c3 | e6 → Nbd7 | 1.1 | 1,075 / 98 | 3.4 ± 5.0 | 1.3 / 12.6 / −8.3 |
+| 0.24% | 1. d4 d5 2. Nf3 Nf6 3. Nc3 | e6 → c5 | 5.1 | 7,858 / 2,716 | 3.3 ± 1.1 | 3.8 / 4.0 / −1.0 |
+| 0.11% | 1. d4 d5 2. c4 e6 3. e3 Nf6 4. a3 | Be7 → b6 | 1.0 | 2,076 / 453 | 3.8 ± 2.5 | 7.8 / 1.2 / 1.0 |
+| 0.07% | 1. d4 d5 2. Bf4 c5 3. dxc5 Nc6 4. Nf3 | Nf6 → f6 | 5.5 | 159 / 149 | 3.3 ± 5.5 | 6.7 / 2.4 / −12.5 |
+
+HES.114 **The one miss: Nc6 in the Advance** (1. e4 c6 2. d4 d5 3. e5 c5 4. Nf3). It promised at least 2.3 points and scored −0.5 ± 0.9 in 2026, about three standard errors short, and −2.9 ± 1.7 in the 1800 group. In 2025 it had gained 2.8 ± 0.6. So its edge looks real in earlier years but gone in 2026: a line where fashion or theory moved. At 90% confidence, one or two misses in 16 is what the dial allows for. The other switches below their safe gain (Be7 after 3. Nc3, Nbd7, Qb6 after 4. e3, c5 after 3. Nc3, f6) are within their 2026 noise.
+
+HES.115 **a5, doubted in HES.97, held:** 3.3 ± 1.6 overall in 2026. Its 2000-group loss in 2025 doesn't repeat (−1.1 ± 9.1, but on only 36 games of a5).
+
+HES.116 **What it means.** On unseen games the selector's switches score about 4 points better than the tree's moves, in each rating group, with one miss in 16. The method works for this tree. Two cautions for the generator: gains fade a little with time, so the selector should run on recent months, and rechecking switches each year would catch lines like the Advance Nc6.
