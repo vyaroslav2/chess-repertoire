@@ -254,7 +254,7 @@ npm --prefix experiments/he run select -- --run tree-low --pool 2024-02-03 --k l
 For each position with Black to move and a move already chosen, the tree's move is the champion,
 and every other move with Explorer games (1600–2199, rapid and classical) a contender. A contender
 gets k pretend games at the curve's chances for its eval, never better than the champion's, plus
-its real games. It switches only if, 95% sure, it scores at least 1 point more than the champion
+its real games. It switches only if, 90% sure, it scores at least 1 point more than the champion
 and loses at most 30 cp. A contender that couldn't pass even with the champion's prior and its
 real games is not searched. Evals are HE's Stockfish 19 at 2M nodes, cached. `--k low` takes each move's k from the low end
 of the pool's trend range, `--k best` from its best fit. `--k-run explorer-k` takes the trend from
@@ -262,6 +262,7 @@ that run's `k.json` instead, while the curve still comes from the pool. It write
 `data/selections/<run>/selections.jsonl` (every position, every contender and why it passed or
 failed) and `selections-summary.json` (switches, their cumProb-weighted share, by move number).
 `--db` points at another SQLite file; the default is `prisma/dev.db`, opened read-only.
+`--margin` (points of score, default 1) and `--confidence` (percent, default 90; 95 before HES.104) change those dials.
 
 Move counts come from the app's Explorer cache, which holds every year. `--months 2023-01..2024-12`
 asks the Explorer for those months only (through the proxy, cached as for the walk), so later

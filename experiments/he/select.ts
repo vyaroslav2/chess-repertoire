@@ -14,7 +14,7 @@ import { explorerCounts, httpFetcher, DEFAULT_BASE, EXPLORER, type ExplorerAnswe
 export type Record3 = { wins: number; draws: number; losses: number };   // Black's view
 export type Dials = { confidence: number; margin: number; cpLimit: number; draws: number; nearTie: number };
 // HES.20. Score is a fraction: a margin of 0.01 is 1 point.
-export const DIALS: Dials = { confidence: 0.95, margin: 0.01, cpLimit: 30, draws: 20_000, nearTie: 0.005 };
+export const DIALS: Dials = { confidence: 0.9, margin: 0.01, cpLimit: 30, draws: 20_000, nearTie: 0.005 };
 export type Curve = (cpWhite: number) => { win: number; draw: number; loss: number; score: number };
 
 // Marsaglia and Tsang; a shape below 1 is lifted by one and scaled back.
