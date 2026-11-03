@@ -19,6 +19,7 @@ import {
   type LockHandle,
 } from "../src/lib/core/lockfile";
 import { UserRequestedStopError } from "../src/lib/api/retry";
+import { RUN_EVENTS_PATH, runEventWriter } from "../src/lib/core/run-events";
 
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 export const TREE_GENERATOR_PROJECT_ROOT = path.resolve(__dirname, "..");
@@ -87,7 +88,7 @@ export async function runTreeGenerator(
   };
   const generate =
     dependencies.generate ??
-    ((shouldStop) => generateRepertoire(START_FEN, { shouldStop }));
+    ((shouldStop) => generateRepertoire(START_FEN, { shouldStop, recordEvent: runEventWriter(RUN_EVENTS_PATH) }));
   const disconnect = dependencies.disconnect ?? (() => prisma.$disconnect());
   const takeLock = dependencies.acquire ?? (() => acquireLock("treegen"));
 

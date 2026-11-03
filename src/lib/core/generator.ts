@@ -15,6 +15,7 @@ import { fetchExplorer, fetchOpeningMetadata as fetchAmateurOpeningMetadata, typ
 import { defaultConfig, createRuntimeConfig, type Config } from "../core/config";
 import { selectWhiteCandidates, evaluateBlackMove, type SelectorRecord } from "./evaluator";
 import { runCascade, probabilityBalance, type CascadeRunState } from "./cascade";
+import type { RunEvent, SearchFact } from "./run-events";
 import { delay } from "../api/retry";
 import { UserRequestedStopError } from "../api/retry";
 import { createEmptyCard } from "ts-fsrs";
@@ -43,6 +44,8 @@ export type GenerateRepertoireDependencies = {
   shouldStop?: () => boolean;
   /** Tests only; a run uses defaultConfig. */
   config?: Config;
+  /** TGL: told what the run does, in order. */
+  recordEvent?: (event: RunEvent) => void;
 };
 
 export async function attemptCanonicalNodeWikibooks(
@@ -238,7 +241,7 @@ export async function evaluateCanonicalResponse(input: {
   routePgn: string;
   evaluator?: ResponseEvaluator;
   /** HEG: the run's config and the route's line budget spend so far. */
-  evaluatorDependencies?: { config: Config; lineCpSpent: number };
+  evaluatorDependencies?: { config: Config; lineCpSpent: number; onSearch?: (fact: SearchFact) => void };
 }) {
   const canonicalHistory = historyFromCanonicalPgn(input.responseNode.displayPgn);
   const canonicalChess = new Chess(input.responseNode.fullFen);
@@ -529,6 +532,8 @@ export async function generateRepertoire(
   console.log("Initializing BFS Tree Generator...");
   
   const startTime = Date.now();
+  const recordEvent = dependencies.recordEvent ?? (() => {});
+  const elapsedSeconds = () => Math.round((Date.now() - startTime) / 1000);
   // S2.01: zeroed once per run. rareDroppedTotal and unaccountedDroppedTotal are summed from nodes.
   const cascadeRun: CascadeRunState = { cascadeCount: 0, tinyDroppedTotal: 0 };
   let totalPositionsProcessed = 0;
@@ -590,6 +595,7 @@ export async function generateRepertoire(
   });
   await restoreRebuildWikibooksState(rootNode.id, rebuildWikibooksCache);
   await restoreRebuildOpeningMetadataState(rootNode.id, rebuildOpeningMetadataCache);
+  recordEvent({ type: "run", repertoireId, startedAt: new Date(startTime).toISOString(), config: runtime.config });
 
   const queue: GeneratorQueueItem[] = [{
     nodeId: rootNode.id,
@@ -604,6 +610,9 @@ export async function generateRepertoire(
   const visitedNodes = new Set<string>();
   const wikibooksAttemptedNodeIds = new Set<string>();
   const pendingCanonicalContinuations: PendingCanonicalContinuations = new Map();
+
+  // Next first, as the queue is last in, first out; a few are enough to read.
+  const recordQueue = () => recordEvent({ type: "queue", next: queue.slice(-3).reverse().map(item => item.nodeId), waiting: queue.length });
 
   const logQueueContents = () => {
     if (queue.length === 0) {
@@ -626,12 +635,13 @@ export async function generateRepertoire(
     await restoreRebuildWikibooksState(posAfterWhiteNode.id, rebuildWikibooksCache);
     // HM.N.01: Black's reply starts with this node's cumProb, including any cascade that reached it since.
     const effectiveCanonicalProb = posAfterWhiteNode.cumProb;
+    const searches: SearchFact[] = [];
 
     const canonicalSelection = await evaluateCanonicalResponse({
         responseNode: posAfterWhiteNode,
         routePgn: posAfterWhiteNode.displayPgn,
         evaluator: dependencies.responseEvaluator,
-        evaluatorDependencies: { config: runtime.config, lineCpSpent: await routeLineCpSpent(posAfterWhiteNode.id) }
+        evaluatorDependencies: { config: runtime.config, lineCpSpent: await routeLineCpSpent(posAfterWhiteNode.id), onSearch: fact => searches.push(fact) }
     });
     const algoResult = canonicalSelection.result;
     const selector = algoResult.selector ?? null;
@@ -758,11 +768,14 @@ export async function generateRepertoire(
         fullFen: resultingDestinationFen,
         config: runtime.config
     });
+    const recordReply = () => recordEvent({ type: "reply", whiteMoveId, replyMoveId: responseId, pushed: !ending, waiting: queue.length,
+      elapsed: elapsedSeconds(), searches, selectorSeconds: selector?.seconds ?? null });
     if (ending) {
         await prisma.repertoireMove.update({ where: { id: responseId }, data: { stopReason: ending } });
         const tag = ending === "Game over on Black's move" ? "[GAME OVER]" : "[DEPTH CAP REACHED]";
         console.log(`${tag} route=${resultingDestinationPgn}; cumProb=${(effectiveCanonicalProb * 100).toFixed(3)}%`);
         if (ending === "Depth cap reached on Black's move") totalBranchesAborted++;
+        recordReply();
         return;
     }
 
@@ -782,6 +795,7 @@ export async function generateRepertoire(
         responseSourceNodeId: posAfterWhiteNode.id,
         item: continuationItem
     });
+    recordReply();
     console.log(`[QUEUE] Enqueued: ${continuationItem.history.join(" ") || "(root)"}; waiting=${queue.length}`);
     console.log("[QUEUE CONTENTS]");
     logQueueContents();
@@ -798,9 +812,11 @@ export async function generateRepertoire(
       // S3.16, DRS.01
       totalSweeps++;
       const reopened = await reopenDroppedMoves({ repertoireId, minCumProb: runtime.config.minCumProb });
+      recordEvent({ type: "sweep", number: totalSweeps, reopenedMoveIds: reopened.map(move => move.moveId), elapsed: elapsedSeconds() });
       // DRS.05: last first, so the queue (LIFO) gives back the first in log order first.
       for (const move of [...reopened].reverse()) await expandWhiteMove(move.moveId, move.nodeId);
       totalReopenedRoutes += reopened.length;
+      if (reopened.length > 0) recordQueue();
       // DRS.06
       console.log(`[SWEEP ${totalSweeps}] Reopened ${reopened.length} routes.`);
       if (reopened.length === 0) break;
@@ -824,6 +840,7 @@ export async function generateRepertoire(
     visitedNodes.add(node.nodeId);
     
     totalPositionsProcessed++;
+    recordEvent({ type: "position", nodeId: node.nodeId, waiting: queue.length, elapsed: elapsedSeconds() });
 
     const currentElapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     
@@ -969,6 +986,9 @@ export async function generateRepertoire(
           console.log(`[REPETITION] route=${endingRoute}; repeated=${reconciledOpponent.repeatedPgn || "(root)"}; cumProb=${(reconciledOpponent.effectiveCumProb * 100).toFixed(3)}%`);
           totalRepetitionStops++;
         }
+        if (reconciledOpponent.ending !== "Too rare") {
+          recordEvent({ type: "ending", whiteMoveId: reconciledOpponent.edgeId, ending: reconciledOpponent.ending, elapsed: elapsedSeconds() });
+        }
         continue;
       }
       if (reconciledOpponent.isTransposition) {
@@ -977,7 +997,8 @@ export async function generateRepertoire(
         const owner = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: reconciledOpponent.ownerNodeId! } });
         totalTranspositions++;
         console.log(`[TRANSPOSITION] route=${canonicalWhiteMove.destinationPgn}; owner=${owner.displayPgn}; cumProb=${(pointer.cumProb * 100).toFixed(3)}%`);
-        await runCascade({ repertoireId: repertoire.id, pointerId: pointer.id, ownerId: owner.id, run: cascadeRun, config: runtime.config });
+        const cascade = await runCascade({ repertoireId: repertoire.id, pointerId: pointer.id, ownerId: owner.id, run: cascadeRun, config: runtime.config });
+        recordEvent({ type: "transposition", whiteMoveId: reconciledOpponent.edgeId, cascade, elapsed: elapsedSeconds() });
         continue;
       }
       console.log(`\nEvaluating White Move: ${whiteMove.san} (Prob: ${whiteMove.probability ? (whiteMove.probability*100).toFixed(1) : 0}%)`);
@@ -987,6 +1008,7 @@ export async function generateRepertoire(
       }
       await expandWhiteMove(reconciledOpponent.edgeId, reconciledOpponent.destinationNodeId);
     }
+    recordQueue();
 
     // --- TEMPORARY DETAILED SUMMARY PER NODE ---
     const runningElapsed = ((Date.now() - startTime) / 1000).toFixed(2);
@@ -1027,6 +1049,7 @@ export async function generateRepertoire(
     console.log(`Human Evidence Searches:  ${totalSelectorSearches} at ${runtime.config.selectorNodes} nodes`);
   }
   console.log("========================================================\n");
+  recordEvent({ type: "end", elapsed: elapsedSeconds() });
 
   // S3.11 - S3.15
   const failures = await endOfRunFailures({

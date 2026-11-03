@@ -13,6 +13,7 @@ import { choose, games, judge, score, scoreDraws, type Dials, type Judged, type 
 import { selectorCurve, selectorK } from "./selector-evidence";
 import { fetchSelectorCounts as fetchSelectorCountsFromLichess } from "../api/lichess";
 import type { ResponseEvaluationSource, ResponseMoveOrigin, ResponseSelectionMethod } from "../db/operations";
+import type { SearchFact } from "./run-events";
 
 /** HM.03: a move's share of the position's games, and its Amateur results. */
 export function whiteMoveStats(moveSan: string, amateurList: any[], totalAmateurGames: number) {
@@ -64,6 +65,8 @@ export type EvaluateBlackMoveDependencies = {
   lineCpSpent?: number;
   selectorSearchRunner?: SelectorSearchRunner;
   fetchSelectorCounts?: (fen: string, config: Config) => Promise<{ moves: { uci: string; san: string; white: number; draws: number; black: number }[] }>;
+  /** TGL: told of each search, run or read from the cache. */
+  onSearch?: (fact: SearchFact) => void;
 };
 
 /** HEG.40: what the selector did at this position, stored on Black's move. */
@@ -84,6 +87,8 @@ export type SelectorRecord = {
   lineCpSpent: number;
   /** 2M searches made here, not read from the cache. */
   searches: number;
+  /** TGL: the selector's whole time here, its fetch and searches included. */
+  seconds: number;
 };
 
 export type SelectedResponseResult = {
@@ -118,6 +123,14 @@ function legalSan(chess: Chess, uci: string): string {
   return move.san;
 }
 
+/** EW.09 with its time, for the run's record. */
+async function timedBaseline(fullFen: string, config: Config, runner: LocalSearchRunner, onSearch: EvaluateBlackMoveDependencies["onSearch"]) {
+  const started = Date.now();
+  const result = await getOrCreateLocalBaseline(fullFen, config, runner);
+  onSearch?.({ fullFen, kind: "deep", seconds: (Date.now() - started) / 1000, reused: result.reused });
+  return result;
+}
+
 /**
  * EW.11, DB.11: the eval of Black's move is the eval of the position it reaches, White to move.
  * Checkmate and stalemate leave nothing to search.
@@ -126,7 +139,8 @@ async function evaluateBlackMoveResult(
   chess: Chess,
   uci: string,
   runner: LocalSearchRunner,
-  config: Config = defaultConfig
+  config: Config = defaultConfig,
+  onSearch?: EvaluateBlackMoveDependencies["onSearch"]
 ): Promise<{ cp: number | null; mate: number | null; depth: number | null }> {
   chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci.length === 5 ? uci[4] : undefined });
   const afterFen = parseFullFen(chess.fen());
@@ -135,7 +149,7 @@ async function evaluateBlackMoveResult(
   chess.undo();
   if (checkmate) return { cp: null, mate: -1, depth: null };
   if (stalemate) return { cp: 0, mate: null, depth: null };
-  const { cp, mate, depth } = (await getOrCreateLocalBaseline(afterFen, config, runner)).evaluation;
+  const { cp, mate, depth } = (await timedBaseline(afterFen, config, runner, onSearch)).evaluation;
   return { cp, mate, depth };
 }
 
@@ -153,7 +167,8 @@ async function runSelector(input: {
   runner: LocalSearchRunner;
   selectorRunner: SelectorSearchRunner;
   fetchCounts: NonNullable<EvaluateBlackMoveDependencies["fetchSelectorCounts"]>;
-}): Promise<SelectorRecord> {
+  onSearch: EvaluateBlackMoveDependencies["onSearch"];
+}): Promise<Omit<SelectorRecord, "seconds">> {
   const { fullFen, chess, baseline, config, lineCpSpent } = input;
   const moveNumber = Number(fullFen.split(" ")[5]);
   const k = selectorK(moveNumber);
@@ -173,7 +188,9 @@ async function runSelector(input: {
 
   let searches = 0;
   const eval2M = async (uci: string) => {
+    const started = Date.now();
     const evaluation = await getOrCreateSelectorEval(fullFen, uci, config, input.selectorRunner);
+    input.onSearch?.({ fullFen, uci, kind: "selector", seconds: (Date.now() - started) / 1000, reused: evaluation.reused });
     if (!evaluation.reused) searches++;
     return { cpWhite: evaluation.cp, mateWhite: evaluation.mate };
   };
@@ -192,7 +209,7 @@ async function runSelector(input: {
       cpAllowed,
       // HEG.32: against EW.09's eval, from the generator's own search of the position the move reaches.
       cpLoss: async () => {
-        const after = await evaluateBlackMoveResult(chess, move.uci, input.runner, config);
+        const after = await evaluateBlackMoveResult(chess, move.uci, input.runner, config, input.onSearch);
         return after.cp === null ? null : after.cp - baseline.cp!;
       }
     }));
@@ -218,7 +235,7 @@ export async function evaluateBlackMove(
   const fullFen = parseFullFen(fen);
   const config = dependencies.config ?? defaultConfig;
   const runner = dependencies.localSearchRunner ?? runTrustedLocalSearch;
-  const baseline = (await getOrCreateLocalBaseline(fullFen, config, runner)).evaluation;
+  const baseline = (await timedBaseline(fullFen, config, runner, dependencies.onSearch)).evaluation;
 
   // EW.13: a hardcoded response. Stockfish never rejects it.
   const hardcodedSan = findHardcodedResponse(previousMovesSan, config.hardcodedBlackResponses);
@@ -233,14 +250,17 @@ export async function evaluateBlackMove(
   // HEG.10: a hardcoded move wins, and Black's first move is never judged (HES.10).
   let selector: SelectorRecord | null = null;
   if (config.humanEvidence && hardcodedSan === null && Number(fullFen.split(" ")[5]) > 1) {
-    selector = await runSelector({ fullFen, chess, baseline: { ...baseline, san: legalSan(chess, baseline.uci) }, config,
+    const selectorStarted = Date.now();
+    const record = await runSelector({ fullFen, chess, baseline: { ...baseline, san: legalSan(chess, baseline.uci) }, config,
       lineCpSpent: dependencies.lineCpSpent ?? 0, runner,
       selectorRunner: dependencies.selectorSearchRunner ?? runSelectorSearch,
-      fetchCounts: dependencies.fetchSelectorCounts ?? fetchSelectorCountsFromLichess });
+      fetchCounts: dependencies.fetchSelectorCounts ?? fetchSelectorCountsFromLichess,
+      onSearch: dependencies.onSearch });
+    selector = { ...record, seconds: (Date.now() - selectorStarted) / 1000 };
     if (selector.chosen) uci = selector.judged.find(move => move.san === selector!.chosen!.san)!.uci;
   }
   const selectedMoveSan = legalSan(chess, uci);
-  const evaluation = await evaluateBlackMoveResult(chess, uci, runner, config);
+  const evaluation = await evaluateBlackMoveResult(chess, uci, runner, config, dependencies.onSearch);
 
   // EW.12: exactly one of cp or mate.
   if ((evaluation.cp === null) === (evaluation.mate === null)) {

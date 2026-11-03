@@ -1,9 +1,10 @@
-// TGL: a small made-up tree that shows every block of the tree log: White's moves, too rare,
-// each kind of Black reply, the selector's table, each ending, and a stopped route.
+// TGL: a small made-up run that shows every block of the tree log: White's moves, too rare, each kind
+// of Black reply, the selector's table, cached searches, a transposition's cascade, the endings and a sweep.
 import type { RepertoireMove, RepertoireNode } from "@prisma/client";
 import { Chess } from "chess.js";
-import { computeExplorerCacheProfile, defaultConfig } from "../src/lib/core/config";
-import type { EngineBest, ExplorerPosition, TreeLogInput } from "./tree_log";
+import { defaultConfig } from "../src/lib/core/config";
+import type { RunEvent, SearchFact } from "../src/lib/core/run-events";
+import { replayEvents, type EngineBest, type ExplorerPosition, type TreeLogInput } from "./tree_log";
 
 type WhiteOptions = { transposesTo?: string };
 type ReplyOptions = {
@@ -11,6 +12,8 @@ type ReplyOptions = {
   cp: number;
   baseline?: { san: string; cp: number };
   stopReason?: string;
+  // Both searches came from the cache.
+  cached?: boolean;
   selector?: { championSan: string; championCp2M: number; championGames: number; championScore: number; lineCpSpent?: number;
     skipped?: string; judged?: { san: string; games: number; score: number; verdict: string; cpWhite?: number; cpLoss?: number; safeGain?: number }[] };
 };
@@ -23,6 +26,8 @@ export function mockTreeLogInput(): TreeLogInput {
   const explorerByPositionKey = new Map<string, ExplorerPosition>();
   const engineBestByFullFen = new Map<string, EngineBest>();
   const searchSecondsByFullFen = new Map<string, number>();
+  const cachedFens = new Set<string>();
+  const cascadeGains = new Map<string, number>();
 
   // A made-up 200M search of a position: stores its time, returns its depth.
   let searches = 0;
@@ -74,6 +79,12 @@ export function mockTreeLogInput(): TreeLogInput {
       if (options.transposesTo) {
         node(to, 0, { transposesTo: options.transposesTo });
         move(route, to, san, { moveProb: share, stopReason: "Transposition" });
+        // TR.16, TR.22: the cascade: the owner and its reply gain what the move brought.
+        cascadeGains.set(`${route}>${san}`, arriving);
+        const owner = nodes.get(options.transposesTo)!;
+        owner.cumProb += arriving;
+        const ownerReply = moves.find(candidate => candidate.fromNodeId === owner.id);
+        if (ownerReply) nodes.get(ownerReply.toNodeId!)!.cumProb += arriving;
       } else if (arriving < config.minCumProb) {
         node(to, 0, { rareDropped: arriving });
         move(route, to, san, { moveProb: share, stopReason: "Too rare" });
@@ -91,6 +102,7 @@ export function mockTreeLogInput(): TreeLogInput {
     white.cp = baseline.cp;
     white.depth = search(parent.fullFen);
     const after = node(to, parent.cumProb);
+    if (options.cached) { cachedFens.add(parent.fullFen); cachedFens.add(after.fullFen); }
     const selector = options.selector;
     move(route, to, san, {
       playerTurn: "RESPONSE", cp: options.cp, depth: search(after.fullFen), selectionMethod: options.method, stopReason: options.stopReason ?? null,
@@ -131,7 +143,8 @@ export function mockTreeLogInput(): TreeLogInput {
       { san: "d6", games: 4_203, score: 0.503, verdict: "cp-limit", cpWhite: 74, cpLoss: 44, safeGain: 0.018 }
     ] } });
   position("e4 c6 Nf3 d5", 2_480_115, [["exd5", 1_510_902], ["d4", 402_337, { transposesTo: "e4 c6 d4 d5 Nf3" }]]);
-  reply("e4 c6 Nf3 d5 exd5", "cxd5", { method: "Baseline", cp: 30, stopReason: "Depth cap reached on Black's move" });
+  reply("e4 c6 Nf3 d5 exd5", "cxd5", { method: "Baseline", cp: 30, stopReason: "Depth cap reached on Black's move", selector: {
+    championSan: "cxd5", championCp2M: 28, championGames: 0, championScore: 0, skipped: "no-games" } });
   reply("d4", "d5", { method: "Hardcoded", cp: 18, baseline: { san: "Nf6", cp: 15 } });
   position("d4 d5", 8_990_442, [["c4", 4_017_920], ["Nf3", 1_994_018], ["Bf4", 1_690_331]]);
   reply("d4 d5 c4", "c6", { method: "Human evidence", cp: 29, baseline: { san: "e6", cp: 21 }, selector: {
@@ -140,30 +153,58 @@ export function mockTreeLogInput(): TreeLogInput {
       { san: "dxc4", games: 40_877, score: 0.471, verdict: "safe-gain", cpWhite: 40, cpLoss: 15, safeGain: 0.006 },
       { san: "Nc6", games: 3_118, score: 0.512, verdict: "cp-limit", cpWhite: 78, cpLoss: 53, safeGain: 0.021 }
     ] } });
-  reply("d4 d5 Bf4", "c5", { method: "Baseline", cp: 9 });
+  position("d4 d5 c4 c6", 9_000_000, [["Nf3", 3_900_000]]);
+  reply("d4 d5 c4 c6 Nf3", "Nf6", { method: "Baseline", cp: 24, stopReason: "Depth cap reached on Black's move", selector: {
+    championSan: "Nf6", championCp2M: 22, championGames: 0, championScore: 0, skipped: "no-games" } });
+  reply("d4 d5 Bf4", "c5", { method: "Baseline", cp: 9, cached: true, stopReason: "No opponent moves found", selector: {
+    championSan: "c5", championCp2M: 8, championGames: 0, championScore: 0, skipped: "no-games" } });
   reply("d4 d5 Nf3", "Nf6", { method: "Baseline", cp: 17, selector: {
     championSan: "Nf6", championCp2M: 17, championGames: 0, championScore: 0, skipped: "no-games" } });
+  position("d4 d5 Nf3 Nf6", 2_000_000, [["c4", 1_100_000]]);
+  reply("d4 d5 Nf3 Nf6 c4", "e6", { method: "Baseline", cp: 22, stopReason: "Depth cap reached on Black's move", selector: {
+    championSan: "e6", championCp2M: 20, championGames: 0, championScore: 0, skipped: "no-games" } });
 
-  // The running total, in the order the generator reaches the replies (HM.06, S3.09).
-  const elapsedSecondsByMoveId = new Map<string, number>();
-  const secondsAt = (nodeId: string | null) => searchSecondsByFullFen.get(nodes.get(nodeId!)!.fullFen) ?? 0;
-  const waiting = [""];
+  // The tree's own replay, with made-up times and cascade facts put in, as a recording would have them.
+  const nodeList = [...nodes.values()];
+  const deep = (nodeId: string | null): SearchFact => {
+    const { fullFen } = nodes.get(nodeId!)!;
+    const reused = cachedFens.has(fullFen);
+    return { fullFen, kind: "deep", seconds: reused ? 0 : searchSecondsByFullFen.get(fullFen) ?? 0, reused };
+  };
   let elapsed = 0;
-  while (waiting.length > 0) {
-    const from = waiting.pop()!;
-    const whites = moves.filter(white => white.fromNodeId === from && white.playerTurn === "OPPONENT").sort((a, b) => (a.moveProb ?? 0) - (b.moveProb ?? 0));
-    for (const white of whites) {
-      const black = moves.find(candidate => candidate.fromNodeId === white.toNodeId && candidate.playerTurn === "RESPONSE");
-      if (!black) continue;
-      elapsed += secondsAt(white.toNodeId) + secondsAt(black.toNodeId);
-      elapsedSecondsByMoveId.set(black.id, elapsed);
-      if (!black.stopReason) waiting.push(black.toNodeId!);
+  let cascades = 0;
+  const recorded = replayEvents(nodeList, moves).map((event): RunEvent => {
+    if (event.type === "position") return { ...event, elapsed };
+    if (event.type === "transposition") {
+      elapsed += 1;
+      const gain = cascadeGains.get(event.whiteMoveId) ?? 0;
+      const cascadeId = `C${String(++cascades).padStart(2, "0")}`;
+      return { ...event, elapsed, cascade: { cascadeId, gain, touched: 2, revisits: 0, refires: 0, duplicates: 0, tinyDroppedCounter: 1 } };
     }
-  }
+    if (event.type !== "reply") return event;
+    const white = moves.find(candidate => candidate.id === event.whiteMoveId)!;
+    const black = moves.find(candidate => candidate.id === event.replyMoveId)!;
+    const judged: { verdict: string; cpWhite?: number }[] = black.selectorJudged ? JSON.parse(black.selectorJudged).judged : [];
+    const after = nodes.get(white.toNodeId!)!;
+    const searched = judged.filter(move => move.cpWhite !== undefined);
+    // The champion's 2M search too, unless nothing was judged. One of them came from the cache.
+    const selectorSearches: SearchFact[] = judged.length === 0 ? [] : [...searched, {}].map((_, index) =>
+      ({ fullFen: after.fullFen, kind: "selector", seconds: 2, reused: index === 0 }));
+    const deepChecks = judged.filter(move => move.verdict === "passes" || move.verdict === "cp-limit").length;
+    const selectorSeconds = black.selectorJudged && judged.length ? selectorSearches.length * 2 + deepChecks * 100 : black.selectorJudged ? 1 : null;
+    const searches = [deep(white.toNodeId), ...selectorSearches, deep(black.toNodeId)];
+    elapsed += deep(white.toNodeId).seconds + (selectorSeconds ?? 0) + deep(black.toNodeId).seconds;
+    return { ...event, elapsed, searches, selectorSeconds };
+  });
+  const events: RunEvent[] = [
+    { type: "run", repertoireId: "mock", startedAt: new Date().toISOString(), config },
+    ...recorded,
+    { type: "sweep", number: 1, reopenedMoveIds: [], elapsed },
+    { type: "end", elapsed }
+  ];
 
   return {
-    repertoire: { title: "Mock repertoire", generationStatus: "GENERATING" },
-    explorerProfile: computeExplorerCacheProfile(config),
-    nodes: [...nodes.values()], moves, explorerByPositionKey, engineBestByFullFen, searchSecondsByFullFen, elapsedSecondsByMoveId, config, printedAt: new Date()
+    repertoire: { title: "Mock repertoire", generationStatus: "IDLE" },
+    nodes: nodeList, moves, explorerByPositionKey, engineBestByFullFen, events, recorded: true, config, printedAt: new Date()
   };
 }

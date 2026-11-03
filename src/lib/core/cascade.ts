@@ -174,5 +174,5 @@ export async function runCascade(input: {
 
   // TR.19
   console.log(`Cascade ${cascadeId} complete. revisits=${revisits}; refires=${refires}; duplicates=${duplicates}; tinyDroppedCounter=${tinyDroppedCounter}`);
-  return { cascadeId, revisits, refires, duplicates, tinyDroppedCounter };
+  return { cascadeId, gain: pointer.cumProb, touched: touchCounts.size, revisits, refires, duplicates, tinyDroppedCounter };
 }

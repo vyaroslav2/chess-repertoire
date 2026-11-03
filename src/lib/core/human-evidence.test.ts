@@ -8,6 +8,8 @@ import { parseFullFen } from "./fen";
 import { generateRepertoire } from "./generator";
 import { parseSelectorSearch, type LocalSearchRunner, type SelectorSearchRunner } from "./local-engine";
 import { selectorK } from "./selector-evidence";
+import type { RunEvent } from "./run-events";
+import { replayEvents, treeLogLines } from "../../../scripts/tree_log";
 
 const START_FEN = new Chess().fen();
 const boardAndTurn = (fen: string) => fen.split(" ").slice(0, 2).join(" ");
@@ -127,6 +129,46 @@ describe("HEG the selector in the generator", () => {
 
     const responseAfter = (route: string) => prisma.repertoireMove.findFirstOrThrow({
       where: { repertoireId, playerTurn: "RESPONSE", fromNode: { displayPgn: route } } });
+
+    it("TGL a run records what it did; a replay of its tree gives the same order; the log prints from either", async () => {
+      const events: RunEvent[] = [];
+      const log = await captureLog(() => generateRepertoire(START_FEN, { repertoireId, ...common, fetchDatabases, responseEvaluator, config: on,
+        recordEvent: event => events.push(event) }));
+      if (log.error) throw log.error;
+      assert.equal(events[0].type, "run");
+      assert.equal(events[events.length - 1].type, "end");
+      assert.ok(events.some(event => event.type === "sweep"));
+
+      const nodes = await prisma.repertoireNode.findMany({ where: { repertoireId } });
+      const moves = await prisma.repertoireMove.findMany({ where: { repertoireId } });
+      const order = (list: RunEvent[]) => list.flatMap(event =>
+        event.type === "position" ? [event.nodeId] : event.type === "reply" ? [event.replyMoveId] : event.type === "queue" ? [event.next.join()] : []);
+      const replayed = replayEvents(nodes, moves);
+      assert.deepEqual(order(replayed), order(events));
+
+      // The switch at 2. c4: the baseline, the selector's searches, its time, and the reply's 200M search.
+      const c4 = events.find((event): event is Extract<RunEvent, { type: "reply" }> => event.type === "reply" &&
+        moves.find(move => move.id === event.replyMoveId)?.selectionMethod === "Human evidence");
+      assert.ok(c4);
+      assert.equal(typeof c4.selectorSeconds, "number");
+      assert.equal(c4.searches[0].kind, "deep");
+      assert.ok(c4.searches.some(fact => fact.kind === "selector" && fact.uci));
+
+      const input = { repertoire: { title: "Test", generationStatus: "IDLE" }, nodes, moves, explorerByPositionKey: new Map(),
+        engineBestByFullFen: new Map(), config: on, printedAt: new Date() };
+      const recordedLines = treeLogLines({ ...input, events, recorded: true });
+      const replayedLines = treeLogLines({ ...input, events: replayed, recorded: false });
+      assert.ok(recordedLines.some(line => line.startsWith("Sweep 1: reopened 0")));
+      assert.ok(recordedLines.some(line => line.includes("200M loss ≤30")));
+      assert.ok(recordedLines.some(line => line.startsWith("Budget     spent 30 of")));
+      assert.ok(replayedLines.includes("Config (today's: this run recorded none)"));
+      assert.ok(!replayedLines.some(line => line.startsWith("Sweep")));
+      const stepOne = treeLogLines({ ...input, events, recorded: true }, { step: 1 });
+      assert.ok(stepOne.some(line => line.startsWith("#1  ")) && !stepOne.some(line => line.startsWith("#2  ")));
+      const route = treeLogLines({ ...input, events, recorded: true }, { route: "1. d4 d5 2. c4" });
+      assert.ok(route.some(line => line.startsWith("Only the route")) && route.some(line => line.includes("2. c4")));
+      assert.ok(!route.some(line => line.includes("transposes")));
+    });
 
     it("HEG.10–11 HEG.31 HEG.40–41 a switch is built on and recorded; the line budget blocks a second; the hardcoded move is never judged", async () => {
       countsAsked.length = 0;
