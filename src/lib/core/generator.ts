@@ -769,7 +769,7 @@ export async function generateRepertoire(
         config: runtime.config
     });
     const recordReply = () => recordEvent({ type: "reply", whiteMoveId, replyMoveId: responseId, pushed: !ending, waiting: queue.length,
-      elapsed: elapsedSeconds(), searches, selectorSeconds: selector?.seconds ?? null });
+      elapsed: elapsedSeconds(), searches, selectorSeconds: selector?.seconds ?? null, cumProb: effectiveCanonicalProb });
     if (ending) {
         await prisma.repertoireMove.update({ where: { id: responseId }, data: { stopReason: ending } });
         const tag = ending === "Game over on Black's move" ? "[GAME OVER]" : "[DEPTH CAP REACHED]";
@@ -840,7 +840,8 @@ export async function generateRepertoire(
     visitedNodes.add(node.nodeId);
     
     totalPositionsProcessed++;
-    recordEvent({ type: "position", nodeId: node.nodeId, waiting: queue.length, elapsed: elapsedSeconds() });
+    const dequeued = await prisma.repertoireNode.findUnique({ where: { id: node.nodeId }, select: { cumProb: true } });
+    recordEvent({ type: "position", nodeId: node.nodeId, waiting: queue.length, elapsed: elapsedSeconds(), cumProb: dequeued?.cumProb });
 
     const currentElapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     
@@ -1049,7 +1050,7 @@ export async function generateRepertoire(
     console.log(`Human Evidence Searches:  ${totalSelectorSearches} at ${runtime.config.selectorNodes} nodes`);
   }
   console.log("========================================================\n");
-  recordEvent({ type: "end", elapsed: elapsedSeconds() });
+  recordEvent({ type: "end", elapsed: elapsedSeconds(), tinyDropped: cascadeRun.tinyDroppedTotal });
 
   // S3.11 - S3.15
   const failures = await endOfRunFailures({

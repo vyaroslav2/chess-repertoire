@@ -69,6 +69,7 @@ export async function runCascade(input: {
 
   // TR.10
   const pointer = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: input.pointerId } });
+  const ownerBefore = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: input.ownerId } });
   const worklist: CascadeItem[] = [{
     cascadeId,
     fromNode: pointer.id,
@@ -174,5 +175,6 @@ export async function runCascade(input: {
 
   // TR.19
   console.log(`Cascade ${cascadeId} complete. revisits=${revisits}; refires=${refires}; duplicates=${duplicates}; tinyDroppedCounter=${tinyDroppedCounter}`);
-  return { cascadeId, gain: pointer.cumProb, touched: touchCounts.size, revisits, refires, duplicates, tinyDroppedCounter };
+  const ownerAfter = await prisma.repertoireNode.findUniqueOrThrow({ where: { id: input.ownerId } });
+  return { cascadeId, gain: pointer.cumProb, ownerFrom: ownerBefore.cumProb, ownerTo: ownerAfter.cumProb, touched: touchCounts.size, revisits, refires, duplicates, tinyDroppedCounter };
 }

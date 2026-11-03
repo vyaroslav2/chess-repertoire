@@ -130,6 +130,7 @@ describe("TR", () => {
       assert.equal(recorded.whiteMoveId, move.id);
       assert.equal(recorded.cascade.cascadeId, "C01");
       assert.ok(near(recorded.cascade.gain, 0.4));
+      assert.ok(near(recorded.cascade.ownerTo! - recorded.cascade.ownerFrom!, 0.4));
       assert.ok(recorded.cascade.touched >= 1);
     });
 

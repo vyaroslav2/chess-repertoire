@@ -74,6 +74,8 @@ export function mockTreeLogInput(): TreeLogInput {
     const parent = nodes.get(route)!;
     explorerByPositionKey.set(parent.positionKey, { positionTotalGames: total, fetchedAt: new Date("2026-10-13T14:02:00"),
       moves: candidates.map(([san, games]) => ({ uci: uciOf(route, san), san, games })) });
+    // TR.47: the games Explorer lists no move for.
+    parent.unaccountedDropped = parent.cumProb * (1 - candidates.reduce((listed, [, games]) => listed + games / total, 0));
     for (const [san, games, options = {}] of candidates) {
       const share = games / total, arriving = parent.cumProb * share, to = join(route, san);
       if (options.transposesTo) {
@@ -171,36 +173,48 @@ export function mockTreeLogInput(): TreeLogInput {
     const reused = cachedFens.has(fullFen);
     return { fullFen, kind: "deep", seconds: reused ? 0 : searchSecondsByFullFen.get(fullFen) ?? 0, reused };
   };
+  // What a node held at that moment: its route's share, until a cascade added to it.
+  const cumProbNow = new Map(nodeList.map(({ id, routeProb }) => [id, routeProb]));
   let elapsed = 0;
   let cascades = 0;
   const recorded = replayEvents(nodeList, moves).map((event): RunEvent => {
-    if (event.type === "position") return { ...event, elapsed };
+    if (event.type === "position") return { ...event, elapsed, cumProb: cumProbNow.get(event.nodeId) };
     if (event.type === "transposition") {
       elapsed += 1;
       const gain = cascadeGains.get(event.whiteMoveId) ?? 0;
       const cascadeId = `C${String(++cascades).padStart(2, "0")}`;
-      return { ...event, elapsed, cascade: { cascadeId, gain, touched: 2, revisits: 0, refires: 0, duplicates: 0, tinyDroppedCounter: 1 } };
+      const pointer = moves.find(candidate => candidate.id === event.whiteMoveId)!.toNodeId!;
+      const owner = nodes.get(pointer)!.transposesTo!;
+      const ownerFrom = cumProbNow.get(owner)!;
+      for (const reached of [owner, moves.find(candidate => candidate.fromNodeId === owner)?.toNodeId]) {
+        if (reached) cumProbNow.set(reached, cumProbNow.get(reached)! + gain);
+      }
+      return { ...event, elapsed, cascade: { cascadeId, gain, ownerFrom, ownerTo: ownerFrom + gain, touched: 2, revisits: 0, refires: 0, duplicates: 0, tinyDroppedCounter: 1 } };
     }
     if (event.type !== "reply") return event;
     const white = moves.find(candidate => candidate.id === event.whiteMoveId)!;
     const black = moves.find(candidate => candidate.id === event.replyMoveId)!;
-    const judged: { verdict: string; cpWhite?: number }[] = black.selectorJudged ? JSON.parse(black.selectorJudged).judged : [];
+    const judged: { san: string; verdict: string; cpWhite?: number }[] = black.selectorJudged ? JSON.parse(black.selectorJudged).judged : [];
     const after = nodes.get(white.toNodeId!)!;
     const searched = judged.filter(move => move.cpWhite !== undefined);
     // The champion's 2M search too, unless nothing was judged. One of them came from the cache.
     const selectorSearches: SearchFact[] = judged.length === 0 ? [] : [...searched, {}].map((_, index) =>
       ({ fullFen: after.fullFen, kind: "selector", seconds: 2, reused: index === 0 }));
-    const deepChecks = judged.filter(move => move.verdict === "passes" || move.verdict === "cp-limit").length;
-    const selectorSeconds = black.selectorJudged && judged.length ? selectorSearches.length * 2 + deepChecks * 100 : black.selectorJudged ? 1 : null;
-    const searches = [deep(white.toNodeId), ...selectorSearches, deep(black.toNodeId)];
-    elapsed += deep(white.toNodeId).seconds + (selectorSeconds ?? 0) + deep(black.toNodeId).seconds;
-    return { ...event, elapsed, searches, selectorSeconds };
+    // HEG.32: the 200M search of each move that passes safe gain. The winner's reply finds its own in the cache.
+    const deepChecks: SearchFact[] = judged.filter(move => move.verdict === "passes" || move.verdict === "cp-limit").map(move =>
+      ({ fullFen: play(join(after.id, move.san)).fen(), kind: "deep", seconds: 100, reused: false }));
+    const replyFen = nodes.get(black.toNodeId!)!.fullFen;
+    const replySearch: SearchFact = deepChecks.some(check => check.fullFen === replyFen) ? { fullFen: replyFen, kind: "deep", seconds: 0, reused: true } : deep(black.toNodeId);
+    const selectorSeconds = black.selectorJudged && judged.length ? selectorSearches.length * 2 + deepChecks.length * 100 : black.selectorJudged ? 1 : null;
+    const searches = [deep(white.toNodeId), ...selectorSearches, ...deepChecks, replySearch];
+    elapsed += deep(white.toNodeId).seconds + (selectorSeconds ?? 0) + replySearch.seconds;
+    return { ...event, elapsed, searches, selectorSeconds, cumProb: cumProbNow.get(after.id) };
   });
   const events: RunEvent[] = [
-    { type: "run", repertoireId: "mock", startedAt: new Date().toISOString(), config },
+    { type: "run", repertoireId: "mock", startedAt: new Date(Date.now() - elapsed * 1000).toISOString(), config },
     ...recorded,
     { type: "sweep", number: 1, reopenedMoveIds: [], elapsed },
-    { type: "end", elapsed }
+    { type: "end", elapsed, tinyDropped: 0 }
   ];
 
   return {

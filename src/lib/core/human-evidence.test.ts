@@ -159,12 +159,38 @@ describe("HEG the selector in the generator", () => {
       const recordedLines = treeLogLines({ ...input, events, recorded: true });
       const replayedLines = treeLogLines({ ...input, events: replayed, recorded: false });
       assert.ok(recordedLines.some(line => line.startsWith("Sweep 1: reopened 0")));
+      // Nothing was reopened, so the sweep is the log's last line, with no empty queue before it.
+      assert.ok(recordedLines[recordedLines.length - 1].startsWith("Sweep 1"));
+      assert.ok(!recordedLines.includes("[Queue] waiting 0"));
+      assert.ok(recordedLines.some(line => /^Run started .*, finished$/.test(line)));
+      assert.ok(recordedLines.some(line => /^Searches +200M \d+.*; 2M \d+/.test(line)));
+      assert.ok(recordedLines.some(line => /^Balance +endings .*, too rare .*, not listed .*, tiny \d/.test(line)));
+      assert.ok(recordedLines.some(line => /^Dequeue .*, cumProb [\d.]+%, waiting \d+$/.test(line)));
+      // The summary counts what is printed: the hardcoded first moves are neither.
+      const dequeues = recordedLines.filter(line => line.startsWith("Dequeue")).length;
+      assert.ok(recordedLines.includes(`Positions  ${dequeues}`));
+      assert.ok(!recordedLines.some(line => /^Black .*hardcoded/.test(line)));
+      // The switch: its reply shows the time of its own search, made inside the selector. No per-step Selector line.
+      assert.ok(recordedLines.some(line => /^Reply +c6 .*  \d+s$/.test(line)));
+      assert.ok(recordedLines.includes(`Selector   judged 2, switched 1`));
+      assert.ok(!recordedLines.some(line => /^Selector +2M/.test(line)));
+      // One verdict per table: `pass` on the move played, `champion` only if the baseline stays. A runner-up that passed is blank.
+      const switchMove = moves.find(move => move.selectionMethod === "Human evidence")!;
+      const stored = JSON.parse(switchMove.selectorJudged!);
+      stored.judged.push({ ...stored.judged[0], san: "Nc6" });
+      const withRunnerUp = treeLogLines({ ...input, events, recorded: true,
+        moves: moves.map(move => move === switchMove ? { ...move, selectorJudged: JSON.stringify(stored) } : move) });
+      assert.ok(withRunnerUp.some(line => /^c6 .* pass$/.test(line)));
+      assert.ok(withRunnerUp.some(line => line.startsWith("Nc6 ")) && !withRunnerUp.some(line => /^Nc6 .* pass$/.test(line)));
+      assert.ok(!withRunnerUp.some(line => /^e6 .* champion$/.test(line)));
+      assert.ok(withRunnerUp.some(line => /^Nf6 .* champion$/.test(line)));
       assert.ok(recordedLines.includes("200M loss ≤30") && recordedLines.includes("line budget 50"));
       // The second switch's table: 30 of the budget is spent, so 20 is left, below the cp limit.
       assert.ok(recordedLines.some(line => line.startsWith("move") && line.includes("200M loss ≤20")));
       assert.ok(recordedLines.some(line => line.startsWith("Budget     spent 30 of")));
       assert.ok(replayedLines.includes("Config (today's: this run recorded none)"));
-      assert.ok(!replayedLines.some(line => line.startsWith("Sweep")));
+      assert.ok(!replayedLines.some(line => line.startsWith("Sweep") || line.startsWith("Run started") || line.startsWith("Searches")));
+      assert.ok(replayedLines.some(line => /^Balance .*tiny —$/.test(line)));
       const stepOne = treeLogLines({ ...input, events, recorded: true }, { step: 1 });
       assert.ok(stepOne.some(line => line.startsWith("#1  ")) && !stepOne.some(line => line.startsWith("#2  ")));
       const route = treeLogLines({ ...input, events, recorded: true }, { route: "1. d4 d5 2. c4" });

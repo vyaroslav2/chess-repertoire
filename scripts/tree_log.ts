@@ -74,7 +74,11 @@ const evalText = (cp: number | null | undefined, mate?: number | null) =>
 const line = (label: string, text: string) => `${label.padEnd(10)} ${text}`;
 const duration = (seconds: number) => {
   const whole = Math.round(seconds), hours = Math.floor(whole / 3600), minutes = Math.floor(whole % 3600 / 60);
-  return `${hours > 0 ? `${hours}h ` : ""}${minutes}m ${whole % 60}s`;
+  return `${hours > 0 ? `${hours}h ` : ""}${hours > 0 || minutes > 0 ? `${minutes}m ` : ""}${whole % 60}s`;
+};
+const searchCounts = (size: string, facts: SearchFact[]) => {
+  const cached = facts.filter(fact => fact.reused).length;
+  return `${size} ${facts.length - cached}${cached ? `, cached ${cached}` : ""}`;
 };
 const elapsedLine = (elapsed: number | null) => line("Elapsed", elapsed === null ? "—" : duration(elapsed));
 const numberedRoute = (route: string) =>
@@ -160,6 +164,7 @@ function fetchedMoves(input: TreeLogInput, node: RepertoireNode): string[] {
 }
 
 // A deep search of this position: its eval, its depth, and its time, or that it came from the cache.
+// The first search: a switch's reply was searched inside the selector, and that search's time is the one to show.
 function searchFacts(fullFen: string, move: RepertoireMove, searches: SearchFact[]): string {
   const search = searches.find(fact => fact.kind === "deep" && fact.fullFen === fullFen);
   const time = !search ? "time —" : search.reused ? "cached" : duration(search.seconds);
@@ -168,7 +173,7 @@ function searchFacts(fullFen: string, move: RepertoireMove, searches: SearchFact
 
 // HEG.10, HEG.31, HEG.41: what the selector judged, against the limits it had here.
 // No table means it didn't run or no move had games; the Reply line names the winner.
-function selectorLines(input: TreeLogInput, reply: RepertoireMove, event: Extract<RunEvent, { type: "reply" }>): string[] {
+function selectorLines(input: TreeLogInput, reply: RepertoireMove): string[] {
   if (!reply.selectorJudged) return [];
   const stored: StoredSelector = JSON.parse(reply.selectorJudged);
   if (stored.skipped === "mate") return [line("Selector", "nothing judged: a mate score")];
@@ -178,26 +183,24 @@ function selectorLines(input: TreeLogInput, reply: RepertoireMove, event: Extrac
   const spentBefore = (reply.lineCpSpent ?? 0) - Math.max(0, winnerLoss);
   // The limits are in the config block; only a line budget running low changes one here.
   const allowed = selectorLineBudget - spentBefore;
+  // One verdict per table, on the move played: `pass` if it replaced the baseline, `champion` if the baseline stays.
   const rows = [
     ["move", "games", "score", "2M eval", "safe gain", allowed < selectorCpLimit ? `200M loss ≤${allowed}` : "200M loss", "verdict"],
     [reply.championSan ?? "?", count(stored.championGames), stored.championScore === null ? "—" : percent(stored.championScore),
-      evalText(reply.championCp2M), "—", "—", stored.judged.some(move => move.verdict === "passes") ? "" : "champion"],
+      evalText(reply.championCp2M), "—", "—", stored.judged.some(move => move.san === reply.san) ? "" : "champion"],
     // HEG.32: a safe-gain failure stops before its 200M search; its stored cp loss is the 2M evals' difference.
     ...stored.judged.map(move => [move.san, count(move.games), percent(move.score), evalText(move.cpWhite, move.mateWhite),
       move.safeGain === undefined ? "—" : (move.safeGain * 100).toFixed(1),
       move.cpLoss === undefined || move.cpLoss === null || move.verdict === "safe-gain" ? "—" : String(move.cpLoss),
-      move.verdict === "passes" ? "pass" : ""])
+      move.san === reply.san ? "pass" : ""])
   ];
-  const selectorSearches = event.searches.filter(fact => fact.kind === "selector");
-  const run = selectorSearches.filter(fact => !fact.reused).length;
-  const spent = event.selectorSeconds === null ? [] : [line("Selector", `2M searches ${run}, cached ${selectorSearches.length - run}  ${duration(event.selectorSeconds)}`)];
-  return [...table(rows, [1, 2, 3, 4, 5]), ...spent];
+  return table(rows, [1, 2, 3, 4, 5]);
 }
 
-// cumProb includes what cascades brought here; the route's own share shows beside it when they differ.
-function probabilityText(node: RepertoireNode): string {
-  const own = Math.abs(node.cumProb - node.routeProb) > 1e-9 ? ` (route ${percent(node.routeProb, 2)})` : "";
-  return `cumProb ${percent(node.cumProb, 2)}${own}`;
+// cumProb includes what cascades had brought here by then; the route's own share shows beside it when they differ.
+function probabilityText(node: RepertoireNode, cumProb: number): string {
+  const own = Math.abs(cumProb - node.routeProb) > 1e-9 ? ` (route ${percent(node.routeProb, 2)})` : "";
+  return `cumProb ${percent(cumProb, 2)}${own}`;
 }
 
 // HM.36, EW, RE: one White move, from the search of the position it reaches to Black's reply going on the queue.
@@ -208,11 +211,11 @@ function replyStep(input: TreeLogInput, white: RepertoireMove, after: Repertoire
   if (!reply || !replyNode) return [`${heading}: its reply is missing`];
   const best = input.engineBestByFullFen.get(after.fullFen);
   return [
-    `${heading}  ${probabilityText(after)}`,
+    `${heading}  ${probabilityText(after, event.cumProb ?? after.cumProb)}`,
     `FEN=${after.fullFen}`,
     line("Baseline", `${best ? best.san ?? best.uci : "?"}  ${searchFacts(after.fullFen, white, event.searches)}`),
     ...(reply.selectionMethod === "Hardcoded" ? [line("Hardcoded", reply.san)] : []),
-    ...selectorLines(input, reply, event),
+    ...selectorLines(input, reply),
     line("Reply", `${reply.san}  ${searchFacts(replyNode.fullFen, reply, event.searches)}`),
     ...(reply.selectionMethod === "Human evidence" ? [line("Budget", `spent ${reply.lineCpSpent} of ${input.config.selectorLineBudget}`)] : []),
     event.pushed
@@ -228,9 +231,11 @@ function transpositionStep(input: TreeLogInput, after: RepertoireNode, number: n
   const { cascade } = event;
   const extras = cascade ? [`revisits ${cascade.revisits}`, `refires ${cascade.refires}`, `duplicates ${cascade.duplicates}`, `tiny dropped ${cascade.tinyDroppedCounter}`]
     .filter(text => !text.endsWith(" 0")) : [];
+  const ownerChange = cascade?.ownerFrom !== undefined && cascade.ownerTo !== undefined && cascade.ownerFrom !== cascade.ownerTo
+    ? `: ${percent(cascade.ownerFrom, 2)} → ${percent(cascade.ownerTo, 2)}` : "";
   return [
     `#${number}  ${numberedRoute(after.displayPgn)}  transposes to ${owner ? numberedRoute(owner.displayPgn) : "?"}`,
-    line("Cascade", cascade ? [`${cascade.cascadeId}  +${percent(cascade.gain, 2)}`, `touched ${cascade.touched}`, ...extras].join("; ") : "—"),
+    line("Cascade", cascade ? [`${cascade.cascadeId}  +${percent(cascade.gain, 2)}${ownerChange}`, `touched ${cascade.touched}`, ...extras].join("; ") : "—"),
     elapsedLine(event.elapsed)
   ];
 }
@@ -241,10 +246,12 @@ const queueLines = (input: TreeLogInput, event: Extract<RunEvent, { type: "queue
   return [`[Queue] waiting ${event.waiting}`, ...names, ...(more > 0 ? [`... ${more} more`] : [])];
 };
 
-// S3: the run, event by event. For now only the hardcoded lines are printed; the whole tree is still counted.
+// For now only the hardcoded lines are printed and counted.
+const isShown = (input: TreeLogInput, route: string) => input.config.hardcodedBlackResponses.some(start => routeStartsWith(route, start));
+
+// S3: the run, event by event.
 function runBlocks(input: TreeLogInput): Block[] {
-  const shownLines = input.config.hardcodedBlackResponses;
-  const shown = (route: string) => shownLines.some(start => routeStartsWith(route, start));
+  const shown = (route: string) => isShown(input, route);
   const blocks: Block[] = [];
   const whiteAndNode = (whiteMoveId: string) => {
     const white = input.moves.find(move => move.id === whiteMoveId);
@@ -259,9 +266,11 @@ function runBlocks(input: TreeLogInput): Block[] {
       positionRoute = node?.displayPgn ?? "";
       if (!node || !shown(node.displayPgn)) continue;
       const noMoves = input.moves.some(move => move.toNodeId === node.id && move.stopReason === NO_OPPONENT_MOVES);
+      const explorer = input.explorerByPositionKey.get(node.positionKey);
+      const facts = [`cumProb ${percent(event.cumProb ?? node.cumProb, 2)}`, ...(explorer ? [`${count(explorer.positionTotalGames)} games`] : []), `waiting ${event.waiting}`];
       blocks.push({ route: node.displayPgn, lines: [
         POSITION_RULE,
-        `Dequeue ${numberedRoute(node.displayPgn)}, waiting ${event.waiting}`,
+        `Dequeue ${numberedRoute(node.displayPgn)}, ${facts.join(", ")}`,
         ...(noMoves ? [line("Ends", REPLY_ENDINGS[NO_OPPONENT_MOVES])] : fetchedMoves(input, node))
       ] });
     } else if (event.type === "reply" || event.type === "transposition" || event.type === "ending") {
@@ -273,11 +282,11 @@ function runBlocks(input: TreeLogInput): Block[] {
         : [`#${step}  ${numberedRoute(found.after.displayPgn)}  ${event.ending.toLowerCase()}`, elapsedLine(event.elapsed)];
       blocks.push({ route: found.after.displayPgn, step, lines: [STEP_RULE, ...lines] });
     } else if (event.type === "queue") {
-      if (positionRoute === "" || shown(positionRoute)) blocks.push({ route: positionRoute, lines: [STEP_RULE, ...queueLines(input, event)] });
+      if (event.waiting > 0 && (positionRoute === "" || shown(positionRoute))) blocks.push({ route: positionRoute, lines: [STEP_RULE, ...queueLines(input, event)] });
     } else if (event.type === "sweep") {
       // S3.16, DRS: the queue ran empty, so the too-rare moves are looked at again.
       const routes = event.reopenedMoveIds.map(moveId => numberedRoute(whiteAndNode(moveId)?.after.displayPgn ?? "?"));
-      blocks.push({ route: "", lines: [POSITION_RULE, `Sweep ${event.number}: reopened ${routes.length}`, ...routes, elapsedLine(event.elapsed)] });
+      blocks.push({ route: "", lines: [POSITION_RULE, `Sweep ${event.number}: reopened ${routes.length}`, ...routes, ...(routes.length ? [elapsedLine(event.elapsed)] : [])] });
     }
   }
   return blocks;
@@ -289,10 +298,12 @@ function tally(labels: string[]): string {
   return [...totals].sort((a, b) => b[1] - a[1]).map(([label, total]) => `${label} ${total}`).join(", ");
 }
 
-// S3.10, HEG.41: totals for the whole stored tree, not only the positions printed below.
+// S3.10, HEG.41: totals for the lines printed below, so they match the log. Elapsed and Balance stay the whole run's.
 function summaryLines(input: TreeLogInput): string[] {
-  const whites = input.moves.filter(move => move.playerTurn === "OPPONENT");
-  const replies = input.moves.filter(move => move.playerTurn === "RESPONSE");
+  const routes = new Map(input.nodes.map(node => [node.id, node.displayPgn]));
+  const printed = (nodeId: string) => isShown(input, routes.get(nodeId) ?? "");
+  const whites = input.moves.filter(move => move.playerTurn === "OPPONENT" && printed(move.fromNodeId));
+  const replies = input.moves.filter(move => move.playerTurn === "RESPONSE" && printed(move.fromNodeId));
   const whiteLabels = whites.map(white => replyTo(input.moves, white) ? "replied" : white.stopReason?.toLowerCase() ?? "no reply yet");
   const endings = replies.flatMap(reply => reply.stopReason ? [REPLY_ENDINGS[reply.stopReason] ?? reply.stopReason] : []);
   // The replies pushed on the queue whose positions were never taken off it.
@@ -302,14 +313,23 @@ function summaryLines(input: TreeLogInput): string[] {
   const switched = judged.filter(reply => reply.selectionMethod === "Human evidence");
   const sweeps = input.events.filter(event => event.type === "sweep");
   const elapsed = input.events.flatMap(event => "elapsed" in event && event.elapsed !== null ? [event.elapsed] : []);
+  const printedReplies = new Set(replies.map(reply => reply.id));
+  const searches = input.events.flatMap(event => event.type === "reply" && printedReplies.has(event.replyMoveId) ? event.searches : []);
+  // S3.11: where the whole probability ended up, so it reaches 100%. An ending is a node with no moves out of it.
+  const sum = (values: number[]) => percent(values.reduce((total, value) => total + value, 0));
+  const hasMoves = new Set(input.moves.map(move => move.fromNodeId));
+  const tiny = input.events.flatMap(event => event.type === "end" && event.tinyDropped !== undefined ? [event.tinyDropped] : []);
   return [
     `[Summary]`,
-    line("Positions", String(input.events.filter(event => event.type === "position").length)),
+    line("Positions", String(input.events.filter(event => event.type === "position" && printed(event.nodeId)).length)),
     line("White", `${whites.length}: ${tally(whiteLabels)}`),
     line("Black", `${replies.length}: ${tally(replies.map(reply => reply.selectionMethod?.toLowerCase() ?? "unknown"))}`),
     ...(endings.length ? [line("Endings", tally(endings))] : []),
     ...(judged.length ? [line("Selector", `judged ${judged.length}, switched ${switched.length}`)] : []),
     ...(sweeps.length ? [line("Sweeps", `${sweeps.length}, reopened ${sweeps.reduce((sum, sweep) => sum + sweep.reopenedMoveIds.length, 0)}`)] : []),
+    ...(searches.length ? [line("Searches", `${searchCounts("200M", searches.filter(fact => fact.kind === "deep"))}; ${searchCounts("2M", searches.filter(fact => fact.kind === "selector"))}`)] : []),
+    line("Balance", `endings ${sum(input.nodes.filter(node => !hasMoves.has(node.id)).map(node => node.cumProb))}, too rare ${sum(input.nodes.map(node => node.rareDropped))}, ` +
+      `not listed ${sum(input.nodes.map(node => node.unaccountedDropped))}, tiny ${tiny.length ? percent(tiny[0]) : "—"}`),
     ...(waiting ? [line("Waiting", `${waiting}: the run stopped early`)] : []),
     line("Elapsed", elapsed.length ? duration(Math.max(...elapsed)) : "—")
   ];
@@ -321,8 +341,12 @@ export function treeLogLines(input: TreeLogInput, filter: TreeLogFilter = {}): s
     filter.step !== undefined ? block.step === filter.step
     : filter.route !== undefined ? block.route !== "" && routeStartsWith(block.route, filter.route)
     : true);
+  const run = input.events.find(event => event.type === "run");
+  const status = input.repertoire.generationStatus !== "FAILED" && input.events.some(event => event.type === "end")
+    ? "finished" : input.repertoire.generationStatus.toLowerCase();
   return [
     `Tree log — ${input.repertoire.title} — printed ${localTime(input.printedAt)}`,
+    ...(run ? [`Run started ${localTime(new Date(run.startedAt))}, ${status}`] : []),
     ...(filter.step !== undefined ? [`Only step #${filter.step}`] : filter.route !== undefined ? [`Only the route ${filter.route}`] : []),
     ``,
     input.recorded ? `Config` : `Config (today's: this run recorded none)`,
