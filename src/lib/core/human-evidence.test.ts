@@ -159,7 +159,9 @@ describe("HEG the selector in the generator", () => {
       const recordedLines = treeLogLines({ ...input, events, recorded: true });
       const replayedLines = treeLogLines({ ...input, events: replayed, recorded: false });
       assert.ok(recordedLines.some(line => line.startsWith("Sweep 1: reopened 0")));
-      assert.ok(recordedLines.some(line => line.includes("200M loss ≤30")));
+      assert.ok(recordedLines.includes("200M loss ≤30") && recordedLines.includes("line budget 50"));
+      // The second switch's table: 30 of the budget is spent, so 20 is left, below the cp limit.
+      assert.ok(recordedLines.some(line => line.startsWith("move") && line.includes("200M loss ≤20")));
       assert.ok(recordedLines.some(line => line.startsWith("Budget     spent 30 of")));
       assert.ok(replayedLines.includes("Config (today's: this run recorded none)"));
       assert.ok(!replayedLines.some(line => line.startsWith("Sweep")));

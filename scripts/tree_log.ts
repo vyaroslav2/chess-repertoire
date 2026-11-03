@@ -173,11 +173,13 @@ function selectorLines(input: TreeLogInput, reply: RepertoireMove, event: Extrac
   const stored: StoredSelector = JSON.parse(reply.selectorJudged);
   if (stored.skipped === "mate") return [line("Selector", "nothing judged: a mate score")];
   if (stored.skipped) return [];
-  const { selectorCpLimit, selectorLineBudget, selectorMargin } = input.config;
+  const { selectorCpLimit, selectorLineBudget } = input.config;
   const winnerLoss = reply.selectionMethod === "Human evidence" ? stored.judged.find(move => move.san === reply.san)?.cpLoss ?? 0 : 0;
   const spentBefore = (reply.lineCpSpent ?? 0) - Math.max(0, winnerLoss);
+  // The limits are in the config block; only a line budget running low changes one here.
+  const allowed = selectorLineBudget - spentBefore;
   const rows = [
-    ["move", "games", "score", "2M eval", `safe gain >${(selectorMargin * 100).toFixed(1)}`, `200M loss ≤${Math.min(selectorCpLimit, selectorLineBudget - spentBefore)}`, "verdict"],
+    ["move", "games", "score", "2M eval", "safe gain", allowed < selectorCpLimit ? `200M loss ≤${allowed}` : "200M loss", "verdict"],
     [reply.championSan ?? "?", count(stored.championGames), stored.championScore === null ? "—" : percent(stored.championScore),
       evalText(reply.championCp2M), "—", "—", stored.judged.some(move => move.verdict === "passes") ? "" : "champion"],
     // HEG.32: a safe-gain failure stops before its 200M search; its stored cp loss is the 2M evals' difference.
@@ -259,7 +261,7 @@ function runBlocks(input: TreeLogInput): Block[] {
       const noMoves = input.moves.some(move => move.toNodeId === node.id && move.stopReason === NO_OPPONENT_MOVES);
       blocks.push({ route: node.displayPgn, lines: [
         POSITION_RULE,
-        `Position after ${numberedRoute(node.displayPgn)}; off the queue, waiting ${event.waiting}`,
+        `Dequeue ${numberedRoute(node.displayPgn)}, waiting ${event.waiting}`,
         ...(noMoves ? [line("Ends", REPLY_ENDINGS[NO_OPPONENT_MOVES])] : fetchedMoves(input, node))
       ] });
     } else if (event.type === "reply" || event.type === "transposition" || event.type === "ending") {
@@ -330,6 +332,11 @@ export function treeLogLines(input: TreeLogInput, filter: TreeLogFilter = {}): s
     `speeds ${config.explorerSpeeds.join(" + ")}`,
     `Stockfish ${config.localStockfishVersion}, ${config.localStockfishNodes / 1_000_000}M nodes`,
     `humanEvidence ${config.humanEvidence ? "on" : "off"}`,
+    ...(config.humanEvidence ? [
+      `safe gain >${(config.selectorMargin * 100).toFixed(1)}`,
+      `200M loss ≤${config.selectorCpLimit}`,
+      `line budget ${config.selectorLineBudget}`
+    ] : []),
     ``,
     ...summaryLines(input),
     ...blocks.flatMap(block => [``, ...block.lines])
