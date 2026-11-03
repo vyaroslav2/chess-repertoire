@@ -55,7 +55,7 @@ export const defaultConfig: Config = {
   minCumProb: 0.001,
   depthCap: 15,
   explorerSpeeds: ["classical", "rapid"],
-  explorerRatings: [1600, 1800, 2000],
+  explorerRatings: [1600, 1800],
   apiRetryDelayMs: 120_000,
   apiRequestGapMs: 2_000,
   apiRequestTimeoutMs: 30_000,

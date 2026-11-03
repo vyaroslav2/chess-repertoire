@@ -14,7 +14,7 @@ tags:
 | `minCumProb`[^3]              | 0.1% (0.001 as a fraction)                       | [[min-cum-prob]]                                            |
 | `depthCap`                    | 15                                               | full moves counted from the root; a ceiling for every route |
 | `explorerSpeeds`              | classical, rapid                                 | related to amateur cache profile                            |
-| `explorerRatings`             | 1600, 1800, 2000                                 | related to amateur cache profile                            |
+| `explorerRatings`             | 1600, 1800                                       | related to amateur cache profile                            |
 | `apiRetryDelayMs`             | 120 000                                          |                                                             |
 | `apiRequestGapMs`             | 2 000                                            |                                                             |
 | `apiRequestTimeoutMs`         | 30 000                                           |                                                             |

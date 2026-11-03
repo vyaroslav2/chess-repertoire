@@ -79,7 +79,7 @@ describe("EX.05 fetch and cache", () => {
     try { await captureLog(() => fetchExplorer(START_FEN)); } finally { global.fetch = original; }
     assert.equal(urls.length, 1);
     assert.match(urls[0], /^https:\/\/explorer\.lichess\.ovh\/lichess\?/);
-    assert.match(urls[0], /speeds=classical,rapid&ratings=1600,1800,2000$/);
+    assert.match(urls[0], /speeds=classical,rapid&ratings=1600,1800$/);
   });
 
   it("EX.05: more move games than the position's total throws and caches nothing", async () => {

@@ -22,7 +22,7 @@ test('generation-config: every setting has the value in the note', () => {
     assert.strictEqual(defaultConfig.minCumProb, 0.001);
     assert.strictEqual(defaultConfig.depthCap, 15);
     assert.deepStrictEqual(defaultConfig.explorerSpeeds, ['classical', 'rapid']);
-    assert.deepStrictEqual(defaultConfig.explorerRatings, [1600, 1800, 2000]);
+    assert.deepStrictEqual(defaultConfig.explorerRatings, [1600, 1800]);
     assert.strictEqual(defaultConfig.apiRetryDelayMs, 120_000);
     assert.strictEqual(defaultConfig.apiRequestGapMs, 2_000);
     assert.strictEqual(defaultConfig.apiRequestTimeoutMs, 30_000);
@@ -34,12 +34,12 @@ test('generation-config: every setting has the value in the note', () => {
     assert.deepStrictEqual(defaultConfig.hardcodedBlackResponses, ['1. e4 c6', '1. d4 d5']);
 });
 
-const AMATEUR_PROFILE = '315b7b6ed7ee94ad8b15ea57cfa4324700f8c14a4c489d1d0357e14f0faa2ead';
+const AMATEUR_PROFILE = '5c0daf4323bccc0ec5670cf32ed251bcf481b49a958316be8bc3bf8c401f2307';
 const LOCAL_PROFILE = 'da64ab3eb7bd609561a3badddeaa1244572475dac4a12df71e5cabb23f05e8ae';
 
 test('DB.31, DB.32: the shipped cache profiles', () => {
-    // The Amateur profile is the one used before the Masters and Elite datasets were dropped,
-    // so the Explorer cache is reused. A change would refetch every position.
+    // A change to the Amateur profile refetches every position. It last changed when the
+    // ratings went from 1600, 1800, 2000 to 1600, 1800.
     assert.strictEqual(computeExplorerCacheProfile(defaultConfig), AMATEUR_PROFILE);
     assert.strictEqual(computeLocalEngineEvaluationProfile(defaultConfig), LOCAL_PROFILE);
 });
