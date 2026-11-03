@@ -112,13 +112,21 @@ function searchFacts(input: TreeLogInput, fullFen: string, move: RepertoireMove)
 }
 
 const line = (label: string, text: string) => `${label.padEnd(10)} ${text}`;
+// RE, S3.14: a route only ends this way on Black's move, so the log doesn't say so.
+const REPLY_ENDINGS: Record<string, string> = {
+  "Depth cap reached on Black's move": "Depth cap",
+  "Game over on Black's move": "Game over",
+  "No opponent moves found": "No White moves"
+};
+const POSITION_RULE = "=".repeat(64);
+const STEP_RULE = "-".repeat(64);
 
-// EW.13, HEG.10, HEG.41: did the selector run here and, if so, what it judged and who won.
+// HEG.10, HEG.41: what the selector judged. No table means it didn't run or no move had games; the Reply line names the winner.
 function selectorLines(reply: RepertoireMove): string[] {
-  if (reply.selectionMethod === "Hardcoded") return [line("Selector", "not run: hardcoded move")];
-  if (!reply.selectorJudged) return [line("Selector", "not run: humanEvidence off")];
+  if (!reply.selectorJudged) return [];
   const stored: StoredSelector = JSON.parse(reply.selectorJudged);
-  if (stored.skipped) return [line("Selector", `nothing judged: ${stored.skipped === "no-games" ? "no games" : "a mate score"}`)];
+  if (stored.skipped === "mate") return [line("Selector", "nothing judged: a mate score")];
+  if (stored.skipped) return [];
   const rows = [
     ["move", "games", "score", "2M eval", "safe gain", "200M cp loss", "verdict"],
     [reply.championSan ?? "?", count(stored.championGames), stored.championScore === null ? "—" : percent(stored.championScore),
@@ -129,15 +137,14 @@ function selectorLines(reply: RepertoireMove): string[] {
       move.cpLoss === undefined || move.cpLoss === null || move.verdict === "safe-gain" ? "—" : String(move.cpLoss),
       move.verdict === "passes" ? "pass" : ""])
   ];
-  const result = reply.selectionMethod === "Human evidence" ? `${reply.san} replaces ${reply.championSan}` : `${reply.championSan} stays`;
-  return [...table(rows, [1, 2, 3, 4, 5]), line("Selector", result)];
+  return table(rows, [1, 2, 3, 4, 5]);
 }
 
 // HM.36, EW, RE: one White move, from the search of the position it reaches to Black's reply going on the queue.
-function whiteMoveStep(input: TreeLogInput, white: RepertoireMove, queue: RepertoireNode[]): string[] {
+function whiteMoveStep(input: TreeLogInput, white: RepertoireMove, queue: RepertoireNode[], nextStep: () => number): string[] {
   const after = input.nodes.find(node => node.id === white.toNodeId);
   if (!after) return [`${white.san}: its node is missing`];
-  const heading = numberedRoute(after.displayPgn);
+  const heading = `#${nextStep()}  ${numberedRoute(after.displayPgn)}`;
   const reply = replyTo(input, white);
   if (!reply) return [`${heading}  ${white.stopReason?.toLowerCase() ?? "no reply yet"}`];
   const replyNode = input.nodes.find(node => node.id === reply.toNodeId);
@@ -147,29 +154,64 @@ function whiteMoveStep(input: TreeLogInput, white: RepertoireMove, queue: Repert
   const elapsed = input.elapsedSecondsByMoveId.get(reply.id);
   return [
     `${heading}  cumProb ${percent(after.cumProb, 2)}`,
+    `FEN=${after.fullFen}`,
     line("Baseline", `${best ? best.san ?? best.uci : "?"}  ${searchFacts(input, after.fullFen, white)}`),
     ...(reply.selectionMethod === "Hardcoded" ? [line("Hardcoded", reply.san)] : []),
     ...selectorLines(reply),
     line("Reply", `${reply.san}  ${searchFacts(input, replyNode.fullFen, reply)}`),
     ...(reply.selectionMethod === "Human evidence" ? [line("Budget", `spent ${reply.lineCpSpent} of ${input.config.selectorLineBudget}`)] : []),
-    reply.stopReason ? line("Ends", reply.stopReason) : line("Queue", `push ${numberedRoute(replyNode.displayPgn)}; waiting ${queue.length}`),
+    reply.stopReason ? line("Ends", REPLY_ENDINGS[reply.stopReason] ?? reply.stopReason) : line("Queue", `push ${numberedRoute(replyNode.displayPgn)}; waiting ${queue.length}`),
     line("Elapsed", elapsed === undefined ? "—" : duration(elapsed))
   ];
 }
 
 const queueLines = (queue: RepertoireNode[]) => [
-  `Queue, next first`,
+  `[Queue]`,
   ...(queue.length ? [...queue].reverse().map(waiting => numberedRoute(waiting.displayPgn)) : ["(empty)"])
 ];
 
 // S3: one position off the queue: White's moves as fetched, then each of them in turn, then the queue as it stands.
-function positionStep(input: TreeLogInput, node: RepertoireNode, queue: RepertoireNode[]): string[] {
+function positionStep(input: TreeLogInput, node: RepertoireNode, queue: RepertoireNode[], nextStep: () => number): string[] {
   return [
+    POSITION_RULE,
     `Position after ${numberedRoute(node.displayPgn)}; off the queue, waiting ${queue.length}`,
     ...fetchedMoves(input, node),
-    ...whiteMovesAt(input, node).filter(white => white.stopReason !== "Too rare").flatMap(white => [``, ...whiteMoveStep(input, white, queue)]),
+    ...whiteMovesAt(input, node).filter(white => white.stopReason !== "Too rare").flatMap(white => [``, STEP_RULE, ...whiteMoveStep(input, white, queue, nextStep)]),
     ``,
+    STEP_RULE,
     ...queueLines(queue)
+  ];
+}
+
+function tally(labels: string[]): string {
+  const totals = new Map<string, number>();
+  for (const label of labels) totals.set(label, (totals.get(label) ?? 0) + 1);
+  return [...totals].sort((a, b) => b[1] - a[1]).map(([label, total]) => `${label} ${total}`).join(", ");
+}
+
+// S3.10, HEG.41: totals for the whole stored tree, not only the positions printed above.
+function summaryLines(input: TreeLogInput): string[] {
+  const whites = input.moves.filter(move => move.playerTurn === "OPPONENT");
+  const replies = input.moves.filter(move => move.playerTurn === "RESPONSE");
+  const whiteLabels = whites.map(white => replyTo(input, white) ? "replied" : white.stopReason?.toLowerCase() ?? "no reply yet");
+  const endings = replies.flatMap(reply => reply.stopReason ? [REPLY_ENDINGS[reply.stopReason] ?? reply.stopReason] : []);
+  // The replies pushed on the queue whose positions were never taken off it.
+  const expanded = new Set(whites.map(white => white.fromNodeId));
+  const waiting = replies.filter(reply => !reply.stopReason && !expanded.has(reply.toNodeId ?? "")).length;
+  const judged = replies.filter(reply => reply.selectorJudged && !(JSON.parse(reply.selectorJudged) as StoredSelector).skipped);
+  const switched = judged.filter(reply => reply.selectionMethod === "Human evidence");
+  const cumProbOf = (selected: RepertoireMove[]) =>
+    selected.reduce((sum, reply) => sum + (input.nodes.find(node => node.id === reply.fromNodeId)?.cumProb ?? 0), 0);
+  const elapsed = [...input.elapsedSecondsByMoveId.values()];
+  return [
+    POSITION_RULE,
+    `[Summary]`,
+    line("White", `${whites.length}: ${tally(whiteLabels)}`),
+    line("Black", `${replies.length}: ${tally(replies.map(reply => reply.selectionMethod?.toLowerCase() ?? "unknown"))}`),
+    ...(endings.length ? [line("Endings", tally(endings))] : []),
+    ...(judged.length ? [line("Selector", `judged ${judged.length}, switched ${switched.length} (${percent(cumProbOf(switched) / cumProbOf(judged))} of judged cumProb)`)] : []),
+    line("Waiting", String(waiting)),
+    line("Elapsed", elapsed.length ? duration(Math.max(...elapsed)) : "—")
   ];
 }
 
@@ -185,8 +227,9 @@ export function treeLogLines(input: TreeLogInput): string[] {
   }) : [];
   const start = queueLines(queue);
   const positions: string[] = [];
+  let step = 0;
   for (let taken = 0; taken < 2 && queue.length > 0; taken++) {
-    positions.push(``, ...positionStep(input, queue.pop()!, queue));
+    positions.push(``, ...positionStep(input, queue.pop()!, queue, () => ++step));
   }
   return [
     `Tree log — ${input.repertoire.title} — printed ${localTime(input.printedAt)}`,
@@ -200,7 +243,9 @@ export function treeLogLines(input: TreeLogInput): string[] {
     `humanEvidence ${config.humanEvidence ? "on" : "off"}`,
     ``,
     ...start,
-    ...positions
+    ...positions,
+    ``,
+    ...summaryLines(input)
   ];
 }
 
