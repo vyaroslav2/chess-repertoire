@@ -408,12 +408,10 @@ async function main() {
   const config = recorded ? run.config : defaultConfig;
   const explorerProfile = computeExplorerCacheProfile(config);
   const [explorerRows, engineRows] = await Promise.all([
-    // Every Amateur profile, so a tree built under older settings still shows its moves.
+    // Every Amateur profile, so a tree built under older settings still shows its moves. Not narrowed
+    // to this tree's positions: Prisma can't split a long `in` beside a `notIn` (P2029).
     prisma.positionCache.findMany({
-      where: {
-        cacheProfile: { notIn: [computeSelectorExplorerCacheProfile(config), "empty-profile"] },
-        positionKey: { in: nodes.map(node => node.positionKey) }
-      },
+      where: { cacheProfile: { notIn: [computeSelectorExplorerCacheProfile(config), "empty-profile"] } },
       include: { moves: true },
       orderBy: { fetchedAt: "asc" }
     }),
