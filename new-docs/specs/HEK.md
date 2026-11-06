@@ -172,3 +172,15 @@ HEK.88 **The choices don't change.** `select --run tree-explorer --k best --k-ru
 * One now passes: Qc7 after 1. d4 d5 2. Nf3 Nf6 3. e3 c5 4. c3, 284 games at 61.6%, safe gain 1.09 points. Nbd7 passes there too, with a bigger safe gain (3.45), and stays the choice.
 
 HEK.89 **k is done for this tree.** Its choices are the same with either k. The Explorer's k matters only once the tree goes past move 4. Then deep moves with a few games will need much more to overrule the eval than the pool's trend asked.
+
+HEK.90 **The curve on 1600–1999.** Checked 2026-11-06. The 2024-02-03 observations with an average rating under 2000 give 69,588 groups and 86,680 games (run `pool-1600-1999`). Fitted with `curve --run pool-1600-1999`, spline-7 again. Against the selector's curve, the score differs by −0.24 to +0.36 points between −400 and +400 cp, and every gap is within its uncertainty. Draws are about 0.2 points lower. About 87% of the games are in both fits, so the two aren't independent.
+
+HEK.91 **k on 1600–1999.** Checked 2026-11-06. The same 5,123 groups as HEK.80, with counts fetched again for Explorer groups 1600 and 1800 only (run `explorer-k-1600-1999`, one-off script), and fitted against curve 2024-02-03. The trend is k(move) = 245 × 0.896^(move − 2). k2's range is 228–264, and r's range is 0.883–0.908. The check fails narrowly: χ² 25.2 on 12 df, against the limit of 21.0. Move 2 (202) and move 5 (217) sit furthest off the line. Against HEK.83's trend:
+
+| move | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1600–2199 | 265 | 233 | 205 | 180 | 158 | 139 | 122 | 108 | 95 | 83 | 73 | 64 | 57 | 50 |
+| 1600–1999 | 245 | 220 | 197 | 176 | 158 | 141 | 127 | 114 | 102 | 91 | 82 | 73 | 66 | 59 |
+| change | −7% | −6% | −4% | −2% | 0% | +2% | +3% | +5% | +7% | +9% | +11% | +14% | +16% | +18% |
+
+HEK.92 **Both stay as they are.** At moves 2–10, where nearly all choices fall, k changes by at most 7%. The cloud's spread goes with 1/√(k + games), so it changes by at most about 3.5%, and by less once there are real games. The bigger gaps at moves 12–15 rest on few groups. Keeping the old k also keeps [[HES|HES.112]]'s evidence, which was measured with it. The switches weren't retested on 1600–1999.

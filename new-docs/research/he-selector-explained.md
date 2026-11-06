@@ -450,5 +450,5 @@ So why take human moves at all? Human results show that some moves score better 
 - A sample also shows who plays a move, not only the move itself (HEK.30). If stronger players prefer a move, it scores better partly because they're stronger. Checking each rating group on its own reduces this bias, but doesn't remove it, because each group still spans 200 points.
 - Edges can fade. Nc6 in the Advance (1. e4 c6 2. d4 d5 3. e5 c5 4. Nf3 Nc6, where the engine plays 4...cxd4) gained 2.8 points in 2025, then lost 0.5 in 2026 (HES.114).
 - In the 2000 group, 10 of 16 switches scored better. The other six scored −0.2, −0.3, −1.0, −1.1, −8.3 and −12.5 points. The two big losses are rare moves, with 98 and 149 games across all rating groups, so they could easily be luck. The group's gain of 4.0 ± 0.5 is still clear, because those two count for little in the weighted average.
-- The curve, k and the final test's switches all came from 1600–2199 games, but the generator now reads 1600–1999. We haven't rechecked them on that range.
+- The curve, k and the final test's switches all came from 1600–2199 games, but the generator now reads 1600–1999. On 1600–1999 the curve still holds, and k differs by at most 7% at moves 2–10, so both stay as they are (HEK.90–92). The switches weren't retested on that range.
 - The data shows that a move scores better, not why.
