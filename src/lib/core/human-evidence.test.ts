@@ -166,10 +166,10 @@ describe("HEG the selector in the generator", () => {
       assert.ok(recordedLines.some(line => /^Searches +200M \d+.*; 2M \d+/.test(line)));
       assert.ok(recordedLines.some(line => /^Balance +endings .*, too rare .*, not listed .*, tiny \d/.test(line)));
       assert.ok(recordedLines.some(line => /^Dequeue .*, cumProb [\d.]+%, waiting \d+$/.test(line)));
-      // The summary counts what is printed: the hardcoded first moves are neither.
+      // Every route is printed and counted, the hardcoded first moves too.
       const dequeues = recordedLines.filter(line => line.startsWith("Dequeue")).length;
       assert.ok(recordedLines.includes(`Positions  ${dequeues}`));
-      assert.ok(!recordedLines.some(line => /^Black .*hardcoded/.test(line)));
+      assert.ok(recordedLines.some(line => /^Black .*hardcoded/.test(line)));
       // The switch: its reply shows the time of its own search, made inside the selector. No per-step Selector line.
       assert.ok(recordedLines.some(line => /^Reply +c6 .*  \d+s$/.test(line)));
       assert.ok(recordedLines.includes(`Selector   judged 2, switched 1`));

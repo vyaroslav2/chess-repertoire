@@ -1,5 +1,5 @@
 // TGL: print a run as a log: the stored tree, plus the events the generator recorded (config, times, cache hits, queue, cascades, sweeps).
-// A tree with no recorded run is replayed, and those facts show as dashes. For now, from move 2 on the hardcoded lines only.
+// A tree with no recorded run is replayed, and those facts show as dashes. Every route is printed.
 // Read-only: it reads the database, the caches and the events and writes new-docs/logs/tree-log.md, so a rerun takes seconds.
 // Usage: npm run tree-log [-- <repertoire title>] [--route "e4 c6 d4"] [--step 12], or npm run tree-log:mock for made-up data.
 import fs from "node:fs";
@@ -246,12 +246,8 @@ const queueLines = (input: TreeLogInput, event: Extract<RunEvent, { type: "queue
   return [`[Queue] waiting ${event.waiting}`, ...names, ...(more > 0 ? [`... ${more} more`] : [])];
 };
 
-// For now only the hardcoded lines are printed and counted.
-const isShown = (input: TreeLogInput, route: string) => input.config.hardcodedBlackResponses.some(start => routeStartsWith(route, start));
-
 // S3: the run, event by event.
 function runBlocks(input: TreeLogInput): Block[] {
-  const shown = (route: string) => isShown(input, route);
   const blocks: Block[] = [];
   const whiteAndNode = (whiteMoveId: string) => {
     const white = input.moves.find(move => move.id === whiteMoveId);
@@ -264,7 +260,7 @@ function runBlocks(input: TreeLogInput): Block[] {
     if (event.type === "position") {
       const node = input.nodes.find(candidate => candidate.id === event.nodeId);
       positionRoute = node?.displayPgn ?? "";
-      if (!node || !shown(node.displayPgn)) continue;
+      if (!node) continue;
       const noMoves = input.moves.some(move => move.toNodeId === node.id && move.stopReason === NO_OPPONENT_MOVES);
       const explorer = input.explorerByPositionKey.get(node.positionKey);
       const facts = [`cumProb ${percent(event.cumProb ?? node.cumProb, 2)}`, ...(explorer ? [`${count(explorer.positionTotalGames)} games`] : []), `waiting ${event.waiting}`];
@@ -275,14 +271,14 @@ function runBlocks(input: TreeLogInput): Block[] {
       ] });
     } else if (event.type === "reply" || event.type === "transposition" || event.type === "ending") {
       const found = whiteAndNode(event.whiteMoveId);
-      if (!found || !shown(found.after.displayPgn)) continue;
+      if (!found) continue;
       step++;
       const lines = event.type === "reply" ? replyStep(input, found.white, found.after, step, event)
         : event.type === "transposition" ? transpositionStep(input, found.after, step, event)
         : [`#${step}  ${numberedRoute(found.after.displayPgn)}  ${event.ending.toLowerCase()}`, elapsedLine(event.elapsed)];
       blocks.push({ route: found.after.displayPgn, step, lines: [STEP_RULE, ...lines] });
     } else if (event.type === "queue") {
-      if (event.waiting > 0 && (positionRoute === "" || shown(positionRoute))) blocks.push({ route: positionRoute, lines: [STEP_RULE, ...queueLines(input, event)] });
+      if (event.waiting > 0) blocks.push({ route: positionRoute, lines: [STEP_RULE, ...queueLines(input, event)] });
     } else if (event.type === "sweep") {
       // S3.16, DRS: the queue ran empty, so the too-rare moves are looked at again.
       const routes = event.reopenedMoveIds.map(moveId => numberedRoute(whiteAndNode(moveId)?.after.displayPgn ?? "?"));
@@ -298,12 +294,10 @@ function tally(labels: string[]): string {
   return [...totals].sort((a, b) => b[1] - a[1]).map(([label, total]) => `${label} ${total}`).join(", ");
 }
 
-// S3.10, HEG.41: totals for the lines printed below, so they match the log. Elapsed and Balance stay the whole run's.
+// S3.10, HEG.41: totals for the whole run.
 function summaryLines(input: TreeLogInput): string[] {
-  const routes = new Map(input.nodes.map(node => [node.id, node.displayPgn]));
-  const printed = (nodeId: string) => isShown(input, routes.get(nodeId) ?? "");
-  const whites = input.moves.filter(move => move.playerTurn === "OPPONENT" && printed(move.fromNodeId));
-  const replies = input.moves.filter(move => move.playerTurn === "RESPONSE" && printed(move.fromNodeId));
+  const whites = input.moves.filter(move => move.playerTurn === "OPPONENT");
+  const replies = input.moves.filter(move => move.playerTurn === "RESPONSE");
   const whiteLabels = whites.map(white => replyTo(input.moves, white) ? "replied" : white.stopReason?.toLowerCase() ?? "no reply yet");
   const endings = replies.flatMap(reply => reply.stopReason ? [REPLY_ENDINGS[reply.stopReason] ?? reply.stopReason] : []);
   // The replies pushed on the queue whose positions were never taken off it.
@@ -313,15 +307,14 @@ function summaryLines(input: TreeLogInput): string[] {
   const switched = judged.filter(reply => reply.selectionMethod === "Human evidence");
   const sweeps = input.events.filter(event => event.type === "sweep");
   const elapsed = input.events.flatMap(event => "elapsed" in event && event.elapsed !== null ? [event.elapsed] : []);
-  const printedReplies = new Set(replies.map(reply => reply.id));
-  const searches = input.events.flatMap(event => event.type === "reply" && printedReplies.has(event.replyMoveId) ? event.searches : []);
+  const searches = input.events.flatMap(event => event.type === "reply" ? event.searches : []);
   // S3.11: where the whole probability ended up, so it reaches 100%. An ending is a node with no moves out of it.
   const sum = (values: number[]) => percent(values.reduce((total, value) => total + value, 0));
   const hasMoves = new Set(input.moves.map(move => move.fromNodeId));
   const tiny = input.events.flatMap(event => event.type === "end" && event.tinyDropped !== undefined ? [event.tinyDropped] : []);
   return [
     `[Summary]`,
-    line("Positions", String(input.events.filter(event => event.type === "position" && printed(event.nodeId)).length)),
+    line("Positions", String(input.events.filter(event => event.type === "position").length)),
     line("White", `${whites.length}: ${tally(whiteLabels)}`),
     line("Black", `${replies.length}: ${tally(replies.map(reply => reply.selectionMethod?.toLowerCase() ?? "unknown"))}`),
     ...(endings.length ? [line("Endings", tally(endings))] : []),
