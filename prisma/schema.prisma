@@ -89,6 +89,8 @@ model EngineCacheEvaluation {
   mate    Int?
   rank    Int? // 1 for Stockfish's best move, otherwise null
   depth   Int? // DB.32: the deepest completed depth; null for evals cached before it was stored
+  nodes   Int? // SC.20: the node count on the line kept; null for evals cached before it was stored
+  pv      String? // SC.20: that line's moves, UCI, single spaces; null for evals cached before it was stored
 
   cache EngineCache @relation(fields: [cacheId], references: [id], onDelete: Cascade)
 

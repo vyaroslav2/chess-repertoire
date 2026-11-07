@@ -55,7 +55,7 @@ A side may store more (here: `id`, `rank`, `fetchedAt`). Extra fields are never 
 
 SC.24 **`rank` is not shared** (decided 2026-11-07). With MultiPV 1 (SC.10) a search has one line, so every shared eval is rank 1 and the field would say nothing. This project keeps its `rank` column as it is ([[DB|DB.32]]): 1 for EW.09's best move, `null` for a selector eval. On import, an added eval gets `rank` 1 (SC.52). Ranks 2 and up would need MultiPV 3, which is a different search: its rank 1 is not the MultiPV 1 baseline, so it would need new settings and its own cache.
 
-SC.22 **This project's profile.** Here the settings are kept as a sha256 hash, `engineProfile` ([[DB|DB.32]]). It gains one field, `record: 2`, meaning "the eval also holds `nodes` and `pv`". So the hash changes, and no row from before SC can be read as if it had them. The hash is this project's own key: it is never put in the exchange file, and the friend's project needn't compute it.
+SC.22 **This project's profile.** Here the settings are kept as a sha256 hash, `engineProfile` ([[DB|DB.32]]). It gains one field, `record: 2`, meaning "the eval also holds `nodes` and `pv`". So the hash changes, and no row from before SC can be read as if it had them. The hash is this project's own key: it is never put in the exchange file, and the friend's project needn't compute it. Built 2026-11-07: the hash is now `6af3998c38326a319fa5ba8e5d820ef274585b83660559e264d1f1dd9752ebaf` (was `da64ab3e…`).
 
 
 SC.23 **Time is not stored in the cache.** It depends on the PC, so it never matches between two people. It goes to the search log instead (SC.30).

@@ -23,8 +23,9 @@ const prisma = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
 const blackFen = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1';
 const blackFenCounters = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 7 9';
 const profile = computeLocalEngineEvaluationProfile(defaultConfig);
-const cpEval = (uci: string, san: string, cp: number, depth: number | null = null): TrustedLocalEvaluation => ({ uci, san, cp, mate: null, depth });
-const mateEval = (uci: string, san: string, mate: number, depth: number | null = null): TrustedLocalEvaluation => ({ uci, san, cp: null, mate, depth });
+// SC.20: the fake engines below print one-move lines with no node count.
+const cpEval = (uci: string, san: string, cp: number, depth: number | null = null): TrustedLocalEvaluation => ({ uci, san, cp, mate: null, depth, nodes: null, pv: uci });
+const mateEval = (uci: string, san: string, mate: number, depth: number | null = null): TrustedLocalEvaluation => ({ uci, san, cp: null, mate, depth, nodes: null, pv: uci });
 
 const SETTINGS = { nodes: 200_000_000, threads: 1, hashMb: 1024, multiPv: 1 };
 
@@ -192,6 +193,43 @@ test('Slice 12 trusted Local Deep Stockfish evidence', async (t) => {
     await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
   });
 
+  await t.test('SC.20 the nodes and pv of the line kept are cached with the eval', async () => {
+    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
+    const runner: LocalSearchRunner = async (fen, settings) => runTrustedLocalSearch(
+      fen,
+      settings,
+      engineFactory([
+        { depth: 23, score: { unit: 'cp', value: 20 }, pv: 'c7c6 d2d4', nodes: 90_000_000 },
+        { depth: 24, score: { unit: 'cp', value: 25 }, pv: 'e7e5  g1f3   b8c6', nodes: 150_000_000 },
+        { depth: 25, score: { unit: 'cp', value: 900 }, pv: 'c7c5', nodes: settings.nodes }
+      ], [])
+    );
+
+    const result = await getOrCreateLocalBaseline(blackFen, defaultConfig, runner);
+    assert.deepEqual([result.evaluation.depth, result.evaluation.nodes, result.evaluation.pv], [24, 150_000_000, 'e7e5 g1f3 b8c6'],
+      'the stop line is dropped; d24\'s line is kept, its pv with single spaces');
+    const stored = await readLocalEngineBaseline(blackFen, profile);
+    assert.deepEqual([stored?.nodes, stored?.pv], [150_000_000, 'e7e5 g1f3 b8c6']);
+
+    const hit = await getOrCreateLocalBaseline(blackFen, defaultConfig, async () => { throw new Error('a cache hit must not search'); });
+    assert.deepEqual([hit.reused, hit.evaluation.nodes, hit.evaluation.pv], [true, 150_000_000, 'e7e5 g1f3 b8c6']);
+    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
+  });
+
+  await t.test('SC.20 an eval cached without nodes or pv reads back as unknown; a bad one is refused', async () => {
+    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
+    await saveLocalEngineBaseline(blackFen, profile, { uci: 'e7e5', cp: -20, mate: null });
+    const stored = await readLocalEngineBaseline(blackFen, profile);
+    assert.deepEqual([stored?.nodes, stored?.pv], [null, null]);
+    for (const nodes of [-1, 1.5, Number.NaN]) {
+      await assert.rejects(saveLocalEngineBaseline(blackFen, profile, { uci: 'e7e5', cp: -20, mate: null, nodes }), /nodes/);
+    }
+    for (const pv of ['c7c6 g1f3', 'e7e5  g1f3', 'e7e5 xx', '']) {
+      await assert.rejects(saveLocalEngineBaseline(blackFen, profile, { uci: 'e7e5', cp: -20, mate: null, pv }), /pv/);
+    }
+    await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
+  });
+
   await t.test('mixed depth metadata falls back to the final sequential LocalEngineBaseline update', async () => {
     await prisma.engineCache.deleteMany({ where: { engine: "LOCAL" } });
     const runner: LocalSearchRunner = async (fen, settings) => runTrustedLocalSearch(
@@ -291,7 +329,7 @@ test('EW.09: a search stopped part-way through a depth takes the deepest complet
     async init() {}, async setoption() {}, async position() {}, async quit() {},
     async go() { return { info: lines.map(parseInfoLine).filter(info => info !== null) }; }
   }));
-  assert.deepEqual(result, cpEval('e7e5', 'e5', -28, 30), 'not bestmove, not a bound');
+  assert.deepEqual(result, { ...cpEval('e7e5', 'e5', -28, 30), nodes: 180_000_000, pv: 'e7e5 g1f3' }, 'not bestmove, not a bound');
 });
 
 test('EW.09: the line Stockfish prints at the node-limit stop is not a completed depth', async () => {
@@ -306,7 +344,7 @@ test('EW.09: the line Stockfish prints at the node-limit stop is not a completed
     async init() {}, async setoption() {}, async position() {}, async quit() {},
     async go() { return { info: lines.map(parseInfoLine).filter(info => info !== null) }; }
   }));
-  assert.deepEqual(result, cpEval('e7e5', 'e5', 15, 35), "depth 35's move, score and depth");
+  assert.deepEqual(result, { ...cpEval('e7e5', 'e5', 15, 35), nodes: 9_275_708, pv: 'e7e5 g1f3' }, "depth 35's move, score, depth, nodes and pv (SC.20)");
 });
 
 // Needs bin/stockfish.exe to be Stockfish 19.

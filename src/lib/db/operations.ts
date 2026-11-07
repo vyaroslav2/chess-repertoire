@@ -208,11 +208,28 @@ export type LocalEngineEvaluation = {
   mate: number | null;
   /** DB.32: the deepest completed depth; null for evals cached before it was stored. */
   depth?: number | null;
+  /** SC.20: the node count on the line the eval was read from; null for evals cached before it was stored. */
+  nodes?: number | null;
+  /** SC.20: that line's moves, UCI, single spaces, starting with `uci`; null for evals cached before it was stored. */
+  pv?: string | null;
 };
 
 /** DB.11, DB.32: a depth is a whole number of plies, or unknown. */
 function isValidDepth(depth: unknown): boolean {
   return depth === undefined || depth === null || (typeof depth === "number" && Number.isInteger(depth) && depth >= 0);
+}
+
+/** SC.20: a node count is a whole number, or unknown. */
+function isValidNodes(nodes: unknown): boolean {
+  return nodes === undefined || nodes === null || (typeof nodes === "number" && Number.isInteger(nodes) && nodes >= 0);
+}
+
+/** SC.20: a line is UCI moves separated by single spaces, starting with the eval's move, or unknown. */
+function isValidPv(pv: unknown, uci: string): boolean {
+  if (pv === undefined || pv === null) return true;
+  if (typeof pv !== "string") return false;
+  const moves = pv.split(" ");
+  return moves[0] === uci && moves.every(isValidUciMove);
 }
 
 function validateLocalEngineIdentity(fullFen: string, evaluationProfile: string): string {
@@ -231,7 +248,7 @@ function validateLocalEngineEvaluation(
   evaluationProfile: string,
   evaluation: LocalEngineEvaluation,
   expectedUci?: string
-): LocalEngineEvaluation & { san: string; depth: number | null } {
+): LocalEngineEvaluation & { san: string; depth: number | null; nodes: number | null; pv: string | null } {
   const canonicalFullFen = validateLocalEngineIdentity(fullFen, evaluationProfile);
   if (!evaluation || typeof evaluation !== "object" || !isValidUciMove(evaluation.uci)) {
     throw new Error("Invalid Local Engine evidence: malformed UCI/LAN move");
@@ -246,6 +263,8 @@ function validateLocalEngineEvaluation(
     throw new Error("Invalid Local Engine evidence: exactly one of finite cp or integer mate is required");
   }
   if (!isValidDepth(evaluation.depth)) throw new Error("Invalid Local Engine evidence: depth must be a non-negative integer or null");
+  if (!isValidNodes(evaluation.nodes)) throw new Error("Invalid Local Engine evidence: nodes must be a non-negative integer or null");
+  if (!isValidPv(evaluation.pv, evaluation.uci)) throw new Error("Invalid Local Engine evidence: pv must be UCI moves, single spaces, starting with the move, or null");
 
   const chess = new Chess(canonicalFullFen);
   let parsedMove;
@@ -266,7 +285,7 @@ function validateLocalEngineEvaluation(
     throw new Error(`Invalid Local Engine evidence: SAN does not match UCI move ${evaluation.uci}`);
   }
 
-  return { ...evaluation, san: parsedMove.san, depth: evaluation.depth ?? null };
+  return { ...evaluation, san: parsedMove.san, depth: evaluation.depth ?? null, nodes: evaluation.nodes ?? null, pv: evaluation.pv ?? null };
 }
 
 /** Local Stockfish runs with localStockfishMultiPv = 1: its best move is the evaluation ranked 1. */
@@ -281,10 +300,10 @@ export async function saveLocalEngineBaseline(
     await tx.engineCacheEvaluation.updateMany({ where: { cacheId: cache.id, rank: 1, uci: { not: validated.uci } }, data: { rank: null } });
     const saved = await tx.engineCacheEvaluation.upsert({
       where: { cacheId_uci: { cacheId: cache.id, uci: validated.uci } },
-      update: { san: validated.san, cp: validated.cp, mate: validated.mate, depth: validated.depth, rank: 1 },
-      create: { cacheId: cache.id, uci: validated.uci, san: validated.san, cp: validated.cp, mate: validated.mate, depth: validated.depth, rank: 1 }
+      update: { san: validated.san, cp: validated.cp, mate: validated.mate, depth: validated.depth, nodes: validated.nodes, pv: validated.pv, rank: 1 },
+      create: { cacheId: cache.id, uci: validated.uci, san: validated.san, cp: validated.cp, mate: validated.mate, depth: validated.depth, nodes: validated.nodes, pv: validated.pv, rank: 1 }
     });
-    return { fullFen, evaluationProfile, bestUci: saved.uci, san: saved.san, cp: saved.cp, mate: saved.mate, depth: saved.depth };
+    return { fullFen, evaluationProfile, bestUci: saved.uci, san: saved.san, cp: saved.cp, mate: saved.mate, depth: saved.depth, nodes: saved.nodes, pv: saved.pv };
   });
 }
 
@@ -301,7 +320,9 @@ export async function readLocalEngineBaseline(fullFen: string, evaluationProfile
     san: row.san,
     cp: row.cp,
     mate: row.mate,
-    depth: row.depth
+    depth: row.depth,
+    nodes: row.nodes,
+    pv: row.pv
   });
   return { fullFen, evaluationProfile, bestUci: row.uci, ...evaluation };
 }

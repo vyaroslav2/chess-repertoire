@@ -36,7 +36,8 @@ test('generation-config: every setting has the value in the note', () => {
 });
 
 const AMATEUR_PROFILE = '5c0daf4323bccc0ec5670cf32ed251bcf481b49a958316be8bc3bf8c401f2307';
-const LOCAL_PROFILE = 'da64ab3eb7bd609561a3badddeaa1244572475dac4a12df71e5cabb23f05e8ae';
+// SC.22: last changed when the eval gained nodes and pv (record 2).
+const LOCAL_PROFILE = '6af3998c38326a319fa5ba8e5d820ef274585b83660559e264d1f1dd9752ebaf';
 
 test('DB.31, DB.32: the shipped cache profiles', () => {
     // A change to the Amateur profile refetches every position. It last changed when the

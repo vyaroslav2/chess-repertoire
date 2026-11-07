@@ -104,7 +104,7 @@ describe("HEG the selector in the generator", () => {
     const localSearchRunner: LocalSearchRunner = async fen => {
       const [san, cp] = deep[fen] ?? (() => { throw new Error(`no fake 200M search for ${fen}`); })();
       const move = new Chess(fen).move(san);
-      return { uci: move.lan, san: move.san, cp, mate: null, depth: 40 };
+      return { uci: move.lan, san: move.san, cp, mate: null, depth: 40, nodes: null, pv: move.lan };
     };
     // 2M (HEG.21), White's view, keyed by position and move.
     const shallow: Record<string, number> = { "2 e7e6": 30, "2 c7c6": 35, "3 g8f6": 40, "3 e7e6": 45 };

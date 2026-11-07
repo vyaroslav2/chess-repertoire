@@ -163,6 +163,10 @@ export type TrustedLocalEvaluation = LocalEngineEvaluation & {
   san: string;
   /** DB.32: the deepest completed depth (EW.09); null if Stockfish gave none or the cached eval predates it. */
   depth: number | null;
+  /** SC.20: the node count on the line kept; null if Stockfish gave none or the cached eval predates it. */
+  nodes: number | null;
+  /** SC.20: the line kept, UCI moves with single spaces; null if the cached eval predates it. */
+  pv: string | null;
 };
 
 export type LocalSearchSettings = {
@@ -228,7 +232,8 @@ export function collectLocalSearchUpdates(
       throw new Error('Local Engine returned an incomplete evaluation update');
     }
 
-    const uci = info.pv.trim().split(/\s+/)[0];
+    const pv = info.pv.trim().split(/\s+/).join(' ');
+    const uci = pv.split(' ')[0];
     const san = assertLegalRoot(fullFen, uci);
     const value = info.score.value;
     let cp: number | null = null;
@@ -251,7 +256,10 @@ export function collectLocalSearchUpdates(
     const depth = typeof info.depth === 'number' && Number.isInteger(info.depth) && info.depth >= 0
       ? info.depth
       : null;
-    const evaluation: CollectedEvaluation = { uci, san, cp, mate, depth, sequence };
+    const nodes = typeof info.nodes === 'number' && Number.isInteger(info.nodes) && info.nodes >= 0
+      ? info.nodes
+      : null;
+    const evaluation: CollectedEvaluation = { uci, san, cp, mate, depth, nodes, pv, sequence };
     const previous = updates.get(uci);
     if (!previous ||
         (depth !== null && previous.depth !== null ? depth >= previous.depth : sequence > previous.sequence)) {
@@ -311,7 +319,7 @@ export async function runTrustedLocalSearch(
     const best = selectFinalUnrestrictedUpdate(
       collectLocalSearchUpdates(fullFen, dropStopLine(result?.info, settings.nodes))
     );
-    return { uci: best.uci, san: best.san, cp: best.cp, mate: best.mate, depth: best.depth };
+    return { uci: best.uci, san: best.san, cp: best.cp, mate: best.mate, depth: best.depth, nodes: best.nodes, pv: best.pv };
   } catch (error) {
     primaryError = error;
     throw error;
@@ -427,7 +435,7 @@ export async function getOrCreateLocalBaseline(
   if (cached) {
     return {
       evaluationProfile,
-      evaluation: { uci: cached.uci, san: cached.san, cp: cached.cp, mate: cached.mate, depth: cached.depth },
+      evaluation: { uci: cached.uci, san: cached.san, cp: cached.cp, mate: cached.mate, depth: cached.depth, nodes: cached.nodes, pv: cached.pv },
       reused: true
     };
   }
@@ -436,7 +444,7 @@ export async function getOrCreateLocalBaseline(
   const saved = await saveLocalEngineBaseline(fullFen, evaluationProfile, evaluation);
   return {
     evaluationProfile,
-    evaluation: { uci: saved.bestUci, san: saved.san!, cp: saved.cp, mate: saved.mate, depth: saved.depth },
+    evaluation: { uci: saved.bestUci, san: saved.san!, cp: saved.cp, mate: saved.mate, depth: saved.depth, nodes: saved.nodes, pv: saved.pv },
     reused: false
   };
 }
