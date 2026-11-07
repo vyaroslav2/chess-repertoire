@@ -6,7 +6,7 @@ aliases:
   - depthCap
   - depth cap
 ---
-**`depthCap`** — the most full moves any route may run, counted from the root: 15. See [[generation-config]].
+**`depthCap`** — the most full moves any route may run, counted from the root: 6. See [[generation-config]].
 
 The limit counts Black's moves. With a limit of 15, the route ends straight after Black's 15th move.
 

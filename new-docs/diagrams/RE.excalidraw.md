@@ -96,7 +96,7 @@ No repetition or transposition check here.  ^5vyw2Knr
 
 RE.N.03 (RE.08)
 
-The limit counts Black's moves: with depthCap = 15, the route ends straight after Black's 15th move. Most routes end sooner, on a too-rare White move ([[HM.excalidraw|HM.21]]). ^BGXaJx7o
+The limit counts Black's moves: with depthCap = 6, the route ends straight after Black's 6th move. Most routes end sooner, on a too-rare White move ([[HM.excalidraw|HM.21]]). ^BGXaJx7o
 
 %%
 ## Drawing

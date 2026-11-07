@@ -63,9 +63,9 @@ describe("RE.08 depth cap", () => {
   const ending = (fullmove: number, depthCap = defaultConfig.depthCap) =>
     responseEnding({ fullFen: atMove(fullmove), config: { depthCap } });
 
-  it("RE.08: at depthCap = 15, the route ends straight after Black's 15th move", () => {
-    assert.equal(ending(15), null);
-    assert.equal(ending(16), "Depth cap reached on Black's move");
+  it("RE.08: at depthCap = 6, the route ends straight after Black's 6th move", () => {
+    assert.equal(ending(6), null);
+    assert.equal(ending(7), "Depth cap reached on Black's move");
   });
 
   it("RE.08: a lower depthCap stops every route sooner", () => {

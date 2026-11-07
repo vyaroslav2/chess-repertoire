@@ -589,7 +589,8 @@ export async function generateRepertoire(
     await tx.position.deleteMany({ where: { repertoireId: repertoire.id } });
     await tx.repertoireMove.deleteMany({ where: { repertoireId: repertoire.id } });
     await tx.repertoireNode.deleteMany({ where: { repertoireId: repertoire.id } });
-  });
+    // Prisma's default 5 s is too short for a tree of a few thousand nodes (P2028 on 2026-11-07).
+  }, { timeout: 120_000 });
 
   const rootNode = await createRepertoireNode(repertoire.id, startFen, "", 1.0, {
     displayPgn: "",
