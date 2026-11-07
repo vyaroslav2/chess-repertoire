@@ -159,7 +159,7 @@ test('12. changing one effective value -> different configHash', () => {
     const cfgA = JSON.parse(JSON.stringify(defaultConfig));
     const cfgB = JSON.parse(JSON.stringify(defaultConfig));
 
-    cfgB.depthCap = 6; // effective change
+    cfgB.depthCap = 7; // effective change
 
     const hashA = computeConfigHash(cfgA);
     const hashB = computeConfigHash(cfgB);
