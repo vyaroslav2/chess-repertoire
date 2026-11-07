@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { Chess } from "chess.js";
 import { createRepertoireNode, prisma } from "../db/operations";
-import { captureRebuildOpeningMetadataCache, restoreRebuildOpeningMetadataState } from "./generator";
+import { UserRequestedStopError } from "../api/retry";
+import { captureRebuildOpeningMetadataCache, fillMissingOpeningMetadata, generateRepertoire, restoreRebuildOpeningMetadataState } from "./generator";
 
 let userId: string;
 let repertoireId: string;
@@ -109,4 +110,77 @@ test("DB.06 rule 2 a cached absence copies its named parent", async () => {
   assert.equal(child?.status, "PRESENT");
   assert.equal(child?.eco, "B10");
   assert.equal(child?.openingName, "Caro-Kann Defense: Hillbilly Attack");
+});
+
+test("DB.06 a missing name is retried, parents first, and a name Explorer lacks copies the parent", async () => {
+  const own = await prisma.repertoire.create({ data: { title: "Missing names", color: "black", userId } });
+  try {
+    const chess = new Chess();
+    await createRepertoireNode(own.id, chess.fen(), "", 1, { displayPgn: "", openingMetadataStatus: "VALID_ABSENCE" });
+    chess.move("d4");
+    const afterD4 = chess.fen();
+    chess.move("d5");
+    // Stored child first, so only the sort puts the parent first.
+    const child = await createRepertoireNode(own.id, chess.fen(), "d2d4 d7d5", 0.5, { displayPgn: "d4 d5" });
+    const parent = await createRepertoireNode(own.id, afterD4, "d2d4", 0.5, { displayPgn: "d4" });
+
+    const named = await fillMissingOpeningMetadata(own.id, async fen => fen === afterD4 ? { eco: "A40", name: "Queen's Pawn Game" } : null);
+
+    assert.equal(named, 2);
+    const [filledParent, filledChild] = await Promise.all([
+      prisma.repertoireNode.findUniqueOrThrow({ where: { id: parent.id } }),
+      prisma.repertoireNode.findUniqueOrThrow({ where: { id: child.id } })
+    ]);
+    assert.deepEqual([filledParent.openingMetadataStatus, filledParent.eco, filledParent.openingName], ["PRESENT", "A40", "Queen's Pawn Game"]);
+    assert.deepEqual([filledChild.openingMetadataStatus, filledChild.eco, filledChild.openingName], ["PRESENT", "A40", "Queen's Pawn Game"]);
+  } finally {
+    await prisma.repertoire.delete({ where: { id: own.id } });
+  }
+});
+
+test("DB.06 a run stopped early leaves no node without a name", async () => {
+  const own = await prisma.repertoire.create({ data: { title: "Stopped run", color: "black", userId } });
+  try {
+    const start = new Chess().fen();
+    const amateur = {
+      moves: [
+        { san: "e4", uci: "e2e4", games: 60, white: 30, draws: 15, black: 15 },
+        { san: "d4", uci: "d2d4", games: 40, white: 20, draws: 10, black: 10 }
+      ],
+      totalGames: 100, positionTotalGames: 100, unaccountedShare: 0, opening: null
+    };
+    const empty = { moves: [], totalGames: 0, positionTotalGames: 0, unaccountedShare: 0, opening: null };
+    const responseEvaluator = async (_fen: string, chess: Chess) => {
+      const move = chess.move(chess.get("e4") ? "c5" : "d5");
+      chess.undo();
+      return {
+        selectedUci: move.lan, selectedMoveSan: move.san, cp: 10, mate: null,
+        source: "Local Stockfish 19" as const, selectionMethod: "Baseline" as const, moveOrigin: "Engine Move" as const,
+        engineRank: 1, baselineCp: 10, baselineMate: null
+      };
+    };
+    let flagReads = 0;
+    const log = console.log;
+    console.log = () => undefined;
+    try {
+      // The first read is before the root; the second, after it, stops the run with both Black replies queued.
+      await assert.rejects(generateRepertoire(start, {
+        repertoireId: own.id,
+        fetchDatabases: (async (fen: string) => fen === start ? amateur : empty) as any,
+        fetchOpeningMetadata: async () => null,
+        ensureNodeWikibooks: (async () => ({ status: "CACHED", text: null })) as any,
+        responseEvaluator: responseEvaluator as any,
+        wait: async () => undefined,
+        shouldStop: () => flagReads++ > 0
+      }), UserRequestedStopError);
+    } finally {
+      console.log = log;
+    }
+
+    const nodes = await prisma.repertoireNode.findMany({ where: { repertoireId: own.id }, select: { history: true, openingMetadataStatus: true } });
+    assert.deepEqual(nodes.map(node => node.history).sort(), ["", "d2d4", "d2d4 d7d5", "e2e4", "e2e4 c7c5"]);
+    assert.deepEqual(nodes.filter(node => node.openingMetadataStatus === null), []);
+  } finally {
+    await prisma.repertoire.delete({ where: { id: own.id } });
+  }
 });

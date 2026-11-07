@@ -48,7 +48,7 @@ test('DB record shapes', async (t) => {
         }
         const moveKeys = Object.keys(prisma.repertoireMove.fields);
         for (const field of ['fromNodeId', 'toNodeId', 'san', 'uci', 'playerTurn', 'moveProb', 'stopReason',
-            'cp', 'mate', 'source', 'selectionMethod', 'moveOrigin', 'engineRank']) {
+            'cp', 'mate', 'depth', 'source', 'selectionMethod', 'moveOrigin', 'engineRank']) {
             assert.ok(moveKeys.includes(field), `move is missing ${field}`);
         }
         // DB.13 and deepVerified are gone: Black plays Stockfish's top move.
@@ -261,18 +261,19 @@ test('DB record shapes', async (t) => {
         const rep = await newRepertoire("DB.14");
         const from = await createRepertoireNode(rep.id, AFTER_E4, "e2e4", 1.0);
         const to = await createRepertoireNode(rep.id, AFTER_E4_E5, "e2e4 e7e5", 1.0);
-        const move = await ops.createResponseMove({ ...responseInput(from.id, to.id), engineRank: 1 });
+        const move = await ops.createResponseMove({ ...responseInput(from.id, to.id), engineRank: 1, depth: 45 });
         assert.strictEqual(move.cp, 20);
+        assert.strictEqual(move.depth, 45, "DB.11 the eval's depth");
         assert.strictEqual(move.source, "Local Stockfish 19");
         assert.strictEqual(move.selectionMethod, "Baseline");
         assert.strictEqual(move.moveOrigin, "Engine Move");
         assert.strictEqual(move.engineRank, 1);
     });
 
-    await t.test('DB.14 only the old values are refused: API sources, human moves, engineRank other than 1', () => {
+    await t.test('DB.14 only the old values are refused: API sources, human moves, engineRank other than 1, a bad depth', () => {
         const bad = [
             { source: "Lichess Cloud Evaluation" }, { source: "ChessDB" }, { selectionMethod: "Ordinary API" },
-            { moveOrigin: "Human Move" }, { engineRank: 2 }
+            { moveOrigin: "Human Move" }, { engineRank: 2 }, { depth: -1 }, { depth: 40.5 }
         ];
         for (const change of bad) {
             assert.throws(() => ops.validateResponsePersistence({ ...responseInput("a", "b"), ...change } as never), /Invalid RESPONSE/);

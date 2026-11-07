@@ -10,6 +10,7 @@ if (fs.existsSync("C:\\Files\\.env")) {
 }
 
 import { generateRepertoire } from "../src/lib/core/generator";
+import { createRunExporter } from "../src/lib/core/anki-export";
 import { defaultConfig, type Config } from "../src/lib/core/config";
 import { prisma } from "../src/lib/db/operations";
 import {
@@ -19,6 +20,7 @@ import {
   type LockHandle,
 } from "../src/lib/core/lockfile";
 import { UserRequestedStopError } from "../src/lib/api/retry";
+import { RUN_EVENTS_PATH, runEventWriter } from "../src/lib/core/run-events";
 
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 export const TREE_GENERATOR_PROJECT_ROOT = path.resolve(__dirname, "..");
@@ -58,8 +60,7 @@ type LauncherDependencies = {
 };
 
 export function depthHeaderLine(config: Config = defaultConfig): string {
-  const { deep, medium, shallow } = config.depthBudget;
-  return `Depth: depthBudget deep=${deep}, medium=${medium}, shallow=${shallow}; depthCap=${config.depthCap} (full moves)`;
+  return `Depth: minCumProb=${config.minCumProb * 100}%; depthCap=${config.depthCap} (full moves)`;
 }
 
 function errorReason(error: unknown): string {
@@ -88,7 +89,7 @@ export async function runTreeGenerator(
   };
   const generate =
     dependencies.generate ??
-    ((shouldStop) => generateRepertoire(START_FEN, { shouldStop }));
+    ((shouldStop) => generateRepertoire(START_FEN, { shouldStop, recordEvent: runEventWriter(RUN_EVENTS_PATH), exportCards: createRunExporter() }));
   const disconnect = dependencies.disconnect ?? (() => prisma.$disconnect());
   const takeLock = dependencies.acquire ?? (() => acquireLock("treegen"));
 

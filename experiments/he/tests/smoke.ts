@@ -6,7 +6,7 @@ if (!binary) throw new Error("Supply the path to Stockfish 19.");
 const engine = await HeEngine.start(binary, 120_000);
 try {
   console.log("Engine verified:", engine.profile.name, engine.profile.id);
-  // A small legal position keeps the depth-24 smoke check quick.
+  // A small legal position keeps the smoke check quick.
   const fen = "8/8/5k2/8/8/2K5/3P4/8 b - - 0 1";
   const first = await engine.evaluate(fen);
   const cached = await engine.evaluate(fen);

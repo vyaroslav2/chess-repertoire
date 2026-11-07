@@ -100,7 +100,9 @@ still take substantial time.
 
 ## Independent engine profile
 
-Searches use Stockfish 19, depth 24, MultiPV 1, Threads 1 and Hash 64 MB.
+Searches use Stockfish 19, 2,000,000 nodes (`go nodes`), MultiPV 1, Threads 1 and Hash 64 MB.
+A node limit, not a depth: about 2 s a search. Within ±300 cp it matched 200M-node searches
+closely (scripts/node_compare.py; see the 2026-10-11 session note).
 The baseline is an unrestricted root search. Each observed candidate is searched at
 the same root with searchmoves. If it is already the champion, its baseline result is reused.
 The cache lives in data/eval-cache/<profile>/, with the binary SHA-256, engine name,
@@ -109,10 +111,171 @@ before every uncached request. Raw UCI lines are retained and checked when loadi
 
 Scores are stored from White's view; for Black, cp loss is
 max(0, candidate cpWhite - champion cpWhite).
-Only exact, unbounded scores at depth 24 are accepted. A search that stops before d24
-fails instead of quietly mixing depths. Mate scores stay explicit; mate observations are
+The node limit can stop a search part-way through a depth. The result is the last exact,
+unbounded score, from the deepest completed depth; that depth is recorded with it. A root
+search reports that depth's move, which can differ from bestmove. Changing the node limit
+changes the profile, so its results are cached apart. Mate scores stay explicit; mate observations are
 excluded from the ordinary cp curve rather than converted into invented cp values.
 Finite-depth scores are estimates.
+
+## Evaluating on Google Colab
+
+The curve needs one search per group: its position, limited to the move played. These can
+run on Colab, split between two people. First write the jobs:
+
+```powershell
+npm --prefix experiments/he run jobs -- --run 2024-02-3000mb
+```
+
+This writes `jobs-a.jsonl` (the first 20,000 jobs; `--split` changes it) and `jobs-b.jsonl` (the
+rest) into the run's folder, one job per line: `id`, `positionKey`, the group's first FEN and
+`uci`. A group's FENs differ only in the clocks, so its first FEN stands for all of them.
+The id is the group's number in `groups.jsonl` order.
+
+A later month need not search again what an earlier one has. With `--reuse`, a group whose
+position and move a finished run's `evals.jsonl` has goes to `jobs-reused.jsonl` instead, with
+where its search lies (`from`: run, results file and id there). Name several runs to reuse them all:
+
+```powershell
+npm --prefix experiments/he run jobs -- --run 2024-03-3000mb --reuse 2024-02-3000mb
+```
+
+Each person puts their jobs file in their Google Drive (e.g. `MyDrive/he/`), mounts Drive in a
+Colab notebook, pastes `colab/he_colab.py` into one cell, sets `JOBS` and `RESULTS`, and runs it.
+The script downloads the Stockfish 19 Linux release, checks its SHA-256 and that `bench`
+searches 2,497,913 nodes (the same as the Windows build), then runs one single-threaded engine
+per core with the settings above. Each finished search is one line in `RESULTS`. Drive gets
+the file only when it is closed (tested on 2026-10-23), so the script closes and reopens it
+every 500 results. A runtime that dies loses at most the last 500; running the cell again
+carries on. The score is kept as Stockfish gives it, from Black's view; the import
+flips it to `cpWhite`. Locally, the script gave the same score and depth as `engine.ts` on the same
+jobs.
+
+For a third person, part of `jobs-a.jsonl` can be moved by hand into `jobs-c.jsonl` (2024-03-3000mb:
+the last 10,000 of a's 20,000). Each Colab session records its jobs file's name, so the file must
+keep that name on Drive. `results`, `recheck`, the dot page and MySQL read part c wherever it exists.
+
+Put each person's `results-a.jsonl`, `results-b.jsonl` (and `results-c.jsonl`) in the run's folder, then:
+
+```powershell
+npm --prefix experiments/he run results -- --run 2024-02-3000mb
+npm --prefix experiments/he run recheck -- --run 2024-02-3000mb --engine stockfish-windows-x86-64-universal/stockfish/stockfish-windows-x86-64-universal.exe
+```
+
+`results` checks every line against its job and its session (release SHA-256, bench, settings,
+one binary for both files, legal move, exact score, no missing or conflicting ids), joins each
+job to its group and writes `evals.jsonl` (each group with `cpWhite` or `mateWhite`) and
+`evals-manifest.json`. A group in `jobs-reused.jsonl` takes its eval from the earlier run, whose
+files get the same checks; its row keeps `from`, and all searches must come from one binary.
+`recheck` leaves reused searches to their own run; `recheck --game` finds them there. It writes nothing if any check fails, and never overwrites. `recheck`
+searches 20 fixed random jobs from each file again here; each must give the same line, only faster or slower.
+`recheck --game <id>` instead searches one game's position afresh (never from the cache), prints each
+finished depth live (depth, selective depth, time, nodes, speed, eval for White, the line in SAN), then the
+Colab line above the local one, with the Lichess link and the search's file and id. It exits with code 1
+if they differ.
+
+```powershell
+npm --prefix experiments/he run curve -- --run 2024-02-3000mb
+```
+
+`curve` fits eval → Black's win/draw/loss on `evals.jsonl` (mates left out): an ordered logistic
+model on cpWhite clipped to ±10 pawns, with a straight line, a 5-knot or a 7-knot natural spline.
+It keeps the one with the lowest surprise on held-out groups (5 folds), refits it on 200 seeded
+bootstrap resamples of groups for a 95% range, and writes `curve.json` and `curve.svg`.
+
+`npm --prefix experiments/he run k -- --run 2024-02-3000mb` fits k on the groups with 2+ games
+and a cp eval: a Dirichlet-multinomial centred on the curve's win/draw/loss at each group's eval,
+k searched from 0.5 to 100,000 on a log scale, with a 95% profile-likelihood range (open where it
+runs off the scale). It fits all groups, then by group size, eval and move number, into `k.json`.
+It also fits k as a trend over Black's move, k(move) = k2 × r^(move − 2), on all groups at once
+(each group at its most common move number): k2 and r with their 95% ranges, and k with its
+range at every move from 2 to 15. Its check compares the trend with a free k for each move
+(a likelihood-ratio test at 95%); `holds` says whether the trend does about as well.
+
+Months are pooled into one run, so that a position and move seen in several of them becomes one
+group with their games summed:
+
+```powershell
+npm --prefix experiments/he run pool -- --run 2024-02-03 --from 2024-02-3000mb --from 2024-03-3000mb
+```
+
+`pool` writes `evals.jsonl`, `observations.jsonl` and `pool.json`. Each group keeps its search
+in `from`. It refuses a game found in two runs, and a group whose evals differ between runs
+(write later months' jobs with `--reuse`). `curve`, `k` and `dots` then run on the pool as on
+any run. `load-moves` refuses a pool: its games are loaded with their own months.
+
+## Groups from the Explorer
+
+`explorer` builds groups from the Lichess Explorer's counts instead of our own games, for a better
+k at deep moves (`new-docs/specs/HEK.md`):
+
+```powershell
+npm --prefix experiments/he run explorer -- --run explorer-2023-24
+npm --prefix experiments/he run k -- --run explorer-2023-24 --curve 2024-02-03
+```
+
+It walks the main lines from 1. d4 d5 and 1. e4 c6, most-played position first, with the curve's
+filters where the Explorer has them: 2023-01 to 2024-12, rating groups 1600, 1800 and 2000 (the
+average of both players, 1600–2199), rapid and classical. It follows every move with at least
+`--follow` games (1000), stops after Black's move `--last-move` (15) and makes at most `--calls`
+requests (5000). At each position with Black to move, every move with at least `--min-group` games
+(2) is a group in `groups.jsonl`, with Black's move number; `positions.jsonl` lists every position
+asked and `manifest.json` counts the groups by move and size. `jobs`, Colab and `results` then work
+on the run as on an import.
+
+The Explorer needs a Lichess token. Requests go through the local proxy (`--explorer`, default
+`http://127.0.0.1:55555/lichess`), which adds it; HE never sees the token. Answers are cached in
+`data/explorer-cache/`, named by the request's filters, so a rerun under a new run name, e.g. with a
+bigger `--min-group`, asks nothing new. `--ask-from <move>` asks only from that Black move on;
+earlier positions come from the cache, and one missing there is skipped. It sends a deeper walk's
+calls to deep moves.
+
+An Explorer run has too many groups to search them all. `sample` writes the ones to search as a new
+run: every group with at least `--min-games` games (50), at most `--per-move` at each Black move
+(500), picked by a hash of position and move, so the same sample comes out every time:
+
+```powershell
+npm --prefix experiments/he run sample -- --run explorer-k --from explorer-deep
+npm --prefix experiments/he run jobs -- --run explorer-k --reuse 2024-02-3000mb --reuse 2024-03-3000mb
+```
+
+`k --curve` centres the fit on another run's curve, since an Explorer run has none. k now also fits
+each move number on its own (`perMove`): groups at one move number share no games, while the
+overall fit and the trend count a game once for each position it passes.
+
+## The selector
+
+`select` runs HE's selector (`new-docs/specs/HES.md`) over the app's tree, read-only. Its maths, and the curve's
+spline, live in the app (`src/lib/core/selector.ts`), which the generator uses too (`new-docs/specs/HEG.md`):
+
+```powershell
+npm --prefix experiments/he run select -- --run tree-low --pool 2024-02-03 --k low --engine stockfish-windows-x86-64-universal/stockfish/stockfish-windows-x86-64-universal.exe
+```
+
+For each position with Black to move and a move already chosen, the tree's move is the champion,
+and every other move with Explorer games (1600–2199, rapid and classical) a contender. A contender
+gets k pretend games at the curve's chances for its eval, never better than the champion's, plus
+its real games. It switches only if, 90% sure, it scores at least 1 point more than the champion
+and loses at most 30 cp. A contender that couldn't pass even with the champion's prior and its
+real games is not searched. Evals are HE's Stockfish 19 at 2M nodes, cached. `--k low` takes each move's k from the low end
+of the pool's trend range, `--k best` from its best fit. `--k-run explorer-k` takes the trend from
+that run's `k.json` instead, while the curve still comes from the pool. It writes
+`data/selections/<run>/selections.jsonl` (every position, every contender and why it passed or
+failed) and `selections-summary.json` (switches, their cumProb-weighted share, by move number).
+`--db` points at another SQLite file; the default is `prisma/dev.db`, opened read-only.
+`--margin` (points of score, default 1) and `--confidence` (percent, default 90; 95 before HES.104) change those dials.
+
+Move counts come from the app's Explorer cache, which holds every year. `--months 2023-01..2024-12`
+asks the Explorer for those months only (through the proxy, cached as for the walk), so later
+months stay unseen. `check` then scores each switch on later months: the champion's and the chosen
+move's scores there, the gain with its standard error, and a pooled gain. It writes
+`check-<since>-<until>.json` beside the selection. `--rating 1600` counts one Explorer rating group
+only, and writes `check-<since>-<until>-1600.json`:
+
+```powershell
+npm --prefix experiments/he run select -- --run tree-2023-24 --pool 2024-02-03 --k best --k-run explorer-k --months 2023-01..2024-12 --engine stockfish-windows-x86-64-universal/stockfish/stockfish-windows-x86-64-universal.exe
+npm --prefix experiments/he run check -- --run tree-2023-24 --months 2025-01..2025-12
+```
 
 ## Checks
 
@@ -123,7 +286,7 @@ npx eslint experiments/he
 node --import tsx experiments/he/tests/smoke.ts stockfish-windows-x86-64-universal/stockfish/stockfish-windows-x86-64-universal.exe
 ```
 
-The optional real-engine smoke check evaluates one small legal position at d24,
+The optional real-engine smoke check evaluates one small legal position at 2M nodes,
 confirms a cached result, and exercises a restricted candidate search.
 Unit tests use synthetic games; they are not evidence for the statistical model.
 
@@ -142,11 +305,19 @@ Scripts log in as the `he` user. Set the connection once as a Windows user envir
 then restart terminals and editors so they see it:
 
 ```powershell
-[Environment]::SetEnvironmentVariable("HE_MYSQL_URL", "mysql://he:<password>@127.0.0.1:3306/he", "User")
+[Environment]::SetEnvironmentVariable("HE_MYSQL_URL", "mysql://he:<password>@127.0.0.1:13306/he", "User")
 npm --prefix experiments/he run db-check
 ```
 
 db-check prints the server version, user and database. The password is never stored in the code.
+
+The container publishes MySQL on host port 13306, not 3306: Windows can reserve port ranges for
+itself (`netsh interface ipv4 show excludedportrange protocol=tcp`), and on 2026-10-22 one of them
+held 3306, so Docker could not open it. The container was made with:
+
+```powershell
+docker run -d --name he-mysql --restart unless-stopped -p 127.0.0.1:13306:3306 --env-file <MYSQL_* variables> -v "C:/chess-repertoire/experiments/he/data/mysql:/var/lib/mysql" mysql:8.0
+```
 The mysql2 driver is installed in experiments/he/node_modules, not in the application.
 
 ### Games table
@@ -166,3 +337,22 @@ never reach it: the filter drops them. 50,000 games take about 20 minutes.
 ```powershell
 npm --prefix experiments/he run load -- --run 2024-01-2500mb --limit 100
 ```
+
+### Sampled moves table
+
+load-moves joins a run's observations.jsonl to its evals.jsonl and copies each game's sampled
+move into `sampled_moves`: move number, SAN, UCI, the FEN before it, where its group's search
+lies (id, results file and `search_run`, the earlier run when it was reused), the group's size and the eval (cp_white or mate_white, exactly one, and depth).
+It joins `games` by game_id and reports rows with no game. Repeating it is safe.
+
+```powershell
+npm --prefix experiments/he run load-moves -- --run 2024-02-3000mb
+```
+
+## Dot page
+
+`dots` writes data/runs/<run>/dots.html from observations.jsonl, evals.jsonl and curve.json: every
+game with a cp eval as a dot (eval against Black's result), the fitted curve and its range, and
+per-band real scores. Samples, filters and a clicked game's details (Lichess link at the sampled
+move, search id, FEN, MySQL query) run in the page; it needs no server or internet. The page
+itself is dots-template.html.

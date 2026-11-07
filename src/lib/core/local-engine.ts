@@ -3,7 +3,7 @@ import { Chess } from 'chess.js';
 import { spawn } from 'child_process';
 import * as path from 'path';
 
-import { defaultConfig, computeLocalEngineEvaluationProfile, type Config } from './config';
+import { defaultConfig, computeLocalEngineEvaluationProfile, computeSelectorEngineProfile, type Config } from './config';
 import { parseFullFen } from './fen';
 import { isValidUciMove } from './uci';
 import {
@@ -18,7 +18,7 @@ type StockfishEngine = {
   init(): Promise<void>;
   setoption(name: string, value: string): Promise<void>;
   position(fen: string): Promise<void>;
-  go(params: { depth: number; searchmoves?: string[] }): Promise<{ info?: unknown[] }>;
+  go(params: { nodes: number }): Promise<{ info?: unknown[] }>;
   quit(): Promise<void>;
 };
 
@@ -54,47 +54,136 @@ export class ConsoleDetachedEngine extends Engine {
   }
 
   /**
-   * node-uci writes `go searchmoves <moves> depth <n>`, but Stockfish reads every token
-   * after `searchmoves` as a move, so the depth is lost and the search never ends.
-   * With searchmoves, write the command ourselves with searchmoves last.
+   * EW.09: node-uci reads `score cp 20 lowerbound` as an exact score. A node-limited search
+   * stops part-way through a depth, where bounds are common, so read the lines ourselves.
    */
   async go(params: Record<string, unknown>): Promise<{ info?: unknown[] }> {
-    const searchmoves = params.searchmoves as string[] | undefined;
-    if (!searchmoves?.length) return super.go(params);
-    this.write(`go depth ${params.depth} searchmoves ${searchmoves.join(' ')}`);
-    const lines = await this.getBufferUntil(line => line.startsWith('bestmove '));
-    return { info: lines.map(parseInfoLine).filter(info => info !== null) };
+    const progress = new SearchProgress(Number(params.nodes));
+    const listener = (chunk: string) => progress.read(chunk);
+    const stdout = this.proc?.stdout;
+    if (!stdout) throw new Error('Stockfish is not running');
+    stdout.on('data', listener);
+    const timer = setInterval(() => progress.draw(), 1000);
+    try {
+      this.write(`go nodes ${params.nodes}`);
+      const lines = await this.getBufferUntil(line => line.startsWith('bestmove '));
+      return { info: lines.map(parseInfoLine).filter(info => info !== null) };
+    } finally {
+      clearInterval(timer);
+      stdout.off('data', listener);
+      progress.finish();
+    }
+  }
+
+  /** HEG.21: one root move's search, as raw lines, for the selector's HE-style read. */
+  async goSearchmoves(nodes: number, uci: string): Promise<string[]> {
+    this.write(`go nodes ${nodes} searchmoves ${uci}`);
+    return this.getBufferUntil(line => line.startsWith('bestmove '));
   }
 }
 
-/** One `info` line in the shape node-uci gives: depth, score { unit, value }, pv. Bound scores are skipped. */
-export function parseInfoLine(line: string): { depth: number; score: { unit: string; value: number }; pv: string } | null {
+export type SearchProgressState = { nodes: number; nps: number; depth: number };
+
+const millions = (nodes: number) => `${(nodes / 1_000_000).toFixed(1)}M`;
+const clock = (ms: number) => {
+  const seconds = Math.floor(ms / 1000);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+};
+
+/**
+ * TGL: the live line shown while Stockfish searches. Stockfish reports nodes only when a depth
+ * ends, so between reports the count is estimated from its last speed, marked with `~`.
+ */
+export function formatSearchProgress(state: SearchProgressState, limit: number, elapsedMs: number): string {
+  const estimated = Math.min(limit, Math.max(state.nodes, Math.round(state.nps * elapsedMs / 1000)));
+  const share = Math.floor(100 * estimated / limit);
+  const depth = state.depth > 0 ? `  depth ${state.depth}` : '';
+  const speed = state.nps > 0 ? `  ${millions(state.nps)} nodes/s` : '';
+  return `Stockfish: ~${millions(estimated)} / ${millions(limit)} nodes (${share}%)${depth}  ${clock(elapsedMs)}${speed}`;
+}
+
+/** TGL: the log line after each search. */
+export function formatSearchSummary(state: SearchProgressState, elapsedMs: number): string {
+  return `[STOCKFISH] ${millions(state.nodes)} nodes; depth ${state.depth}; ${clock(elapsedMs)}; ${millions(state.nps)} nodes/s`;
+}
+
+/** Reads Stockfish's info lines as they arrive. The live line goes to the terminal only, never the log file. */
+class SearchProgress {
+  private readonly startedAt = Date.now();
+  private readonly state: SearchProgressState = { nodes: 0, nps: 0, depth: 0 };
+  private backlog = '';
+  private drawn = false;
+
+  constructor(private readonly limit: number) {}
+
+  read(chunk: string): void {
+    this.backlog += chunk;
+    const lines = this.backlog.split('\n');
+    this.backlog = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line.startsWith('info ')) continue;
+      const depth = /\bdepth (\d+)/.exec(line);
+      const nodes = /\bnodes (\d+)/.exec(line);
+      const nps = /\bnps (\d+)/.exec(line);
+      if (depth) this.state.depth = Number(depth[1]);
+      if (nodes) this.state.nodes = Number(nodes[1]);
+      if (nps) this.state.nps = Number(nps[1]);
+    }
+  }
+
+  draw(): void {
+    if (!process.stdout.isTTY) return;
+    process.stdout.write(`\r${formatSearchProgress(this.state, this.limit, Date.now() - this.startedAt).padEnd(100)}`);
+    this.drawn = true;
+  }
+
+  finish(): void {
+    if (this.drawn) process.stdout.write(`\r${' '.repeat(100)}\r`);
+    if (this.state.nodes > 0) console.log(formatSearchSummary(this.state, Date.now() - this.startedAt));
+  }
+}
+
+/** One `info` line in the shape node-uci gives: depth, score { unit, value }, pv, and nodes when given. Bound scores are skipped. */
+export function parseInfoLine(line: string): { depth: number; score: { unit: string; value: number }; pv: string; nodes?: number } | null {
   if (!line.startsWith('info ') || /\b(?:lowerbound|upperbound)\b/.test(line)) return null;
   const depth = /\bdepth (\d+)/.exec(line);
   const score = /\bscore (cp|mate) (-?\d+)/.exec(line);
   const pv = / pv (.+)$/.exec(line);
+  const nodes = /\bnodes (\d+)/.exec(line);
   if (!depth || !score || !pv) return null;
-  return { depth: Number(depth[1]), score: { unit: score[1], value: Number(score[2]) }, pv: pv[1].trim() };
+  return {
+    depth: Number(depth[1]),
+    score: { unit: score[1], value: Number(score[2]) },
+    pv: pv[1].trim(),
+    ...(nodes ? { nodes: Number(nodes[1]) } : {})
+  };
 }
 
 export type TrustedLocalEvaluation = LocalEngineEvaluation & {
   san: string;
+  /** DB.32: the deepest completed depth (EW.09); null if Stockfish gave none or the cached eval predates it. */
+  depth: number | null;
+  /** SC.20: the node count on the line kept; null if Stockfish gave none or the cached eval predates it. */
+  nodes: number | null;
+  /** SC.20: the line kept, UCI moves with single spaces; null if the cached eval predates it. */
+  pv: string | null;
 };
 
 export type LocalSearchSettings = {
-  depth: number;
+  nodes: number;
+  threads: number;
+  hashMb: number;
   multiPv: number;
 };
 
 export type LocalSearchRunner = (
   fullFen: string,
-  settings: LocalSearchSettings,
-  expectedUci?: string
+  settings: LocalSearchSettings
 ) => Promise<TrustedLocalEvaluation>;
 
 function assertSearchSettings(settings: LocalSearchSettings): void {
-  if (!Number.isInteger(settings.depth) || settings.depth < 1) {
-    throw new Error('Invalid Local Engine depth');
+  for (const [name, value] of [['nodes', settings.nodes], ['threads', settings.threads], ['hash', settings.hashMb]] as const) {
+    if (!Number.isInteger(value) || value < 1) throw new Error(`Invalid Local Engine ${name}`);
   }
   if (settings.multiPv !== 1) {
     throw new Error('Trusted Local Deep searches require MultiPV 1');
@@ -119,18 +208,15 @@ function assertLegalRoot(fullFen: string, uci: string): string {
 }
 
 type CollectedEvaluation = TrustedLocalEvaluation & {
-  depth: number | null;
   sequence: number;
 };
 
 export function collectLocalSearchUpdates(
   fullFenInput: string,
-  rawInfo: unknown,
-  expectedUci?: string
+  rawInfo: unknown
 ): CollectedEvaluation[] {
   const fullFen = parseFullFen(fullFenInput);
   if (fullFen !== fullFenInput) throw new Error('Local Engine search requires canonical FullFen');
-  if (expectedUci !== undefined) assertLegalRoot(fullFen, expectedUci);
   if (!Array.isArray(rawInfo)) throw new Error('Local Engine returned malformed search information');
 
   const multiplier = fullFen.split(' ')[1] === 'b' ? -1 : 1;
@@ -146,10 +232,8 @@ export function collectLocalSearchUpdates(
       throw new Error('Local Engine returned an incomplete evaluation update');
     }
 
-    const uci = info.pv.trim().split(/\s+/)[0];
-    if (expectedUci !== undefined && uci !== expectedUci) {
-      throw new Error(`Invariant violation: Local Stockfish searchmoves requested ${expectedUci} but returned ${uci}`);
-    }
+    const pv = info.pv.trim().split(/\s+/).join(' ');
+    const uci = pv.split(' ')[0];
     const san = assertLegalRoot(fullFen, uci);
     const value = info.score.value;
     let cp: number | null = null;
@@ -172,7 +256,10 @@ export function collectLocalSearchUpdates(
     const depth = typeof info.depth === 'number' && Number.isInteger(info.depth) && info.depth >= 0
       ? info.depth
       : null;
-    const evaluation: CollectedEvaluation = { uci, san, cp, mate, depth, sequence };
+    const nodes = typeof info.nodes === 'number' && Number.isInteger(info.nodes) && info.nodes >= 0
+      ? info.nodes
+      : null;
+    const evaluation: CollectedEvaluation = { uci, san, cp, mate, depth, nodes, pv, sequence };
     const previous = updates.get(uci);
     if (!previous ||
         (depth !== null && previous.depth !== null ? depth >= previous.depth : sequence > previous.sequence)) {
@@ -180,13 +267,23 @@ export function collectLocalSearchUpdates(
     }
   });
 
-  if (expectedUci !== undefined && !updates.has(expectedUci)) {
-    throw new Error(`Local Engine returned no usable result for expected root ${expectedUci}`);
-  }
   if (updates.size === 0) throw new Error('Local Engine returned zero usable root evaluations');
   return [...updates.values()];
 }
 
+/**
+ * EW.09: when the node limit stops the search part-way through a depth, Stockfish prints one last
+ * line for that unfinished depth, with no bound mark. It is the only line at or past the limit.
+ */
+function dropStopLine(rawInfo: unknown, nodeLimit: number): unknown {
+  if (!Array.isArray(rawInfo)) return rawInfo;
+  return rawInfo.filter(info => !(typeof info?.nodes === 'number' && info.nodes >= nodeLimit));
+}
+
+/**
+ * EW.09: bound scores and the stop line are already dropped, so the deepest exact score left is
+ * the deepest completed depth's.
+ */
 function selectFinalUnrestrictedUpdate(evaluations: CollectedEvaluation[]): CollectedEvaluation {
   const hasReliableDepths = evaluations.every(evaluation => evaluation.depth !== null);
   if (!hasReliableDepths) {
@@ -202,33 +299,27 @@ function selectFinalUnrestrictedUpdate(evaluations: CollectedEvaluation[]): Coll
 export async function runTrustedLocalSearch(
   fullFenInput: string,
   settings: LocalSearchSettings,
-  expectedUci?: string,
   engineFactory: LocalEngineFactory = enginePath => new ConsoleDetachedEngine(enginePath) as StockfishEngine
 ): Promise<TrustedLocalEvaluation> {
   const fullFen = parseFullFen(fullFenInput);
   if (fullFen !== fullFenInput) throw new Error('Local Engine search requires canonical FullFen');
   assertSearchSettings(settings);
-  if (expectedUci !== undefined) assertLegalRoot(fullFen, expectedUci);
 
   const enginePath = path.resolve(process.cwd(), 'bin', 'stockfish.exe');
   const engine = engineFactory(enginePath);
   let primaryError: unknown = null;
   try {
     await engine.init();
+    // EW.09: a new process per search, so the hash starts empty and earlier searches never matter.
+    await engine.setoption('Threads', settings.threads.toString());
+    await engine.setoption('Hash', settings.hashMb.toString());
     await engine.setoption('MultiPV', settings.multiPv.toString());
     await engine.position(fullFen);
-    const goParams: { depth: number; searchmoves?: string[] } = { depth: settings.depth };
-    if (expectedUci !== undefined) goParams.searchmoves = [expectedUci]; // node-uci joins the list itself
-    const result = await engine.go(goParams);
-    const evaluations = collectLocalSearchUpdates(fullFen, result?.info, expectedUci);
-    const trusted = (evaluation: CollectedEvaluation): TrustedLocalEvaluation => ({
-      uci: evaluation.uci,
-      san: evaluation.san,
-      cp: evaluation.cp,
-      mate: evaluation.mate
-    });
-    if (expectedUci !== undefined) return trusted(evaluations.find(item => item.uci === expectedUci)!);
-    return trusted(selectFinalUnrestrictedUpdate(evaluations));
+    const result = await engine.go({ nodes: settings.nodes });
+    const best = selectFinalUnrestrictedUpdate(
+      collectLocalSearchUpdates(fullFen, dropStopLine(result?.info, settings.nodes))
+    );
+    return { uci: best.uci, san: best.san, cp: best.cp, mate: best.mate, depth: best.depth, nodes: best.nodes, pv: best.pv };
   } catch (error) {
     primaryError = error;
     throw error;
@@ -243,9 +334,95 @@ export async function runTrustedLocalSearch(
 
 function deepLocalSettings(config: Config): LocalSearchSettings {
   return {
-    depth: config.localStockfishDepth,
+    nodes: config.localStockfishNodes,
+    threads: config.localStockfishThreads,
+    hashMb: config.localStockfishHashMb,
     multiPv: config.localStockfishMultiPv
   };
+}
+
+// --- HEG.21: the selector's prior evals, searched and read as HE's were ---
+
+export type SelectorEvaluation = { cp: number | null; mate: number | null; depth: number | null };
+export type SelectorSearchSettings = { nodes: number; hashMb: number };
+export type SelectorSearchRunner = (fullFen: string, uci: string, settings: SelectorSearchSettings) => Promise<SelectorEvaluation>;
+
+/**
+ * HE's read (`experiments/he/engine.ts`): the last exact, unbounded score whose first move is the
+ * searched one. Unlike EW.09 it keeps the stop line, because the curve was fitted on evals read
+ * this way. White's point of view, as DB.15.
+ */
+export function parseSelectorSearch(lines: readonly string[], fullFen: string, uci: string): SelectorEvaluation {
+  const best = /^bestmove ([a-h][1-8][a-h][1-8][qrbn]?)(?:\s|$)/.exec(lines.at(-1) ?? '')?.[1];
+  if (best !== uci) throw new Error(`Selector search did not return the requested root move ${uci} at ${fullFen}`);
+  const multiplier = fullFen.split(' ')[1] === 'b' ? -1 : 1;
+  for (const line of [...lines].reverse()) {
+    if (!line.startsWith('info ') || /\b(?:lowerbound|upperbound)\b/.test(line)) continue;
+    const depth = Number(/\bdepth (\d+)\b/.exec(line)?.[1]);
+    const score = /\bscore (cp|mate) (-?\d+)\b/.exec(line);
+    const pv = /\bpv (\S+)/.exec(line)?.[1];
+    const multiPv = Number(/\bmultipv (\d+)\b/.exec(line)?.[1] ?? '1');
+    if (!depth || !score || !pv || multiPv !== 1) continue;
+    if (pv !== uci) break;
+    const value = Number(score[2]) * multiplier;
+    if (score[1] === 'mate' && value === 0) throw new Error(`Invalid selector mate score at ${fullFen}`);
+    return { cp: score[1] === 'cp' ? (value === 0 ? 0 : value) : null, mate: score[1] === 'mate' ? value : null, depth };
+  }
+  throw new Error(`Selector search gave no exact score for ${uci} at ${fullFen}`);
+}
+
+type SelectorEngine = {
+  init(): Promise<void>;
+  setoption(name: string, value: string): Promise<void>;
+  position(fen: string): Promise<void>;
+  goSearchmoves(nodes: number, uci: string): Promise<string[]>;
+  quit(): Promise<void>;
+};
+
+export async function runSelectorSearch(
+  fullFenInput: string,
+  uci: string,
+  settings: SelectorSearchSettings,
+  engineFactory: (enginePath: string) => SelectorEngine = enginePath => new ConsoleDetachedEngine(enginePath) as unknown as SelectorEngine
+): Promise<SelectorEvaluation> {
+  const fullFen = parseFullFen(fullFenInput);
+  if (fullFen !== fullFenInput) throw new Error('Selector search requires canonical FullFen');
+  assertLegalRoot(fullFen, uci);
+  const engine = engineFactory(path.resolve(process.cwd(), 'bin', 'stockfish.exe'));
+  let primaryError: unknown = null;
+  try {
+    await engine.init();
+    // A new process per search, so the hash starts empty, as HE's ucinewgame and Clear Hash did.
+    await engine.setoption('Threads', '1');
+    await engine.setoption('Hash', settings.hashMb.toString());
+    await engine.setoption('MultiPV', '1');
+    await engine.position(fullFen);
+    return parseSelectorSearch(await engine.goSearchmoves(settings.nodes, uci), fullFen, uci);
+  } catch (error) {
+    primaryError = error;
+    throw error;
+  } finally {
+    try {
+      await engine.quit();
+    } catch (cleanupError) {
+      if (primaryError === null) throw cleanupError;
+    }
+  }
+}
+
+/** HEG.21: a move's 2M eval, from EngineCache under the selector's profile, or searched once. */
+export async function getOrCreateSelectorEval(
+  fullFen: string,
+  uci: string,
+  config: Config = defaultConfig,
+  runner: SelectorSearchRunner = runSelectorSearch
+): Promise<SelectorEvaluation & { reused: boolean }> {
+  const profile = computeSelectorEngineProfile(config);
+  const cached = await readLocalEngineCandidate(fullFen, uci, profile);
+  if (cached) return { cp: cached.cp, mate: cached.mate, depth: cached.depth ?? null, reused: true };
+  const evaluation = await runner(fullFen, uci, { nodes: config.selectorNodes, hashMb: config.selectorHashMb });
+  await saveLocalEngineCandidate(fullFen, uci, profile, { uci, cp: evaluation.cp, mate: evaluation.mate, depth: evaluation.depth });
+  return { ...evaluation, reused: false };
 }
 
 export async function getOrCreateLocalBaseline(
@@ -258,7 +435,7 @@ export async function getOrCreateLocalBaseline(
   if (cached) {
     return {
       evaluationProfile,
-      evaluation: { uci: cached.uci, san: cached.san, cp: cached.cp, mate: cached.mate },
+      evaluation: { uci: cached.uci, san: cached.san, cp: cached.cp, mate: cached.mate, depth: cached.depth, nodes: cached.nodes, pv: cached.pv },
       reused: true
     };
   }
@@ -267,36 +444,7 @@ export async function getOrCreateLocalBaseline(
   const saved = await saveLocalEngineBaseline(fullFen, evaluationProfile, evaluation);
   return {
     evaluationProfile,
-    evaluation: { uci: saved.bestUci, san: saved.san!, cp: saved.cp, mate: saved.mate },
-    reused: false
-  };
-}
-
-export async function getOrCreateLocalCandidate(
-  fullFen: string,
-  candidateUci: string,
-  config: Config = defaultConfig,
-  runner: LocalSearchRunner = runTrustedLocalSearch
-): Promise<{ evaluationProfile: string; evaluation: TrustedLocalEvaluation; reused: boolean }> {
-  assertLegalRoot(parseFullFen(fullFen), candidateUci);
-  const evaluationProfile = computeLocalEngineEvaluationProfile(config);
-  const cached = await readLocalEngineCandidate(fullFen, candidateUci, evaluationProfile);
-  if (cached) {
-    return {
-      evaluationProfile,
-      evaluation: { uci: cached.uci, san: cached.san, cp: cached.cp, mate: cached.mate },
-      reused: true
-    };
-  }
-
-  const evaluation = await runner(fullFen, deepLocalSettings(config), candidateUci);
-  if (evaluation.uci !== candidateUci) {
-    throw new Error(`Invariant violation: Local Stockfish searchmoves requested ${candidateUci} but returned ${evaluation.uci}`);
-  }
-  const saved = await saveLocalEngineCandidate(fullFen, candidateUci, evaluationProfile, evaluation);
-  return {
-    evaluationProfile,
-    evaluation: { uci: saved.candidateUci, san: saved.san!, cp: saved.cp, mate: saved.mate },
+    evaluation: { uci: saved.bestUci, san: saved.san!, cp: saved.cp, mate: saved.mate, depth: saved.depth, nodes: saved.nodes, pv: saved.pv },
     reused: false
   };
 }

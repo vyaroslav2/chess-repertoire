@@ -180,3 +180,22 @@ search slower.
 **cp (centipawn).** 100 cp = 1 pawn. Mates are shown as `M+3` (White mates in
 3) or `M-3` (Black mates in 3). Positions with a mate are left out of the
 comparison.
+
+# node_compare.py
+
+Compares two node-capped `depth_drift.py` runs: a shallow search against a
+deep one. `depth_drift.py` compares depths within one search, so it cannot do
+this itself. Run it twice with `--multipv 1`, an unreachable `--depths 99` and
+a different `--max-nodes`, each with its own `--cache` and `--out` (a new
+setting would otherwise wipe the main cache). Each position then keeps the
+deepest depth completed before the cap.
+
+```
+python scripts/depth_drift.py --depths 99 --multipv 1 --threads 1 --hash-mb 64 --max-nodes 2000000 --cache scripts/temp/nodes_2m.db --out scripts/temp/nodes_2m.json --only-marked
+python scripts/depth_drift.py --depths 99 --multipv 1 --threads 1 --hash-mb 256 --max-nodes 50000000 --cache scripts/temp/nodes_50m.db --out scripts/temp/nodes_50m.json --only-marked
+python scripts/node_compare.py scripts/temp/nodes_2m.json scripts/temp/nodes_50m.json
+```
+
+It prints how often the best move changed, the average change with its
+direction, a growth figure (the slope of deep evals against shallow ones; 1.00 = no growth) and the
+same change bands as `depth_drift.py`. Mates are left out.

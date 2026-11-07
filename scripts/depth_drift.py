@@ -54,15 +54,51 @@ SKIP_IN_CHECK = True           # positions in check have few moves and can stall
 
 # Positions: FENS first, then positions sampled from LINES (SAN, from the start).
 # Duplicates are analysed once. --fen on the command line replaces both.
-FENS = ["rnbqkbnr/pp2pp1p/2pp2p1/8/3PP3/2N2N2/PPP2PPP/R1BQKB1R b KQkq - 1 4"]
-# 5 random 10-ply lines from the "Black Universal Repertoire" in prisma/dev.db.
-LINES = [
-    "e4 c6 d4 d5 exd5 Qxd5 Nf3 Qa5+ Nc3 Bf5",
-    "e4 c6 d4 d5 e5 a6 Bd3 g6 c3 c5",
-    "d4 d5 Nf3 c6 e3 Bg4 Be2 Nd7 Nbd2 e6",
-    "d4 d5 e3 Bf5 Nf3 e6 a3 Nd7 b4 c6",
-    "e4 c6 Nf3 g6 Bc4 d5 exd5 cxd5 Bb3 Nc6",
+# 30 HE positions from 2024-01-2500mb groups.jsonl (random, seed 1): the group's first FEN
+# after the move played. White to move, so the eval is the eval of Black's move (the curve's x).
+FENS = [
+    "r2qk2r/p4pp1/1p1bpn1p/2ppBb2/3P4/2P1P2P/PP2BPP1/RN1Q1RK1 w kq - 1 11",  # 10...Bd6, 1 game
+    "r4rk1/ppp3pp/3q1p2/3p1p2/3Pn3/2P1PN2/PP3PPP/R2QK2R w KQ - 0 13",  # 12...Qxd6, 1 game
+    "r2q1rk1/pp1nbppp/4pn2/3p2Bb/3P4/2P2N1P/PP1NBPP1/R2Q1RK1 w - - 1 11",  # 10...Bh5, 1 game
+    "r2qkbnr/ppp1pppp/2n5/3pN2b/3P1B2/8/PPP1PPPP/RN1QKB1R w KQkq - 6 5",  # 4...Bh5, 1 game
+    "3r2nr/p1pk1ppp/Q1p5/8/2P1N1b1/6P1/Pq2PPBP/R3K2R w KQ - 2 14",  # 13...Kd7, 1 game
+    "r1bqkbnr/ppp2ppp/2n1p3/3p4/3P4/2N2N2/PPP1PPPP/R1BQKB1R w KQkq - 0 4",  # 3...e6, 1 game
+    "r1bqkb1r/ppp2ppp/2n1pn2/3p4/2PP1B2/2N5/PP2PPPP/R2QKBNR w KQkq - 4 5",  # 4...Nf6, 1 game
+    "r1bq1rk1/1ppnppb1/p4np1/3p2p1/3P3P/2N1P3/PPPBQP2/2KR1BNR w - - 0 10",  # 9...hxg5, 1 game
+    "rnbqkb1r/pp3ppp/2p1pn2/3p4/2PP4/P3P3/1P3PPP/RNBQKBNR w KQkq - 1 5",  # 4...Nf6, 1 game
+    "r1bqkbnr/ppp1pppp/2n5/8/Q1pP4/8/PP2PPPP/RNB1KBNR w KQkq - 2 4",  # 3...Nc6, 2 games
+    "r2qkbnr/ppp1pbpp/2n2p2/3p4/3P1B2/2P1PN2/PP3PPP/RN1QKB1R w KQkq - 1 6",  # 5...Bf7, 1 game
+    "r1bqk2r/ppp2ppp/2nb1n2/8/2BP4/5N2/PP3PPP/RNBQ1RK1 w kq - 1 8",  # 7...Bd6, 1 game
+    "r2qkb1r/pp3ppp/4p3/3pPn2/3Q1P2/2P5/PP3PBP/RN2K2R w KQkq - 1 12",  # 11...Nf5, 1 game
+    "r1bqkbnr/ppp2ppp/2n5/3p4/3P4/2N5/PP2PPPP/R1BQKBNR w KQkq - 2 5",  # 4...Nc6, 1 game
+    "rn1qkbnr/pppbp1pp/5p2/8/Q1pP1B2/8/PP2PPPP/RN2KBNR w KQkq - 2 5",  # 4...Bd7, 1 game
+    "r1bqk2r/pp1n1pp1/2n1p2p/3pP3/2p2B2/2P1P2P/PPBN1PP1/R2QK2R w KQkq - 1 12",  # 11...Nd7, 1 game
+    "2r2rk1/5ppp/1n2p3/5b2/1qpPn3/2N1PN2/PP3PPP/R2QKB1R w KQ - 5 15",  # 14...Qb4, 1 game
+    "r3k2r/ppqnbp1p/2pp1n2/3Pp1pb/1P2P3/2N2N1P/PBP2PP1/R2QRBK1 w kq - 0 13",  # 12...g5, 1 game
+    "rn1qk2r/ppp1bppp/8/3pP3/4n1b1/P1P1PN2/1P3PPP/RNBQKB1R w KQkq - 1 7",  # 6...Bg4, 1 game
+    "r2qk2r/1p2bppp/p1n1pn2/8/2QP1B2/P1N2N2/1P3PPP/R3K2R w KQkq - 1 12",  # 11...Nc6, 1 game
+    "r3k2r/pp3ppp/q1p1pn2/4Q3/1b6/2NP2PP/PP1B1PB1/R4RK1 w kq - 1 15",  # 14...Nf6, 1 game
+    "r1bqrnk1/pp1n2pp/2pbpp2/3pN2Q/3P1P2/1P1BP3/PBPN2PP/R4RK1 w - - 0 12",  # 11...f6, 1 game
+    "r4rk1/pp1qnpb1/2n1p1p1/3p3p/3P1P2/P1NQB1NP/1PP3P1/4RRK1 w - - 0 15",  # 14...h5, 1 game
+    "2r1k2r/pp2bppp/1q2pn2/1b6/2p2B2/3QPN1P/PP1N1PP1/R4RK1 w k - 0 15",  # 14...dxc4, 1 game
+    "r3k2r/pppqbppp/2n1bn2/3p2B1/3P4/2NBP3/PP2NPPP/R2QK2R w KQkq - 5 9",  # 8...Qd7, 1 game
+    "r2qkb1r/2p1ppp1/p1n3b1/1p2P3/3P1B1p/1BP2N2/P4PPP/R2QR1K1 w kq - 0 13",  # 12...h4, 1 game
+    "rnbqkb1r/pp2pppp/5n2/2pp4/3P4/3BP3/PPP2PPP/RNBQK1NR w KQkq - 0 4",  # 3...c5, 3 games
+    "rnbqkbnr/5ppp/p3p3/1ppp4/3P1B2/3BPN2/PPP2PPP/RN1QK2R w KQkq - 0 6",  # 5...c5, 1 game
+    "r2q1r1k/pppn1ppB/2n1p3/3p2P1/3P4/2P2P2/PP4P1/RN1QK2R w KQ - 3 14",  # 13...Kh8, 1 game
+    "r1bq1rk1/pp1nbpp1/2p1pn1p/3p4/2PP3B/1QNBP3/PP3PPP/R3K1NR w KQ - 2 9",  # 8...Nbd7, 1 game
 ]
+LINES = []
+# The earlier set: 1 FEN and 5 repertoire lines (20 positions, Black to move).
+# FENS = ["rnbqkbnr/pp2pp1p/2pp2p1/8/3PP3/2N2N2/PPP2PPP/R1BQKB1R b KQkq - 1 4"]
+# # 5 random 10-ply lines from the "Black Universal Repertoire" in prisma/dev.db.
+# LINES = [
+#     "e4 c6 d4 d5 exd5 Qxd5 Nf3 Qa5+ Nc3 Bf5",
+#     "e4 c6 d4 d5 e5 a6 Bd3 g6 c3 c5",
+#     "d4 d5 Nf3 c6 e3 Bg4 Be2 Nd7 Nbd2 e6",
+#     "d4 d5 e3 Bf5 Nf3 e6 a3 Nd7 b4 c6",
+#     "e4 c6 Nf3 g6 Bc4 d5 exd5 cxd5 Bb3 Nc6",
+# ]
 # LINES = [
 #     "e4 c6 Nf3 g6 d4 d6 Nc3 Nd7",
 #     "d4 Nf6 c4 e6 Nf3 b6 g3 Ba6 b3 Bb4+ Bd2 Be7",

@@ -10,6 +10,13 @@
       ],
       "port": 3001,
       "autoPort": true
+    },
+    {
+      "name": "he-runs",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-u", "-m", "http.server", "8791", "--bind", "127.0.0.1", "--directory", "experiments/he/data/runs"],
+      "port": 8791,
+      "autoPort": false
     }
   ]
 }

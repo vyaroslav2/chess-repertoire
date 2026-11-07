@@ -4,25 +4,35 @@ tags:
 ---
 # EW — Engine Response
 
-EW receives a position after White's move (Black to play) and selects Black's single repertoire move: local Stockfish 19's top move, unless a hardcoded response applies. Human games play no part in Black's choice.
+EW receives a position after White's move (Black to play) and selects Black's single repertoire move: local Stockfish 19's top move, unless a hardcoded response applies. Human games play no part in Black's choice, unless `humanEvidence` is on: then the selector may replace Stockfish's move (EW.14, [[HEG]]). Each card costs two searches: the position after White's move (EW.09) and the position after Black's (EW.11).
 
 EW.01 **Receive Position**: Accept the position FEN after White's move from [[HM|HM.07]]. Go to EW.13.
 
 EW.13 **Hardcoded response?** Does the route so far match a line in `hardcodedBlackResponses`[^1], up to and including White's last move?
-* yes `-->` take Black's move from that line. Record `selectionMethod = Hardcoded`, `moveOrigin = Hardcoded Move` ([[DB|DB.14]]). Local Stockfish evaluates the baseline move and the hardcoded move, and caches both. The move keeps Stockfish's eval, because every node keeps an eval. Stockfish never rejects a hardcoded move. Go to EW.10.
+* yes `-->` take Black's move from that line. Record `selectionMethod = Hardcoded`, `moveOrigin = Hardcoded Move` ([[DB|DB.14]]). EW.09 still runs: its search gives White's move its eval ([[HM|HM.09]]) and its top move sets `engineRank`. The hardcoded move is evaluated like any Black move (EW.11). Stockfish never rejects a hardcoded move. Go to EW.09.
 * no `-->` go to EW.09.
 
 The match is on the route (the moves played), not the position. A different route that transposes into the same position does not get the hardcoded move.
 
 EW.09 **Local Stockfish**:
 * Check `EngineCache` first, for this `fullFen` under the local Stockfish cache profile ([[DB|DB.32]]). A hit is used as-is; only a miss is run.
-* Run local Stockfish 19 (`localStockfishDepth`[^1], `localStockfishMultiPv`[^1]) on the position. Its top move is the baseline.
-* Store the result in the local `EngineCache` table with its corresponding local engine cache profile.
-* The baseline is Black's repertoire move. Record `moveOrigin = Engine Move`.
+* Run local Stockfish 19 on the position: `localStockfishNodes`, `localStockfishThreads`, `localStockfishHashMb`, `localStockfishMultiPv`[^1]. No depth or time limit.
+* The node limit nearly always stops the search part-way through a depth. That unfinished depth has looked at only some moves, and its scores are often only bounds. Ignore it, and ignore Stockfish's `bestmove`. Take the score and the top move of the deepest completed depth, so the move and its eval come from one complete search. HE uses the same rule ([[HE]]).
+	* #fixed 2026-10-24. The code didn't follow this rule. When the node limit stops the search, Stockfish prints one last line. It carries the unfinished depth's number and no bound mark. Usually it repeats the previous depth's result. Sometimes it holds the first move's score from the unfinished depth, before the other moves are checked. `selectFinalUnrestrictedUpdate` (`local-engine.ts`) took it as the deepest line. Example (2026-10-24, 10M nodes): after 1.e4 the code stored depth 36, −15 cp, which was depth 35's result; `go depth 36` gives −17 cp.
+	* Fix: `dropStopLine` (`local-engine.ts`) ignores a line whose `nodes` are at or above the limit. Then the result is the last finished depth's, and `go depth D` (D = that depth) gives the same move and eval. Evals already in `EngineCache` were made the old way.
+	* #note HE's search (`experiments/he/engine.ts`) still takes the stop line.
+* Store the result in the local `EngineCache` table with its corresponding local engine cache profile, and the depth it came from ([[DB|DB.32]]).
+* Its top move is the baseline. Its score is the eval of White's move ([[HM|HM.09]]).
+* Unless EW.13 chose a hardcoded move, the baseline is Black's repertoire move. Record `moveOrigin = Engine Move`.
+* Go to EW.14.
 
-EW.10 **Record**: on the chosen move ([[DB|DB.14]]), record its `cp` or `mate`, the `source` of that eval, `selectionMethod`, `moveOrigin` and `engineRank`. The eval is local Stockfish's, in White's point of view ([[DB|DB.15]]). This holds for both paths: the baseline and a hardcoded response (EW.13).
+EW.14 **Human evidence** ([[HEG]]). Only with `humanEvidence` on, no hardcoded move, and Black's move 2 or later. The baseline is the champion. The selector judges every other move with games in `selectorMonths` (HEG.11). A switch makes the chosen move Black's move: `selectionMethod = Human evidence`, `moveOrigin = Human Move`, `engineRank = null`. Either way, what it judged is recorded (HEG.40). Go to EW.11.
 
-EW.12 **Return**: the chosen move must carry exactly one of `cp` or `mate` ([[DB|DB.14]]). If it carries neither, hard error. Apply Black's move to the position, giving a new position with White to move, and create its node with `routeProb = parent.routeProb` and `cumProb = parent.cumProb`. Black plays one move, so everything that reaches the parent passes to this node. Hand that node to [[RE.excalidraw|RE]], which decides whether the route ends and, if not, pushes the node onto the [[S3]] queue ([[RE.excalidraw|RE.09]]).
+EW.11 **Evaluate Black's move**: apply it, and search the position it reaches, White to move, as in EW.09 (cache first, same profile, same rule for a stopped search). Its score is the eval of Black's move ([[DB|DB.11]]). The same for the baseline and a hardcoded move. A move that ends the game by checkmate or stalemate is not searched: checkmate `mate = -1`, from EW.09's search; stalemate `cp = 0`. Go to EW.10.
+
+EW.10 **Record**: on the chosen move ([[DB|DB.14]]), record its `cp` or `mate` (EW.11) and its `depth` ([[DB|DB.11]]), the `source` of that eval, `selectionMethod`, `moveOrigin` and `engineRank`. The eval is local Stockfish's, in White's point of view ([[DB|DB.15]]). This holds for every path: the baseline, a hardcoded response (EW.13) and a switch (EW.14).
+
+EW.12 **Return**: the chosen move must carry exactly one of `cp` or `mate` ([[DB|DB.11]]). If it carries neither, hard error. Apply Black's move to the position, giving a new position with White to move, and create its node with `routeProb = parent.routeProb` and `cumProb = parent.cumProb`. Black plays one move, so everything that reaches the parent passes to this node. Hand that node to [[RE.excalidraw|RE]], which decides whether the route ends and, if not, pushes the node onto the [[S3]] queue ([[RE.excalidraw|RE.09]]).
 
 
 

@@ -5,6 +5,7 @@ import { prisma } from "../db/operations";
 import { defaultConfig } from "./config";
 import { generateRepertoire } from "./generator";
 import { probabilityBalance, runCascade, type CascadeRunState } from "./cascade";
+import type { RunEvent } from "./run-events";
 
 const START_FEN = new Chess().fen();
 const near = (actual: number, expected: number) => Math.abs(actual - expected) < defaultConfig.probabilityTolerance;
@@ -84,7 +85,7 @@ describe("TR", () => {
         return {
           selectedUci: reply.lan, selectedMoveSan: reply.san, cp: -10, mate: null,
           source: "Local Stockfish 19" as const, selectionMethod: "Baseline" as const, moveOrigin: "Engine Move" as const,
-          engineRank: 1
+          engineRank: 1, baselineCp: -10, baselineMate: null
         };
       };
     }
@@ -97,8 +98,10 @@ describe("TR", () => {
         [play(["Nf3", "e5"])]: [["e4", 100]]
       };
       const calls: string[] = [];
+      const events: RunEvent[] = [];
       const log = await captureLog(() => generateRepertoire(START_FEN, {
         repertoireId, ...common,
+        recordEvent: event => events.push(event),
         responseEvaluator: evaluator(calls, { [play(["e4"])]: "e5", [play(["Nf3"])]: "e5", [play(["e4", "e5", "Nf3"])]: "Nc6" }) as any,
         fetchDatabases: (async (fen: string) => {
           const moves = whiteMoves[boardAndTurn(fen)];
@@ -116,8 +119,20 @@ describe("TR", () => {
       if (log.error) throw log.error;
       const owner = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, displayPgn: "e4 e5 Nf3" } });
       const pointer = await prisma.repertoireNode.findFirstOrThrow({ where: { repertoireId, displayPgn: "Nf3 e5 e4" } });
-      return { ...log, calls, owner, pointer };
+      return { ...log, calls, owner, pointer, events };
     }
+
+    it("TGL: a transposition records its cascade: the gain the pointer handed over and the nodes touched", async () => {
+      const { events, pointer } = await runTransposition();
+      const recorded = events.find(event => event.type === "transposition");
+      assert.ok(recorded?.cascade);
+      const move = await prisma.repertoireMove.findFirstOrThrow({ where: { toNodeId: pointer.id } });
+      assert.equal(recorded.whiteMoveId, move.id);
+      assert.equal(recorded.cascade.cascadeId, "C01");
+      assert.ok(near(recorded.cascade.gain, 0.4));
+      assert.ok(near(recorded.cascade.ownerTo! - recorded.cascade.ownerFrom!, 0.4));
+      assert.ok(recorded.cascade.touched >= 1);
+    });
 
     it("TR.02 TR.03 TR.06 TR.07: the first node to reach a positionKey owns it", async () => {
       const { owner, pointer } = await runTransposition();

@@ -8,6 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "generate": "tsx scripts/start_tree_generator.ts",
+    "fill-opening-names": "tsx scripts/fill_opening_names.ts",
+    "tree-log": "tsx scripts/tree_log.ts",
+    "tree-log:mock": "tsx scripts/tree_log.ts --mock",
     "scenario": "node scripts/generator_scenario_runner.cjs"
   },
   "dependencies": {

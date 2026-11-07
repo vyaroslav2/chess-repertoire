@@ -1,0 +1,215 @@
+---
+tags:
+  - processed
+---
+# AK — Anki
+
+Anki is the backend for reviews; the web app is the frontend. The deck is made once from our database. After that, the two are not linked.
+
+AK.01 **The model.**
+Anki keeps each card's state: the queue, intervals, due dates and grades. The web app keeps no copy of it. A thin layer between them lets the app get the next card, read its fields and send the grade back.
+- The layer is AnkiConnect, on `localhost:8765`. Anki must be running.
+- The app never opens or writes Anki's collection file itself.
+
+AK.02 **The deck.**
+One card per whole line: 59 cards. A line runs from move 1 to a Black reply no other reply goes on from (`RepertoirePositionStat`). Cards are added line by line, in the same order as on `/demo` (AK.15), so Anki shows new cards in that order.
+- Deck: `Chess Repertoire`. Profile: `User test New` while we test. 
+- Since 2026-10-22. Before that, 20 cards, one per reply: the 20 replies with the highest `cumProb`. That deck was deleted; a backup with its review history was kept outside the repo (`chess-repertoire-old-deck.apkg`).
+
+- Made by the generator as it runs (AK.17), and by `scripts/anki_export.ts`. Both read the database and write nothing to it.
+- The script refuses to run unless every repertoire's `generationStatus` is `IDLE`. A tree being built is wiped and only half there; on 2026-10-14 a run during generation made a deck of 15 cards.
+- `--while-generating` skips that check, and then adds final lines only (AK.17), as the generator does. `--limit 10` sets the number of cards (every line if left out).
+- The 59 cards of 2026-10-22 were deleted on 2026-11-07, before the first run that adds cards as it goes. A backup with their review history was kept outside the repo (`.apkg`). 
+
+AK.03 **The note type.**
+`Chess Repertoire`, with four fields:
+- `Line`: the moves before the answer, in SAN with move numbers, e.g. `1. e4 c6 2. d4`. The first field, so Anki sorts and checks duplicates by it.
+- `Opening`: the opening name at the end of the line.
+- `Answer`: the move to play, e.g. `2... d5`.
+- `Key`: see AK.04. Not shown on the card.
+
+The front shows the line and the opening; the back adds the answer. So a card can still be reviewed in Anki itself.
+- For a whole line (AK.02), `Line` is the line up to its last reply and `Answer` is that reply. The page joins them and asks each of your moves in turn (AK.15).
+
+AK.04 **The key.**
+SHA-1 of the line's UCI history and the answer's UCI, joined by a space: `e2e4 c7c6 d2d4 d7d5`. One key per reply. The script works out the key for each reply and skips any reply whose key is already in Anki. The script looks for the key among all our notes (`note:"Chess Repertoire"`), in any deck, not only in this deck. So a card you moved to another deck still counts as "already there".
+- The script skips a reply whose key is already in Anki. Run twice, it adds nothing the second time.
+- It is built from the moves alone, not from database ids, so a rebuilt tree gives the same keys.
+
+AK.05 **One way.**
+After the deck is made, cards and database rows are not linked. Deleting a card in Anki changes nothing in the database. A change in the database reaches Anki only through a new export, as new cards, or as a longer line replacing a shorter one (AK.18).
+
+AK.06 **A new computer.**
+AnkiWeb sync carries the note type and its fields. On any device, the app finds our cards with `note:"Chess Repertoire"`, whatever the deck is called.
+
+AK.07 **Reviews from the web app.**
+Anki's own reviewer runs the session; the web app is its screen. `/` trains from Anki.
+- The app opens Anki's study screen on the deck (`guiDeckReview`) and shows the card Anki shows there (`guiCurrentCard`). Anki picks the card, with its learning steps and daily limits.
+- Cards are answered and graded as in [[GR]]. Each grade goes to Anki with `guiShowAnswer` then `guiAnswerCard`, as if pressed in Anki.
+- The deck is found by note type (AK.06): the deck of the first `Chess Repertoire` card. The app does not switch profiles.
+- The app asks Anki only when it needs a card: on page load and after each grade. No polling.
+- Why not `answerCards`: the app would pick the order, not Anki, and Anki would log each answer as taking 0s.
+- Downside: while you train, Anki's main window stays on its study screen for our deck, out of sight behind the browser. Anki is not frozen: Browse works as usual, and the main window can go elsewhere, but the app switches it back at the next card.
+- In the app since 2026-10-14.
+
+AK.09 **The card's timer.**
+Anki times each answer from when its own window showed the card. The web page may show it much later, say the next morning. So the app restarts Anki's timer (`guiStartCardTimer`) when the page shows the card; otherwise the log would read Anki's cap ('Maximum answer seconds', 70s here), not the real time.
+
+AK.10 **A card changed in Anki.**
+The page and Anki's window can get out of step: a card graded in Anki itself, or in a second tab, moves Anki on while the page still shows the old card. A grade from the page would then grade a card you never saw. So before a grade, the app checks that Anki's current card is the one on the page. If not, it drops the grade and shows Anki's card.
+
+AK.11 **Line details.**
+The card has the line, the opening and the answer. The evals (UI.26) and the opening at each ply (UI.04) come from the database: the app finds the node whose SAN line matches, read-only.
+- Not found (the tree was rebuilt without that line): the card still works. The opening shows at the end of the line only, and there are no evals.
+- This reads the database; it does not link to it (AK.05). Card state stays in Anki.
+
+AK.12 **Status line.**
+Left of the board, Anki's counts for the deck, as on its overview screen: New, Learning, To Review. They come from AnkiConnect's `getDeckStats`, which reads Anki's own due tree; the app counts nothing. They are today's counts, after daily limits. The page asks for them on load, after each grade and after each undo.
+
+```
+New        54 
+Learning    5 
+To Review   0 
+Done        6 
+```
+
+- Numbers right-aligned, in Anki's own colours: blue, red, green; Done in violet, ours. The look: [[UI|UI.22]].
+
+AK.12.01 **Done.**
+The cards finished today: answered today, and not coming back today. Each card counts once, however many times it was answered. Anki shows no such count; its "Studied N cards today" counts answers, so a card answered Again twice, then Good, counts 3 there and 1 here.
+- From two Anki searches on the deck, both counted by Anki: `rated:1 -is:learn` (reviewed, or graduated from learning) and `rated:1 is:learn prop:due>0` (still in learning, but next due tomorrow or later). The app adds the two. A card in learning that is due again later today is not done.
+- "Today" is Anki's day: `rated:1` follows Anki's "Next day starts at" hour (Preferences → Review, default 4 am), one setting for the whole profile. So the count starts again from 0 when Anki's day changes, with no counter of ours to reset. The app needn't know the hour.
+- Asked with the other three counts: on load, after each grade, after each undo. A page left open across the day change shows yesterday's count until the next grade or reload, as the other three do. Accepted.
+- Includes cards graded in Anki itself, as the other counts do.
+- Checked 2026-10-22, by grading in the test profile:
+  - Again on a card already in learning: answered today, still 1 card (each card counts once); not done, as it is due again in minutes.
+  - Easy on a card in learning: it graduated, and Done went from 1 to 2.
+  - Cards in today's learning steps match `prop:due=0`, so `prop:due>0` leaves them out, as meant.
+  - The page then showed New 50, Learning 1, To Review 0, Done 2; Anki's own counts were 50, 1, 0.
+  - Not tried: a card in learning due tomorrow or later (`prop:due>0`). The deck's steps (1m 10m; 10m after a lapse) are all within the day, so no card can be in that state yet.
+
+
+AK.13 **Undo.**
+`Ctrl + Z` on the page is Anki's own undo, through AnkiConnect's `guiUndo`: it undoes Anki's next step, whatever it is ([[AD|AD.13]]). Anki's message about it shows on the page ([[AD|AD.14]], [[MS|MS.04]]). Replaces the local history of [[UN]] on `/`.
+- The page keeps no list of its own grades. `Ctrl + Z` works before anything is graded on the page, as in Anki.
+- From 2026-10-14 to 2026-10-22, the add-on undid only the page's last grade, and refused anything else.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+%%
+"Send `Ctrl + Z` only once before Anki replies" is already the case: further presses are ignored while Anki works (AK.16).
+Suggested text for AK.13:
+"- If an undo doesn't take back the expected grade (the card's review count doesn't go down), Anki has undone some other change, e.g. an edit made in Browse. The page then shows: 'Anki's last change was not a grade, so Anki undid that instead. To get it back, use Edit → Redo in Anki. Undo here is off until you reload the page.' From then on, `Ctrl + Z` does nothing until the page is reloaded.
+- Why not an add-on that checks first: this is an edge case, and Anki's own `Ctrl + Z` behaves the same way. The block keeps it to one wrong undo, and Anki's redo puts it right."
+%%
+
+- After an undo, Anki's study screen doesn't redraw until you click on Anki's window. So the page restarts it, and shows Anki's current card ([[AD|AD.16]]).
+- In the app since 2026-10-14; native since 2026-10-22.
+
+==`AK.13.01` //- #roadmap polish undo tooltip -//==
+
+AK.16 **Waiting for Anki.**
+After a grade, Anki says 'done' before it has saved the grade and shown the next card. So the app keeps asking for Anki's current card, every 0.1s for up to 3s, until it is a different card or the deck is finished. If the same card rightly comes back (Again on the last card left), the app takes it once the grade is saved, plus 0.3s.
+- Every grade or undo takes about 0.5s. The old card stays on screen meanwhile. A grade or `Ctrl + Z` pressed during that time is ignored.
+==`AK.16.01` //- #roadmap robust oprimisation -//==
+
+AK.14 **Errors.**
+- Anki not running: "Anki is not running. Start Anki, then reload."
+- No `Chess Repertoire` cards in the open profile: "No Chess Repertoire cards in profile [X]. Open profile User test New in Anki, then reload."
+- Nothing due: "You're all caught up!", "No more cards due in Anki."
+==`AK.14.01` //- #roadmap polish messages -//==
+
+AK.15 **The demo.**
+The trainer without Anki moves to `/demo`, unchanged: its own queue, nothing saved.
+- #note Temporary, since 2026-10-21: on `/demo` a card is a whole line, from move 1 to its end. You play each of your moves in turn ([[GR|GR.01]]–[[GR|GR.03]] for each). A move played or revealed goes straight on to the opponent's reply. The line ends at your last move, with no opponent move after it; only then do `2`–`4` and `Enter` grade. `1` grades Again at any move ([[GR|GR.04]]). There is no cue for the end. Source: `fetchDemoLines` in `app/actions.ts`, `lineStepCard` in `components/SrsTrainer.tsx`.
+- Since 2026-10-22, `/` trains whole lines the same way, from Anki's cards (AK.02). `trainerCard` in `app/anki.ts` gives the line (`fullLine`). A grade or `Ctrl + Z` brings Anki's next card from move 1.
+
+AK.17 **Cards during a run.** Decided 2026-11-07, so you can start learning while a run takes days.
+- After each position is dealt with ([[S3|S3.08]]), the generator adds every line that has just become final. At the end of the run, after the last sweep ([[DRS]]), it adds the rest.
+- **Final** means the line can no longer grow in this run. A line ends at a Black reply. It is final when:
+  - the reply ended the route ([[RE.excalidraw|RE]]): `Game over on Black's move`, `Depth cap reached on Black's move`, or `No opponent moves found` ([[DB|DB.20]]); or
+  - the position after it has been dealt with, and each of White's moves there ended with `Game over`, `Repetition` or `Transposition`.
+- **Held back:** a line where one of White's moves there is `Too rare`. A sweep can reopen that move and the line would go on. These lines are added at the end of the run.
+- A position not yet dealt with: its line is not final.
+- **Order.** The lines that become final after one position are added together, sorted as in AK.02. Between those groups, the order is the run's: the most played lines first ([[S3|S3.09]]). The held-back lines come last.
+- **Anki not running, or another profile open:** nothing is added. The log says so once, `"[WARNING] Anki export skipped: [reason]. Retrying after the next position."`, and the next position catches up. The generator never switches Anki's profile, and never stops for Anki.
+- After adding, the log reads `"[ANKI] [n] cards added; [k] replaced."`
+- Keys (AK.04) make it safe to stop and restart a run: the rebuilt tree gives the same keys, and nothing is added twice.
+
+AK.18 **A longer line replaces a shorter one.** Decided 2026-11-07. When a line to be added starts with the whole line of a card already in Anki (its `Line` and `Answer`), that card is deleted and the new line added. This happens when a later run goes deeper, e.g. `depthCap` raised from 4 to 5. The deleted card's progress is lost; the new card starts from zero.
+- A card whose key is already in Anki is skipped, as now (AK.04), so an unchanged line keeps its progress.
+- A card for a line no longer in the tree at all is left alone (AK.05).
+- #roadmap A longer line could take over the shorter card instead (update its fields in place), keeping its review history.
+
+AK.08 **The test.**
+The integration works when:
+1. The app gets the next card from Anki.
+2. It shows the card's fields correctly.
+3. The user grades it in the app.
+4. The grade reaches Anki.
+5. The card's state in Anki changes exactly as if it had been graded in Anki.
+6. Deleting a card in Anki leaves the database unchanged.
+
+Checked 2026-10-14: 1–5. The review log for a grade from the app reads ease 3, a 10-minute step, and 15.1s, as from Anki's own buttons. 6 holds by design: nothing on `/` writes to the database. Not yet tried by deleting a card.

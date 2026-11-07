@@ -88,6 +88,9 @@ model EngineCacheEvaluation {
   cp      Float?
   mate    Int?
   rank    Int? // 1 for Stockfish's best move, otherwise null
+  depth   Int? // DB.32: the deepest completed depth; null for evals cached before it was stored
+  nodes   Int? // SC.20: the node count on the line kept; null for evals cached before it was stored
+  pv      String? // SC.20: that line's moves, UCI, single spaces; null for evals cached before it was stored
 
   cache EngineCache @relation(fields: [cacheId], references: [id], onDelete: Cascade)
 
@@ -197,13 +200,27 @@ model RepertoireMove {
   // DB.20
   stopReason String?
 
-  // DB.14 Black move fields: the engine evidence
+  // DB.11 the eval: every Black move, and every White move Black replies to
   cp              Float?
   mate            Int?
+  depth           Int? // the depth of the search that gave the eval; null for checkmate, stalemate or an old cached eval
   source          String?
+
+  // DB.14 Black move fields: the engine evidence
   selectionMethod String?
   moveOrigin      String?
   engineRank      Int?
+
+  // HEG.40 the selector, on a Black move it judged; null where it did not run
+  championSan    String? // Stockfish's move, the champion
+  championCp2M   Float? // the champion's 2M eval (HEG.21)
+  chosenCp2M     Float? // a switch: the chosen move's 2M eval
+  selectorCpLoss Float? // a switch: its cp loss at 200M (HEG.32)
+  selectorGames  Int? // a switch: its games in selectorMonths
+  selectorScore  Float? // a switch: Black's score in them
+  safeGain       Float? // a switch: its safe gain (HES.16)
+  lineCpSpent    Float? // HEG.31: the route's spend after this move
+  selectorJudged String? // JSON: every judged move and its verdict, or why nothing was judged
 
   fromNode   RepertoireNode           @relation("OutgoingMoves", fields: [fromNodeId], references: [id], onDelete: Cascade)
   toNode     RepertoireNode?          @relation("IncomingMoves", fields: [toNodeId], references: [id], onDelete: Cascade)

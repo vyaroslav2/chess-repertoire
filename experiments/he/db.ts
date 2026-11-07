@@ -1,7 +1,11 @@
 import mysql from "mysql2/promise";
 import { readGames, gameRecord, type GameRecord } from "./pgn";
+import { access } from "node:fs/promises";
+import path from "node:path";
+import { sampledMoves } from "./dots";
+import { runPath } from "./paths";
 
-// Connection details come from HE_MYSQL_URL (mysql://he:<password>@127.0.0.1:3306/he),
+// Connection details come from HE_MYSQL_URL (mysql://he:<password>@127.0.0.1:13306/he),
 // so no password lives in the code. Error messages never repeat the URL.
 export function mysqlUrl(env: NodeJS.ProcessEnv = process.env): string {
   const url = env.HE_MYSQL_URL;
@@ -49,6 +53,56 @@ export const GAMES_TABLE = `CREATE TABLE IF NOT EXISTS games (
   INDEX (uci_moves(100)),
   INDEX (san_moves(100))
 )`;
+
+// One row per game: its sampled Black move (HER.12) and that move's eval. Joins games by game_id.
+// A move has a cp score or a mate score, never both, never neither.
+export const SAMPLED_MOVES_TABLE = `CREATE TABLE IF NOT EXISTS sampled_moves (
+  game_id     CHAR(8) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+  run         VARCHAR(80) NOT NULL,                         -- the HE run it came from, e.g. 2024-02-3000mb
+  move_number TINYINT NOT NULL,                             -- Black's move number, 2–15
+  san         VARCHAR(10) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  uci         VARCHAR(5) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  fen         VARCHAR(100) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,  -- the position before the move
+  group_id    INT NOT NULL,                                 -- the search's id in results-a/b
+  results     ENUM('a','b','c') NOT NULL,                   -- which results file holds the search
+  search_run  VARCHAR(80),                                  -- the earlier run that made the search; NULL: this run
+  group_games INT NOT NULL,                                 -- games in the group (same position and move)
+  cp_white    SMALLINT,                                     -- Stockfish 19, 2M nodes, White's view
+  mate_white  SMALLINT,                                     -- + White mates, − Black mates
+  depth       SMALLINT NOT NULL,
+  CHECK ((cp_white IS NULL) <> (mate_white IS NULL)),
+  INDEX (cp_white),
+  INDEX (move_number)
+)`;
+
+// Loading is safe to repeat: a row already in the table is overwritten, never doubled.
+export async function loadSampledMoves(run: string) {
+  // A pool's games belong to their months: loading it would relabel each row with the pool's name.
+  if (await access(path.join(runPath(run), "pool.json")).then(() => true, () => false))
+    throw new Error(run + " is a pool. Load its months instead.");
+  const connection = await connect();
+  try {
+    await connection.query(SAMPLED_MOVES_TABLE);
+    // Tables made before searches were reused lack search_run.
+    const [columns] = await connection.query("SHOW COLUMNS FROM sampled_moves LIKE 'search_run'");
+    if (!(columns as unknown[]).length) await connection.query("ALTER TABLE sampled_moves ADD COLUMN search_run VARCHAR(80) AFTER results");
+    // And those made before a third results file allow only a and b.
+    const [results] = await connection.query("SHOW COLUMNS FROM sampled_moves LIKE 'results'");
+    if (!(results as { Type: string }[])[0].Type.includes("'c'"))
+      await connection.query("ALTER TABLE sampled_moves MODIFY results ENUM('a','b','c') NOT NULL");
+    const rows = await sampledMoves(run);
+    for (let start = 0; start < rows.length; start += 1000)
+      await connection.query(`INSERT INTO sampled_moves (game_id, run, move_number, san, uci, fen, group_id, results,
+        search_run, group_games, cp_white, mate_white, depth) VALUES ? AS new ON DUPLICATE KEY UPDATE run = new.run,
+        move_number = new.move_number, san = new.san, uci = new.uci, fen = new.fen, group_id = new.group_id,
+        results = new.results, search_run = new.search_run, group_games = new.group_games, cp_white = new.cp_white, mate_white = new.mate_white, depth = new.depth`,
+        [rows.slice(start, start + 1000).map(row => [row.gameId, run, row.moveNumber, row.san, row.uci, row.fen,
+          row.groupId, row.results, row.searchRun ?? null, row.groupGames, row.cpWhite, row.mateWhite, row.depth])]);
+    const [counts] = await connection.query(`SELECT COUNT(*) AS rows_in_table,
+      SUM(game_id NOT IN (SELECT game_id FROM games)) AS without_game FROM sampled_moves WHERE run = ?`, [run]);
+    return { run, loaded: rows.length, ...(counts as { rows_in_table: number; without_game: number }[])[0] };
+  } finally { await connection.end(); }
+}
 
 // Loading is safe to repeat: a game already in the table is overwritten, never doubled.
 export async function loadGames(file: string, limit?: number) {

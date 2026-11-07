@@ -206,7 +206,31 @@ export type LocalEngineEvaluation = {
   san?: string | null;
   cp: number | null;
   mate: number | null;
+  /** DB.32: the deepest completed depth; null for evals cached before it was stored. */
+  depth?: number | null;
+  /** SC.20: the node count on the line the eval was read from; null for evals cached before it was stored. */
+  nodes?: number | null;
+  /** SC.20: that line's moves, UCI, single spaces, starting with `uci`; null for evals cached before it was stored. */
+  pv?: string | null;
 };
+
+/** DB.11, DB.32: a depth is a whole number of plies, or unknown. */
+function isValidDepth(depth: unknown): boolean {
+  return depth === undefined || depth === null || (typeof depth === "number" && Number.isInteger(depth) && depth >= 0);
+}
+
+/** SC.20: a node count is a whole number, or unknown. */
+function isValidNodes(nodes: unknown): boolean {
+  return nodes === undefined || nodes === null || (typeof nodes === "number" && Number.isInteger(nodes) && nodes >= 0);
+}
+
+/** SC.20: a line is UCI moves separated by single spaces, starting with the eval's move, or unknown. */
+function isValidPv(pv: unknown, uci: string): boolean {
+  if (pv === undefined || pv === null) return true;
+  if (typeof pv !== "string") return false;
+  const moves = pv.split(" ");
+  return moves[0] === uci && moves.every(isValidUciMove);
+}
 
 function validateLocalEngineIdentity(fullFen: string, evaluationProfile: string): string {
   const canonicalFullFen = parseFullFen(fullFen);
@@ -224,7 +248,7 @@ function validateLocalEngineEvaluation(
   evaluationProfile: string,
   evaluation: LocalEngineEvaluation,
   expectedUci?: string
-): LocalEngineEvaluation & { san: string } {
+): LocalEngineEvaluation & { san: string; depth: number | null; nodes: number | null; pv: string | null } {
   const canonicalFullFen = validateLocalEngineIdentity(fullFen, evaluationProfile);
   if (!evaluation || typeof evaluation !== "object" || !isValidUciMove(evaluation.uci)) {
     throw new Error("Invalid Local Engine evidence: malformed UCI/LAN move");
@@ -238,6 +262,9 @@ function validateLocalEngineEvaluation(
   if (!((hasCp && evaluation.mate === null) || (evaluation.cp === null && hasMate))) {
     throw new Error("Invalid Local Engine evidence: exactly one of finite cp or integer mate is required");
   }
+  if (!isValidDepth(evaluation.depth)) throw new Error("Invalid Local Engine evidence: depth must be a non-negative integer or null");
+  if (!isValidNodes(evaluation.nodes)) throw new Error("Invalid Local Engine evidence: nodes must be a non-negative integer or null");
+  if (!isValidPv(evaluation.pv, evaluation.uci)) throw new Error("Invalid Local Engine evidence: pv must be UCI moves, single spaces, starting with the move, or null");
 
   const chess = new Chess(canonicalFullFen);
   let parsedMove;
@@ -258,7 +285,7 @@ function validateLocalEngineEvaluation(
     throw new Error(`Invalid Local Engine evidence: SAN does not match UCI move ${evaluation.uci}`);
   }
 
-  return { ...evaluation, san: parsedMove.san };
+  return { ...evaluation, san: parsedMove.san, depth: evaluation.depth ?? null, nodes: evaluation.nodes ?? null, pv: evaluation.pv ?? null };
 }
 
 /** Local Stockfish runs with localStockfishMultiPv = 1: its best move is the evaluation ranked 1. */
@@ -273,10 +300,10 @@ export async function saveLocalEngineBaseline(
     await tx.engineCacheEvaluation.updateMany({ where: { cacheId: cache.id, rank: 1, uci: { not: validated.uci } }, data: { rank: null } });
     const saved = await tx.engineCacheEvaluation.upsert({
       where: { cacheId_uci: { cacheId: cache.id, uci: validated.uci } },
-      update: { san: validated.san, cp: validated.cp, mate: validated.mate, rank: 1 },
-      create: { cacheId: cache.id, uci: validated.uci, san: validated.san, cp: validated.cp, mate: validated.mate, rank: 1 }
+      update: { san: validated.san, cp: validated.cp, mate: validated.mate, depth: validated.depth, nodes: validated.nodes, pv: validated.pv, rank: 1 },
+      create: { cacheId: cache.id, uci: validated.uci, san: validated.san, cp: validated.cp, mate: validated.mate, depth: validated.depth, nodes: validated.nodes, pv: validated.pv, rank: 1 }
     });
-    return { fullFen, evaluationProfile, bestUci: saved.uci, san: saved.san, cp: saved.cp, mate: saved.mate };
+    return { fullFen, evaluationProfile, bestUci: saved.uci, san: saved.san, cp: saved.cp, mate: saved.mate, depth: saved.depth, nodes: saved.nodes, pv: saved.pv };
   });
 }
 
@@ -292,7 +319,10 @@ export async function readLocalEngineBaseline(fullFen: string, evaluationProfile
     uci: row.uci,
     san: row.san,
     cp: row.cp,
-    mate: row.mate
+    mate: row.mate,
+    depth: row.depth,
+    nodes: row.nodes,
+    pv: row.pv
   });
   return { fullFen, evaluationProfile, bestUci: row.uci, ...evaluation };
 }
@@ -340,9 +370,9 @@ export async function readLocalEngineCandidate(fullFen: string, candidateUci: st
 // --- DB.08 - DB.15 moves ---
 
 export const RESPONSE_EVALUATION_SOURCES = ["Local Stockfish 19"] as const;
-// DB.14: Stockfish's baseline (EW.09) or a hardcoded response (EW.13).
-export const RESPONSE_SELECTION_METHODS = ["Baseline", "Hardcoded"] as const;
-export const RESPONSE_MOVE_ORIGINS = ["Engine Move", "Hardcoded Move"] as const;
+// DB.14: Stockfish's baseline (EW.09), a hardcoded response (EW.13), or the selector's switch (HEG.40).
+export const RESPONSE_SELECTION_METHODS = ["Baseline", "Hardcoded", "Human evidence"] as const;
+export const RESPONSE_MOVE_ORIGINS = ["Engine Move", "Hardcoded Move", "Human Move"] as const;
 export type ResponseEvaluationSource = typeof RESPONSE_EVALUATION_SOURCES[number];
 export type ResponseSelectionMethod = typeof RESPONSE_SELECTION_METHODS[number];
 export type ResponseMoveOrigin = typeof RESPONSE_MOVE_ORIGINS[number];
@@ -353,6 +383,19 @@ export type ResponsePersistenceInput = {
   selectionMethod: ResponseSelectionMethod; moveOrigin: ResponseMoveOrigin;
   stopReason?: "Repetition" | "Transposition" | ResponseEnding | null;
   engineRank?: number | null;
+  /** DB.11: null for checkmate, stalemate or an eval cached before depth was stored. */
+  depth?: number | null;
+  /** HEG.40: what the selector did here; absent where it did not run. */
+  selector?: ResponseSelectorFields | null;
+};
+
+export type ResponseSelectorFields = {
+  championSan: string;
+  championCp2M: number | null;
+  chosen: { cp2M: number; cpLoss: number; games: number; score: number; safeGain: number } | null;
+  lineCpSpent: number;
+  /** JSON of every judged move and its verdict, or why nothing was judged. */
+  judged: string;
 };
 
 function isNonEmptyCanonicalString(value: unknown): value is string {
@@ -369,6 +412,13 @@ export function validateResponsePersistence(input: ResponsePersistenceInput): vo
   const hasMate = typeof input.mate === "number" && Number.isInteger(input.mate) && input.mate !== 0;
   if (!((hasCp && input.mate === null) || (input.cp === null && hasMate))) throw new Error("Invalid RESPONSE evaluation: exactly one of finite cp or non-zero integer mate is required");
   if (input.engineRank !== undefined && input.engineRank !== null && input.engineRank !== 1) throw new Error("Invalid RESPONSE engineRank");
+  if (!isValidDepth(input.depth)) throw new Error("Invalid RESPONSE depth");
+  // HEG.40: a switch, and only a switch, carries the chosen move's evidence.
+  const switched = input.selectionMethod === "Human evidence";
+  if (switched !== (input.moveOrigin === "Human Move")) throw new Error("Invalid RESPONSE: Human evidence and Human Move go together");
+  if (switched && (!input.selector?.chosen || input.engineRank !== null)) throw new Error("Invalid RESPONSE: a switch needs its evidence and no engineRank");
+  if (!switched && input.selector?.chosen) throw new Error("Invalid RESPONSE: only a switch carries chosen-move evidence");
+  if (input.selector && (!Number.isFinite(input.selector.lineCpSpent) || input.selector.lineCpSpent < 0)) throw new Error("Invalid RESPONSE lineCpSpent");
   const stopReason = input.stopReason ?? null;
   if (stopReason === "Repetition") {
     if (input.toNodeId !== null) throw new Error("Invalid RESPONSE repetition: toNodeId must be null");
@@ -497,12 +547,25 @@ export async function createOpponentMove(data: {
   });
 }
 
+/** DB.11, HM.09: an expanded White move carries exactly one of cp or mate, from local Stockfish, and its depth. */
+export async function recordOpponentMoveEval(moveId: string, evaluation: { cp: number | null; mate: number | null; depth?: number | null }) {
+  if ((evaluation.cp === null) === (evaluation.mate === null)) {
+    throw new Error(`White move ${moveId} must carry exactly one of cp or mate`);
+  }
+  if (evaluation.mate === 0) throw new Error(`White move ${moveId} has mate = 0`); // DB.12
+  if (!isValidDepth(evaluation.depth)) throw new Error(`White move ${moveId} has an invalid depth`);
+  return prisma.repertoireMove.update({
+    where: { id: moveId },
+    data: { cp: evaluation.cp, mate: evaluation.mate, depth: evaluation.depth ?? null, source: "Local Stockfish 19" }
+  });
+}
+
 /** HM.24, HM.29, HM.33: the White moves that end the route at their own node. */
 export const WHITE_MOVE_ENDINGS = ["Too rare", "Game over", "Repetition"] as const;
 export type WhiteMoveEnding = typeof WHITE_MOVE_ENDINGS[number];
 
 /** RE.03, RE.07: the Black moves that end the route at the node they reach. */
-export const RESPONSE_ENDINGS = ["Game over on Black's move", "Depth budget reached on Black's move"] as const;
+export const RESPONSE_ENDINGS = ["Game over on Black's move", "Depth cap reached on Black's move"] as const;
 export type ResponseEnding = typeof RESPONSE_ENDINGS[number];
 
 /** A node whose White move ended the route is only an ending, never a route owner or ancestor. */
@@ -538,7 +601,17 @@ export async function createResponseMove(input: ResponsePersistenceInput) {
     stopReason: input.stopReason ?? null,
     cp: input.cp, mate: input.mate, source: input.source,
     selectionMethod: input.selectionMethod, moveOrigin: input.moveOrigin,
-    engineRank: input.engineRank ?? null
+    engineRank: input.engineRank ?? null,
+    depth: input.depth ?? null,
+    championSan: input.selector?.championSan ?? null,
+    championCp2M: input.selector?.championCp2M ?? null,
+    chosenCp2M: input.selector?.chosen?.cp2M ?? null,
+    selectorCpLoss: input.selector?.chosen?.cpLoss ?? null,
+    selectorGames: input.selector?.chosen?.games ?? null,
+    selectorScore: input.selector?.chosen?.score ?? null,
+    safeGain: input.selector?.chosen?.safeGain ?? null,
+    lineCpSpent: input.selector?.lineCpSpent ?? null,
+    selectorJudged: input.selector?.judged ?? null
   };
   return prisma.$transaction(async tx => {
     // DB.09: one RESPONSE per position.

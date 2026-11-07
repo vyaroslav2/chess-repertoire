@@ -6,7 +6,8 @@ import path from "node:path";
 import { Chess } from "chess.js";
 import { assertDataDirectory, DATA_ROOT } from "./paths";
 
-export const SETTINGS = { depth: 24, multiPv: 1, threads: 1, hashMb: 64 } as const;
+// A node limit, not a depth: 2M nodes is about 2 s and matched 200M nodes closely within ±300 cp.
+export const SETTINGS = { nodes: 2_000_000, multiPv: 1, threads: 1, hashMb: 64 } as const;
 export type Evaluation = { uci: string; depth: number; cpWhite: number | null; mateWhite: number | null };
 export type EngineProfile = { id: string; name: string; binarySha256: string; settings: typeof SETTINGS };
 export function parseEvaluation(lines: string[], fen: string, expectedUci?: string): Evaluation {
@@ -15,24 +16,29 @@ export function parseEvaluation(lines: string[], fen: string, expectedUci?: stri
   const legal = new Chess(fen).moves({ verbose: true }).some(move => move.lan === best);
   if (!legal) throw new Error("Engine returned an illegal move.");
   const multiplier = fen.split(" ")[1] === "b" ? -1 : 1;
+  // The node limit can stop the search part-way through a depth. The result is the last
+  // exact score: the deepest depth Stockfish completed. Its move can differ from bestmove,
+  // which may come from the unfinished depth, so a root search reports the completed move.
   for (const line of [...lines].reverse()) {
     if (!line.startsWith("info ") || /\b(?:lowerbound|upperbound)\b/.test(line)) continue;
     const depth = Number(/\bdepth (\d+)\b/.exec(line)?.[1]);
     const score = /\bscore (cp|mate) (-?\d+)\b/.exec(line);
     const pv = /\bpv (\S+)/.exec(line)?.[1];
     const multiPv = Number(/\bmultipv (\d+)\b/.exec(line)?.[1] ?? "1");
-    if (depth !== SETTINGS.depth || !score || pv !== best || multiPv !== 1) continue;
+    if (!depth || !score || !pv || multiPv !== 1) continue;
+    if (expectedUci && pv !== expectedUci) break;
+    if (!new Chess(fen).moves({ verbose: true }).some(move => move.lan === pv)) throw new Error("Engine returned an illegal move.");
     const value = Number(score[2]) * multiplier;
-    return { uci: best, depth, cpWhite: score[1] === "cp" ? value : null,
+    return { uci: pv, depth, cpWhite: score[1] === "cp" ? value : null,
       mateWhite: score[1] === "mate" ? value : null };
   }
-  throw new Error("Engine returned no exact, unbounded depth-24 score for its best move.");
+  throw new Error("Engine returned no exact, unbounded score for the searched move.");
 }
 
 class UciProcess {
   private readonly process: ChildProcessWithoutNullStreams;
   private pending: { lines: string[]; until: (line: string) => boolean; resolve: (lines: string[]) => void;
-    reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | null = null;
+    reject: (error: Error) => void; timer: ReturnType<typeof setTimeout>; onLine?: (line: string) => void } | null = null;
   private dead: Error | null = null;
   constructor(binary: string, private readonly timeoutMs: number) {
     this.process = spawn(binary, [], { windowsHide: true, stdio: "pipe" });
@@ -41,6 +47,7 @@ class UciProcess {
       const request = this.pending;
       if (!request) return;
       request.lines.push(line);
+      request.onLine?.(line);
       if (request.until(line)) {
         clearTimeout(request.timer); this.pending = null; request.resolve(request.lines);
       }
@@ -56,14 +63,14 @@ class UciProcess {
       clearTimeout(this.pending.timer); this.pending.reject(error); this.pending = null;
     }
   }
-  command(command: string, until: (line: string) => boolean): Promise<string[]> {
+  command(command: string, until: (line: string) => boolean, onLine?: (line: string) => void): Promise<string[]> {
     if (this.dead) return Promise.reject(this.dead);
     if (this.pending) return Promise.reject(new Error("Overlapping UCI commands are not supported."));
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.fail(new Error("Stockfish command timed out.")); this.process.kill();
       }, this.timeoutMs);
-      this.pending = { lines: [], until, resolve, reject, timer };
+      this.pending = { lines: [], until, resolve, reject, timer, onLine };
       this.process.stdin.write(command + "\n");
     });
   }
@@ -91,6 +98,11 @@ export class HeEngine {
     } catch (error) { uci.close(); throw error; }
   }
   async evaluate(fen: string, candidate?: string): Promise<Evaluation> {
+    return (await this.search(fen, candidate)).evaluation;
+  }
+  // The evaluation with Stockfish's raw lines, cached or new. `fresh` always searches,
+  // so a live check never just reads back an earlier result; `onLine` sees each line as it comes.
+  async search(fen: string, candidate?: string, fresh = false, onLine?: (line: string) => void): Promise<{ evaluation: Evaluation; rawLines: string[] }> {
     const chess = new Chess(fen);
     if (chess.turn() !== "b") throw new Error("HE evaluates Black decisions only.");
     if (candidate && !chess.moves({ verbose: true }).some(move => move.lan === candidate)) throw new Error("Illegal HE candidate.");
@@ -99,23 +111,23 @@ export class HeEngine {
     const directory = path.join(DATA_ROOT, "eval-cache", this.profile.id);
     await assertDataDirectory(directory);
     const cachePath = path.join(directory, key + ".json");
-    try {
+    if (!fresh) try {
       const cached = JSON.parse(await readFile(cachePath, "utf8"));
       if (JSON.stringify(cached.request) !== JSON.stringify(request) ||
           !Array.isArray(cached.rawLines)) throw new Error("Invalid HE evaluation cache: " + cachePath);
-      return parseEvaluation(cached.rawLines, fen, candidate);
+      return { evaluation: parseEvaluation(cached.rawLines, fen, candidate), rawLines: cached.rawLines };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
     // Clear search history between requests so results don't depend on import order.
     await this.uci.command("ucinewgame\nsetoption name Clear Hash\nisready", line => line === "readyok");
-    const rawLines = await this.uci.command("position fen " + fen + "\ngo depth 24" +
-      (candidate ? " searchmoves " + candidate : ""), line => line.startsWith("bestmove "));
+    const rawLines = await this.uci.command("position fen " + fen + "\ngo nodes " + SETTINGS.nodes +
+      (candidate ? " searchmoves " + candidate : ""), line => line.startsWith("bestmove "), onLine);
     const evaluation = parseEvaluation(rawLines, fen, candidate);
     const temporary = cachePath + "." + process.pid + "." + Date.now() + ".tmp";
     await writeFile(temporary, JSON.stringify({ request, profile: this.profile, rawLines, evaluation }), { flag: "wx" });
     await rename(temporary, cachePath);
-    return evaluation;
+    return { evaluation, rawLines };
   }
   close() { this.uci.close(); }
 }

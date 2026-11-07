@@ -1,7 +1,13 @@
 import { lichessHeaders, requestApi } from './retry';
 import { readExplorerCache, saveExplorerCache, ExplorerMoveRow } from '../db/operations';
 import { parseFullFen, positionKeyFromFen } from '../core/fen';
-import { computeExplorerCacheProfile, defaultConfig } from '../core/config';
+import {
+  computeExplorerCacheProfile,
+  computeSelectorExplorerCacheProfile,
+  defaultConfig,
+  SELECTOR_EXPLORER_MOVES,
+  type Config
+} from '../core/config';
 import { Chess } from 'chess.js';
 
 type PublicExplorerMove = {
@@ -62,9 +68,26 @@ export function checkExplorerGameCounts(totalGames: number, positionTotalGames: 
 
 /** EX.01 - EX.06: White's moves at this position, from the Amateur dataset. Cache first, then Lichess. */
 export async function fetchExplorer(fen: string) {
+  const speeds = defaultConfig.explorerSpeeds.join(',');
+  const ratings = defaultConfig.explorerRatings.join(',');
+  return fetchExplorerShape(fen, computeExplorerCacheProfile(defaultConfig), `speeds=${speeds}&ratings=${ratings}`);
+}
+
+/**
+ * HEG.20: the selector's counts at a position with Black to move: the same speeds and ratings,
+ * only `selectorMonths`, and every move. Cached under its own profile, so EX's cache is untouched.
+ */
+export async function fetchSelectorCounts(fen: string, config: Config = defaultConfig) {
+  const speeds = config.explorerSpeeds.join(',');
+  const ratings = config.explorerRatings.join(',');
+  const { since, until } = config.selectorMonths;
+  return fetchExplorerShape(fen, computeSelectorExplorerCacheProfile(config),
+    `speeds=${speeds}&ratings=${ratings}&since=${since}&until=${until}&moves=${SELECTOR_EXPLORER_MOVES}&topGames=0&recentGames=0`);
+}
+
+async function fetchExplorerShape(fen: string, cacheProfile: string, query: string) {
   const fullFen = parseFullFen(fen);
   const posKey = positionKeyFromFen(fullFen);
-  const cacheProfile = computeExplorerCacheProfile(defaultConfig);
 
   const cached = await readExplorerCache(posKey, cacheProfile);
   if (cached.status === "success" || cached.status === "empty") {
@@ -77,9 +100,7 @@ export async function fetchExplorer(fen: string) {
     };
   }
 
-  const speeds = defaultConfig.explorerSpeeds.join(',');
-  const ratings = defaultConfig.explorerRatings.join(',');
-  const url = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(fullFen)}&speeds=${speeds}&ratings=${ratings}`;
+  const url = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(fullFen)}&${query}`;
   // AR.11: Explorer throws on give-up, so any result here is an answer.
   const result = await requestApi("Explorer", url, { body: "json", headers: lichessHeaders(true) });
   if (result.kind !== "answer") {

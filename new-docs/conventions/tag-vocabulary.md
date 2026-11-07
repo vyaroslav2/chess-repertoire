@@ -13,8 +13,9 @@ tags:
 
 ## Status tags
 
-Every note carries one of these in its frontmatter. A spec or diagram moves `#in-progress` `-->` `#reviewed` `-->` `#processed`.
+Every note carries one of these in its frontmatter. A spec or diagram moves `#draft` `-->` `#in-progress` `-->` `#reviewed` `-->` `#processed`.
 
+`#draft` — a first version, with open questions still in it. Not yet worked on with the user.
 `#in-progress` — still being written. Not confirmed yet.
 `#reviewed` — confirmed. For specs and diagrams: the code is not written yet, or does not match.
 `#processed` — specs and diagrams only: the code matches the note.

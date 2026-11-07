@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Chessground from "@react-chess/chessground";
+import type { Key } from "chessground/types";
 import "chessground/assets/chessground.base.css";
 import { Chess } from "chess.js";
 import LichessMoveList from "./LichessMoveList";
@@ -9,11 +10,10 @@ import LichessMoveList from "./LichessMoveList";
 interface ChessBoardWidgetProps {
   initialFen?: string;
   pgn?: string;
-  pieceSet?: "cburnett" | "staunty" | "alpha" | "merida";
   onMove?: (move: string, fen: string) => void;
 }
 
-export default function ChessBoardWidget({ initialFen, pgn, pieceSet = "merida", onMove }: ChessBoardWidgetProps) {
+export default function ChessBoardWidget({ initialFen, pgn, onMove }: ChessBoardWidgetProps) {
   const [chess] = useState(new Chess());
   const [fen, setFen] = useState(chess.fen());
   const [lastMove, setLastMove] = useState<[string, string] | undefined>();
@@ -124,15 +124,14 @@ export default function ChessBoardWidget({ initialFen, pgn, pieceSet = "merida",
       margin: "0 auto",
       backgroundColor: "var(--lichess-panel-bg)"
     }}>
-      <div className={`cg-board-newspaper piece-set-${pieceSet}`} style={{ width: "560px", height: "560px" }}>
+      <div className="board-themed" style={{ width: "560px", height: "560px" }}>
         <Chessground
-          width="100%"
-          height="100%"
+          contained
           config={{
             fen: fen,
             orientation: orientation,
             turnColor: calcTurnColor(),
-            lastMove: lastMove,
+            lastMove: lastMove as Key[] | undefined,
             highlight: { lastMove: true, check: true },
             drawable: { enabled: true, visible: true },
             coordinates: true,

@@ -2,7 +2,8 @@
 
 import { PrismaClient } from "@prisma/client";
 import { Chess } from "chess.js";
-import { fsrs, createEmptyCard, Rating, Card, State } from "ts-fsrs";
+import { fsrs, createEmptyCard, Rating, Card, State, type Grade } from "ts-fsrs";
+import { lineEvals, lineOpenings } from "../lib/line-details";
 
 const prisma = new PrismaClient();
 const f = fsrs(); // Initialize FSRS algorithm
@@ -56,33 +57,9 @@ export async function fetchDuePositions(repertoireId: string) {
     if (!stat.node || !stat.targetMove) throw new Error(`Incomplete repertoire card ${stat.id}`);
     const lineMoves = stat.node.displayPgn === "" ? [] : stat.node.displayPgn.split(/\s+/);
     const historyUcis = stat.node.history === "" ? [] : stat.node.history.split(/\s+/);
-    const histories = ["", ...historyUcis.map((_, index) => historyUcis.slice(0, index + 1).join(" "))];
-    const historyNodes = await prisma.repertoireNode.findMany({
-      where: { repertoireId, history: { in: histories } },
-      select: { history: true, eco: true, openingName: true, openingMetadataStatus: true }
-    });
-    const metadataByHistory = new Map(historyNodes.map(node => [node.history, node]));
-    const openingByPly = histories.map(history => metadataByHistory.get(history) ?? null);
-    if (stat.targetMove.toNodeId) {
-      const destination = await prisma.repertoireNode.findUnique({
-        where: { id: stat.targetMove.toNodeId },
-        select: { history: true, eco: true, openingName: true, openingMetadataStatus: true }
-      });
-      openingByPly.push(destination);
-    } else if (stat.targetMove.stopReason === "Repetition" && stat.targetMove.uci) {
-      const routeHistory = [stat.node.history, stat.targetMove.uci].filter(Boolean).join(" ");
-      const terminal = await prisma.openingMetadataHistoryCache.findUnique({
-        where: { repertoireId_history: { repertoireId, history: routeHistory } },
-        select: { eco: true, openingName: true, status: true }
-      });
-      openingByPly.push(terminal ? {
-        history: routeHistory,
-        eco: terminal.eco,
-        openingName: terminal.openingName,
-        openingMetadataStatus: terminal.status
-      } : null);
-    }
-    return { ...stat, lineMoves, openingByPly };
+    const openingByPly = await lineOpenings(repertoireId, stat.node.history, stat.targetMove);
+    const evalByPly = await lineEvals(repertoireId, historyUcis);
+    return { ...stat, lineMoves, openingByPly, evalByPly };
   }));
 
   // Sort by depth (shallower lines first) to ensure new cards are introduced logically
@@ -121,41 +98,17 @@ export async function fetchDemoPositions(repertoireId: string) {
       : [];
     const lineMoves = [...priorMoves, branch.san];
 
-    // Attach per-ply opening metadata for live move-list browsing, same as fetchDuePositions.
     const historyUcis = branch.toNode.history === "" ? [] : branch.toNode.history.split(/\s+/);
-    const histories = ["", ...historyUcis.map((_, index) => historyUcis.slice(0, index + 1).join(" "))];
-    const historyNodes = await prisma.repertoireNode.findMany({
-      where: { repertoireId, history: { in: histories } },
-      select: { history: true, eco: true, openingName: true, openingMetadataStatus: true }
-    });
-    const metadataByHistory = new Map(historyNodes.map(node => [node.history, node]));
-    const openingByPly = histories.map(history => metadataByHistory.get(history) ?? null);
-    if (stat.targetMove.toNodeId) {
-      const destination = await prisma.repertoireNode.findUnique({
-        where: { id: stat.targetMove.toNodeId },
-        select: { history: true, eco: true, openingName: true, openingMetadataStatus: true }
-      });
-      openingByPly.push(destination);
-    } else if (stat.targetMove.stopReason === "Repetition" && stat.targetMove.uci) {
-      const routeHistory = [branch.toNode.history, stat.targetMove.uci].filter(Boolean).join(" ");
-      const terminal = await prisma.openingMetadataHistoryCache.findUnique({
-        where: { repertoireId_history: { repertoireId, history: routeHistory } },
-        select: { eco: true, openingName: true, status: true }
-      });
-      openingByPly.push(terminal ? {
-        history: routeHistory,
-        eco: terminal.eco,
-        openingName: terminal.openingName,
-        openingMetadataStatus: terminal.status
-      } : null);
-    }
+    const openingByPly = await lineOpenings(repertoireId, branch.toNode.history, stat.targetMove);
 
     return {
       ...stat,
+      targetMove: stat.targetMove,
       demoId: branch.id,
       node: branch.toNode,
       lineMoves,
       openingByPly,
+      evalByPly: await lineEvals(repertoireId, historyUcis),
       routeLabel: lineMoves.join(" "),
     };
   }))).filter((card): card is NonNullable<typeof card> => card !== null);
@@ -175,10 +128,29 @@ export async function fetchDemoPositions(repertoireId: string) {
   return cards;
 }
 
+// Temporary: on /demo a card is a whole line, from move 1 to its end. A line
+// ends at a Black move no card goes on from. Kept in the preorder above.
+export async function fetchDemoLines(repertoireId: string) {
+  const positions = await fetchDemoPositions(repertoireId);
+  const fullLine = (card: (typeof positions)[number]) => [...card.lineMoves, card.targetMove.san];
+  const routes = positions.map(card => card.lineMoves.join(" "));
+  return positions
+    .filter(card => {
+      const route = fullLine(card).join(" ");
+      return !routes.some(other => other.startsWith(`${route} `));
+    })
+    .map(card => ({
+      ...card,
+      fullLine: fullLine(card),
+      // By ply, the answer's eval last.
+      lineEvalByPly: [...card.evalByPly, { cp: card.targetMove.cp, mate: card.targetMove.mate }],
+    }));
+}
+
 export async function updateSrsStats(statId: string, quality: number) {
   // quality: 0 (Again), 1 (Hard), 2 (Good), 3 (Easy)
   // FSRS expects Rating enums: 1=Again, 2=Hard, 3=Good, 4=Easy
-  const fsrsRatingMap = [Rating.Again, Rating.Hard, Rating.Good, Rating.Easy];
+  const fsrsRatingMap: Grade[] = [Rating.Again, Rating.Hard, Rating.Good, Rating.Easy];
   const fsrsRating = fsrsRatingMap[quality];
 
   const stat = await prisma.repertoirePositionStat.findUnique({ where: { id: statId } });
@@ -194,7 +166,9 @@ export async function updateSrsStats(statId: string, quality: number) {
     reps: stat.reps,
     lapses: stat.lapses,
     state: stat.state as State,
-    last_review: stat.last_review || undefined
+    last_review: stat.last_review || undefined,
+    // Not stored; ts-fsrs reads a missing value as 0 too.
+    learning_steps: 0
   };
 
   // Run the algorithm

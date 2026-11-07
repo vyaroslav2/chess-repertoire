@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600&family=JetBrains+Mono:wght@400;600&family=Roboto+Mono:wght@400;600&display=swap');
-
 :root {
   --lichess-bg: #161512;
   --lichess-panel-bg: #262421;
@@ -8,15 +6,35 @@
   --lichess-text-primary: #bababa;
   --lichess-text-bright: #ffffff;
   --lichess-text-muted: #787674;
+  /* Warm greys of one tint, each at least 4.5 : 1 on --lichess-bg (WCAG AA). */
+  --opening-text: #979490; /* 6.05 : 1 */
+  --coord-text: #817e7a; /* 4.52 : 1, dimmer than the opening name */
+  --coord-text-large: #e0dcd6; /* 13.37 : 1, large coordinates (UI.32) */
+  --settings-icon: #b5b1ab; /* Obsidian's #b3b3b3 in the same warm tint */
+  --settings-hover-bg: rgb(
+    224 220 214 / 0.075
+  ); /* Obsidian's hover: light at 7.5% */
+  --menu-text: #dad6d0; /* Obsidian's #dadada in the same warm tint */
+  /* Anki's night-mode count colours, from its deckbrowser.css (AK.12) */
+  --anki-new: #93c5fd;
+  --anki-learn: #f87171;
+  --anki-review: #22c55e;
+  /* Ours, not Anki's: violet 400 of the same palette (Tailwind), 6.71 : 1 */
+  --anki-done: #a78bfa;
   --lichess-green: #629924;
   --lichess-green-hover: #75b32c;
   --lichess-accent: #3692e7;
-  
+
+  /* Lichess's board on a 1920 × 1080 screen at 125%: 864 screen px, 108 per square.
+     Pixel-exact only at that scale (UI.18). */
+  --board-size: 691.2px;
+
   /*--glass-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);*/
 
   /* Modern Font Stacks */
-  --font-modern-sans: 'Inter', 'Roboto', 'Noto Sans', 'Source Sans 3', sans-serif;
-  --font-modern-mono: 'JetBrains Mono', 'Fira Code', 'Roboto Mono', monospace;
+  --font-modern-sans:
+    var(--font-inter), "Roboto", "Noto Sans", "Source Sans 3", sans-serif;
+  --font-modern-mono: var(--font-jetbrains-mono), monospace;
 }
 
 * {
@@ -26,7 +44,15 @@
 }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family:
+    var(--font-inter),
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
   background-color: var(--lichess-bg);
   color: var(--lichess-text-primary);
   min-height: 100vh;
@@ -86,7 +112,8 @@ button {
   letter-spacing: 0.5px;
 }
 
-.lichess-header nav a:hover, .lichess-header nav a.active {
+.lichess-header nav a:hover,
+.lichess-header nav a.active {
   color: var(--lichess-text-bright);
 }
 
@@ -127,93 +154,120 @@ button {
 }
 
 /* Anki SRS Buttons */
-.btn-again { background-color: #c62828; color: white; }
-.btn-hard { background-color: #ef6c00; color: white; }
-.btn-good { background-color: #2e7d32; color: white; }
-.btn-easy { background-color: #1565c0; color: white; }
+.btn-again {
+  background-color: #c62828;
+  color: white;
+}
+.btn-hard {
+  background-color: #ef6c00;
+  color: white;
+}
+.btn-good {
+  background-color: #2e7d32;
+  color: white;
+}
+.btn-easy {
+  background-color: #1565c0;
+  color: white;
+}
 
-.btn-again:hover, .btn-hard:hover, .btn-good:hover, .btn-easy:hover {
+.btn-again:hover,
+.btn-hard:hover,
+.btn-good:hover,
+.btn-easy:hover {
   filter: brightness(1.15);
 }
 
 /* Typography */
-h1, h2, h3 {
+h1,
+h2,
+h3 {
   color: var(--lichess-text-bright);
 }
 
-h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
+h2 {
+  font-size: 1.4rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
 
-/* Authentic Lichess Newspaper Board SVG */
-.cg-board-newspaper cg-board {
-  background-image: url('https://lichess1.org/assets/images/board/svg/newspaper.svg') !important;
+/* Board and pieces (SM.08, SM.09). Lichess's newspaper and merida until
+   the script in <head> or the settings menu sets others on <html>. */
+:root {
+  --board: url(/board/newspaper.svg);
+  --piece-wP: url(/piece/merida/wP.svg);
+  --piece-wN: url(/piece/merida/wN.svg);
+  --piece-wB: url(/piece/merida/wB.svg);
+  --piece-wR: url(/piece/merida/wR.svg);
+  --piece-wQ: url(/piece/merida/wQ.svg);
+  --piece-wK: url(/piece/merida/wK.svg);
+  --piece-bP: url(/piece/merida/bP.svg);
+  --piece-bN: url(/piece/merida/bN.svg);
+  --piece-bB: url(/piece/merida/bB.svg);
+  --piece-bR: url(/piece/merida/bR.svg);
+  --piece-bQ: url(/piece/merida/bQ.svg);
+  --piece-bK: url(/piece/merida/bK.svg);
+}
+
+.board-themed cg-board {
+  background-image: var(--board) !important;
   background-size: cover !important;
 }
 
-/* Piece Set Classes using Lichess CDN */
-/* cburnett */
-.piece-set-cburnett piece.pawn.white { background-image: url('https://lichess1.org/assets/piece/cburnett/wP.svg') !important; }
-.piece-set-cburnett piece.knight.white { background-image: url('https://lichess1.org/assets/piece/cburnett/wN.svg') !important; }
-.piece-set-cburnett piece.bishop.white { background-image: url('https://lichess1.org/assets/piece/cburnett/wB.svg') !important; }
-.piece-set-cburnett piece.rook.white { background-image: url('https://lichess1.org/assets/piece/cburnett/wR.svg') !important; }
-.piece-set-cburnett piece.queen.white { background-image: url('https://lichess1.org/assets/piece/cburnett/wQ.svg') !important; }
-.piece-set-cburnett piece.king.white { background-image: url('https://lichess1.org/assets/piece/cburnett/wK.svg') !important; }
+.board-themed piece.pawn.white {
+  background-image: var(--piece-wP) !important;
+}
+.board-themed piece.knight.white {
+  background-image: var(--piece-wN) !important;
+}
+.board-themed piece.bishop.white {
+  background-image: var(--piece-wB) !important;
+}
+.board-themed piece.rook.white {
+  background-image: var(--piece-wR) !important;
+}
+.board-themed piece.queen.white {
+  background-image: var(--piece-wQ) !important;
+}
+.board-themed piece.king.white {
+  background-image: var(--piece-wK) !important;
+}
+.board-themed piece.pawn.black {
+  background-image: var(--piece-bP) !important;
+}
+.board-themed piece.knight.black {
+  background-image: var(--piece-bN) !important;
+}
+.board-themed piece.bishop.black {
+  background-image: var(--piece-bB) !important;
+}
+.board-themed piece.rook.black {
+  background-image: var(--piece-bR) !important;
+}
+.board-themed piece.queen.black {
+  background-image: var(--piece-bQ) !important;
+}
+.board-themed piece.king.black {
+  background-image: var(--piece-bK) !important;
+}
 
-.piece-set-cburnett piece.pawn.black { background-image: url('https://lichess1.org/assets/piece/cburnett/bP.svg') !important; }
-.piece-set-cburnett piece.knight.black { background-image: url('https://lichess1.org/assets/piece/cburnett/bN.svg') !important; }
-.piece-set-cburnett piece.bishop.black { background-image: url('https://lichess1.org/assets/piece/cburnett/bB.svg') !important; }
-.piece-set-cburnett piece.rook.black { background-image: url('https://lichess1.org/assets/piece/cburnett/bR.svg') !important; }
-.piece-set-cburnett piece.queen.black { background-image: url('https://lichess1.org/assets/piece/cburnett/bQ.svg') !important; }
-.piece-set-cburnett piece.king.black { background-image: url('https://lichess1.org/assets/piece/cburnett/bK.svg') !important; }
+/* A king in check: red under the king, as on Lichess (lila's _chessground.scss). */
+.board-themed cg-board square.check {
+  background: radial-gradient(
+    ellipse at center,
+    rgba(255, 0, 0, 1) 0%,
+    rgba(231, 0, 0, 1) 25%,
+    rgba(169, 0, 0, 0) 89%,
+    rgba(158, 0, 0, 0) 100%
+  );
+}
 
-/* staunty */
-.piece-set-staunty piece.pawn.white { background-image: url('https://lichess1.org/assets/piece/staunty/wP.svg') !important; }
-.piece-set-staunty piece.knight.white { background-image: url('https://lichess1.org/assets/piece/staunty/wN.svg') !important; }
-.piece-set-staunty piece.bishop.white { background-image: url('https://lichess1.org/assets/piece/staunty/wB.svg') !important; }
-.piece-set-staunty piece.rook.white { background-image: url('https://lichess1.org/assets/piece/staunty/wR.svg') !important; }
-.piece-set-staunty piece.queen.white { background-image: url('https://lichess1.org/assets/piece/staunty/wQ.svg') !important; }
-.piece-set-staunty piece.king.white { background-image: url('https://lichess1.org/assets/piece/staunty/wK.svg') !important; }
-
-.piece-set-staunty piece.pawn.black { background-image: url('https://lichess1.org/assets/piece/staunty/bP.svg') !important; }
-.piece-set-staunty piece.knight.black { background-image: url('https://lichess1.org/assets/piece/staunty/bN.svg') !important; }
-.piece-set-staunty piece.bishop.black { background-image: url('https://lichess1.org/assets/piece/staunty/bB.svg') !important; }
-.piece-set-staunty piece.rook.black { background-image: url('https://lichess1.org/assets/piece/staunty/bR.svg') !important; }
-.piece-set-staunty piece.queen.black { background-image: url('https://lichess1.org/assets/piece/staunty/bQ.svg') !important; }
-.piece-set-staunty piece.king.black { background-image: url('https://lichess1.org/assets/piece/staunty/bK.svg') !important; }
-
-/* alpha */
-.piece-set-alpha piece.pawn.white { background-image: url('https://lichess1.org/assets/piece/alpha/wP.svg') !important; }
-.piece-set-alpha piece.knight.white { background-image: url('https://lichess1.org/assets/piece/alpha/wN.svg') !important; }
-.piece-set-alpha piece.bishop.white { background-image: url('https://lichess1.org/assets/piece/alpha/wB.svg') !important; }
-.piece-set-alpha piece.rook.white { background-image: url('https://lichess1.org/assets/piece/alpha/wR.svg') !important; }
-.piece-set-alpha piece.queen.white { background-image: url('https://lichess1.org/assets/piece/alpha/wQ.svg') !important; }
-.piece-set-alpha piece.king.white { background-image: url('https://lichess1.org/assets/piece/alpha/wK.svg') !important; }
-
-.piece-set-alpha piece.pawn.black { background-image: url('https://lichess1.org/assets/piece/alpha/bP.svg') !important; }
-.piece-set-alpha piece.knight.black { background-image: url('https://lichess1.org/assets/piece/alpha/bN.svg') !important; }
-.piece-set-alpha piece.bishop.black { background-image: url('https://lichess1.org/assets/piece/alpha/bB.svg') !important; }
-.piece-set-alpha piece.rook.black { background-image: url('https://lichess1.org/assets/piece/alpha/bR.svg') !important; }
-.piece-set-alpha piece.queen.black { background-image: url('https://lichess1.org/assets/piece/alpha/bQ.svg') !important; }
-.piece-set-alpha piece.king.black { background-image: url('https://lichess1.org/assets/piece/alpha/bK.svg') !important; }
-
-/* merida */
-.piece-set-merida piece.pawn.white { background-image: url('https://lichess1.org/assets/piece/merida/wP.svg') !important; }
-.piece-set-merida piece.knight.white { background-image: url('https://lichess1.org/assets/piece/merida/wN.svg') !important; }
-.piece-set-merida piece.bishop.white { background-image: url('https://lichess1.org/assets/piece/merida/wB.svg') !important; }
-.piece-set-merida piece.rook.white { background-image: url('https://lichess1.org/assets/piece/merida/wR.svg') !important; }
-.piece-set-merida piece.queen.white { background-image: url('https://lichess1.org/assets/piece/merida/wQ.svg') !important; }
-.piece-set-merida piece.king.white { background-image: url('https://lichess1.org/assets/piece/merida/wK.svg') !important; }
-
-.piece-set-merida piece.pawn.black { background-image: url('https://lichess1.org/assets/piece/merida/bP.svg') !important; }
-.piece-set-merida piece.knight.black { background-image: url('https://lichess1.org/assets/piece/merida/bN.svg') !important; }
-.piece-set-merida piece.bishop.black { background-image: url('https://lichess1.org/assets/piece/merida/bB.svg') !important; }
-.piece-set-merida piece.rook.black { background-image: url('https://lichess1.org/assets/piece/merida/bR.svg') !important; }
-.piece-set-merida piece.queen.black { background-image: url('https://lichess1.org/assets/piece/merida/bQ.svg') !important; }
-.piece-set-merida piece.king.black { background-image: url('https://lichess1.org/assets/piece/merida/bK.svg') !important; }
-
-/* Force exactly 560px scaling to absolutely prevent Windows DPI sub-pixel gaps */
-.cg-wrap, cg-container, cg-board {
-  width: 560px !important;
-  height: 560px !important;
+/* Force an exact board size to prevent Windows DPI sub-pixel gaps */
+.cg-wrap,
+cg-container,
+cg-board {
+  width: var(--board-size) !important;
+  height: var(--board-size) !important;
 }
 
 /* Coordinates (Rank numbers on LEFT, File letters on BOTTOM) */
@@ -226,6 +280,22 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
   flex-direction: column-reverse !important;
   justify-content: space-around !important;
   align-items: flex-end !important;
+  /* Chessground shifts each label down 39%, so the last label's box hangs below
+     the board and makes the page scroll. The text itself stays inside. */
+  overflow: hidden !important;
+}
+
+/* Our own outer edge (UI.17): the SVG cuts off the outer half of the edge
+   outlines. 0.8px = 1 screen px at 125%. As on Lichess, the edge is half a line
+   between squares: each square adds 1 screen px to the line it shares.
+   Newspaper only: the other boards have no lines. */
+html[data-board="newspaper"] .board-themed::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 0.8px solid #939393;
+  pointer-events: none;
+  z-index: 3;
 }
 
 /* Demo-mode status line (cards remaining / graduated / good streak) — kept out
@@ -235,7 +305,8 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
   transition: opacity 0.15s ease;
 }
 
-.demo-status-hover:hover {
+.demo-status-hover:hover,
+:root[data-status-line="on"] .demo-status-hover {
   opacity: 1;
 }
 
@@ -260,11 +331,27 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
 }
 
 .cg-wrap coords coord {
-  font-family:'Inter','Arial', sans-serif !important;
-  color: var(--lichess-text-muted) !important;
-  font-weight: 500 !important;
+  /* Arial for a classical look. Arimo has Arial's letter widths and stands in
+     where Arial is not installed (Linux, Android). */
+  font-family: Arial, var(--font-arimo), sans-serif !important;
+  color: var(--coord-text) !important;
+  font-weight: 400 !important;
   font-size: 13px !important;
   text-transform: lowercase !important;
+  /* A drag in empty space would otherwise select the labels. */
+  user-select: none;
+}
+
+/* Large coordinates (UI.32), toggled with Ctrl + Alt + Shift + C + U.
+   Off-white, not white: pure white glares on a dark page. */
+html.coords-large .cg-wrap coords {
+  opacity: 1 !important;
+}
+
+html.coords-large .cg-wrap coords coord {
+  color: var(--coord-text-large) !important;
+  font-size: 16px !important;
+  text-transform: uppercase !important;
 }
 
 /* ======================================================== */
@@ -277,7 +364,7 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
   height: 100%;
   width: 100%;
   font-family: var(--font-modern-sans);
-  
+
   /* Webkit custom scrollbar */
   scrollbar-width: thin;
   scrollbar-color: #555 #262421;
@@ -287,38 +374,68 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
   width: 8px;
 }
 .lichess-move-list-container::-webkit-scrollbar-track {
-  background: #262421; 
+  background: #262421;
 }
 .lichess-move-list-container::-webkit-scrollbar-thumb {
-  background-color: #555; 
+  background-color: #555;
   border-radius: 4px;
 }
 .lichess-move-list-container::-webkit-scrollbar-thumb:hover {
-  background-color: #777; 
+  background-color: #777;
 }
 
 .lichess-move-grid {
+  --move-number-width: 44px;
   display: grid;
-  grid-template-columns: 44px 1fr 1fr;
+  grid-template-columns: var(--move-number-width) 1fr 1fr;
   align-items: center;
-  font-size: 14.5px;
   line-height: 26px;
-  padding-top: 6px;
-  padding-bottom: 6px;
+  --grid-padding: 6px;
+  padding-top: var(--grid-padding);
+  padding-bottom: var(--grid-padding);
+  /* The move-number column's shading, painted on the grid so it runs through the
+     top padding, flush with the list's top. It stops short of the bottom padding,
+     so it ends level with the last move's cell, as on Lichess. */
+  background: linear-gradient(
+      to right,
+      #33312e var(--move-number-width),
+      transparent var(--move-number-width)
+    )
+    top left / 100% calc(100% - var(--grid-padding)) no-repeat; /* Lichess's index cell */
 }
 
+/* As on the Lichess analysis board: shaded (see .lichess-move-grid), centred, no dot.
+   Roboto like the moves; its digits are all one width, so 1 to 200 stay steady. */
 .move-number {
+  /* Lichess's sizes on a 1536px-wide window: numbers 14px, moves 16.59px. */
+  font-size: 14px;
   color: var(--lichess-text-muted);
-  text-align: right;
-  padding-right: 12px;
+  text-align: center;
   user-select: none;
-  font-family: var(--font-modern-sans);
+  font-family: var(--font-roboto), sans-serif;
+}
+
+/* GR.07, UI.36: your move's number, marked wrong or revealed, in the status
+   light's fills (UI.30). White on red 5.6 : 1; the panel's colour on amber 7.9 : 1. */
+.move-number.mark-wrong {
+  background-color: #c62828;
+  color: #ffffff;
+}
+
+.move-number.mark-revealed {
+  background-color: #f9a825;
+  color: #262421;
 }
 
 .move-san {
-  font-family: 'JetBrains Mono', 'Inter', sans-serif;
+  /* Roboto: chosen over Arial and Inter on /moves as the cleanest for SAN. */
+  font-family: var(--font-roboto), sans-serif;
+  font-size: 16.59px;
   color: var(--lichess-text-primary);
-  padding-left: 4px;
+  /* UI.26: the eval sits at the cell's right edge, centred in the row as on Lichess. */
+  display: flex;
+  align-items: center;
+  padding: 0 0.3em 0 0.5em; /* Lichess */
   cursor: pointer;
   /*border-radius: 3px;
   margin: 1px 4px 1px 0;*/
@@ -336,3 +453,319 @@ h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 12px; }
   font-weight: 600;
 }
 
+/* UI.37: a wrong move's row under its move. Smaller than a move, on a dark
+   red shade across both move cells; not clickable. */
+.move-mistake {
+  font-family: var(--font-roboto), sans-serif;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--lichess-text-muted);
+  background-color: #3a2424;
+  display: flex;
+  align-items: center;
+  padding: 0 0.3em 0 0.5em; /* As .move-san */
+  user-select: none;
+}
+
+/* Dropped for now, with its ✗ in LichessMoveList.tsx (UI.37); may come back.
+.mistake-cross {
+  margin-left: 0.4em;
+  color: #e05252;
+}
+*/
+
+/* UI.26: as on Lichess (0.8 × the move size, weight 300, #949494), but JetBrains
+   Mono with two decimals, so the decimal points line up. White on the current move.
+   Eval Mono is JetBrains Mono Light with the dot taken out of the zero. */
+.move-eval {
+  margin-left: auto;
+  font-family: var(--font-eval-mono), var(--font-jetbrains-mono), monospace;
+  font-size: 0.8em;
+  font-weight: 300;
+  color: #949494;
+}
+
+.move-san.active .move-eval {
+  color: inherit;
+}
+
+/* ======================================================== */
+/* Eval gauge (UI.31)                                       */
+/* ======================================================== */
+
+/* A copy of Lichess's dark-theme gauge (lila, ui/lib/css/ceval/_eval-gauge.scss).
+   --eval-percent is Black's share, from the top; registered so it can slide. */
+@property --eval-percent {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 50%;
+}
+
+.eval-gauge {
+  width: 15px; /* Lichess's block gap */
+  height: 100%;
+  position: relative;
+  background: linear-gradient(
+    to bottom,
+    #444 var(--eval-percent),
+    #c0c0c0 var(--eval-percent)
+  );
+  transition: --eval-percent 1s ease;
+  overflow: hidden;
+}
+
+.eval-gauge.empty {
+  opacity: 0.5;
+}
+
+.eval-gauge.reverse {
+  transform: rotateX(180deg);
+}
+
+.eval-gauge::after {
+  content: "";
+  display: block;
+  position: absolute;
+  inset: 0;
+  box-shadow: 0 0 5px rgb(0 0 0 / 0.5) inset;
+}
+
+/* In the trainer: the gauge 4px right of the board, the move list past it (4 + 15 + 4px). */
+.trainer-gauge {
+  position: absolute;
+  left: calc(100% + 4px);
+  top: 0;
+  height: var(--board-size);
+}
+
+.trainer-move-list {
+  left: calc(100% + 23px);
+}
+
+/* Lines at every 12.5%: each tick is a box from the top whose bottom border is the line. */
+.eval-gauge-tick {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  opacity: 0.4;
+  border-bottom: 2px ridge #888;
+}
+
+/* The middle line: thick and in Lichess's accent at half strength. */
+.eval-gauge-tick.zero {
+  top: 6px;
+  opacity: 1;
+  border-bottom: 7px solid hsl(22 100% 42% / 0.5);
+  margin-top: -3px;
+}
+
+/* Settings button (SM.01): three dots in the top-right corner, a box behind
+   them on hover. Sizes from Obsidian's "More options" button. */
+.settings-button {
+  position: fixed;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--settings-icon);
+  border-radius: var(--settings-button-radius, 4px);
+  z-index: 200;
+}
+
+.settings-button:hover,
+.settings-button.hover,
+.settings-button.open {
+  background: var(--settings-hover-bg);
+}
+
+.settings-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Settings menu (SM.01): under the button, right edges level, as Obsidian's menus. */
+.settings-menu {
+  position: fixed;
+  top: calc(8px + 28px + 4px);
+  right: 8px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  padding: 6px;
+  background: var(--lichess-panel-bg);
+  border: 1px solid var(--lichess-border);
+  border-radius: var(--settings-menu-radius, 1px);
+}
+
+.settings-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: var(--settings-menu-item-radius, 0);
+  color: var(--menu-text);
+  font-size: 14px;
+  line-height: 20px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.settings-menu-item:hover,
+.settings-menu-item.hover {
+  background: var(--settings-hover-bg);
+}
+
+.settings-menu-item svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--settings-icon);
+}
+
+/* "PGN copied" (SM.07, MS.02): where the menu was, in the menu's style, then fades. */
+.settings-notice {
+  top: calc(8px + 28px + 4px);
+  right: 8px;
+  animation: settings-notice 2.45s forwards; /* 2s, then a 0.45s fade */
+}
+
+/* "Answer undone" (MS.01): bottom left, 8px above the status light (UI.30), left edges level. */
+.undo-notice {
+  left: 16px;
+  bottom: calc(16px + clamp(12px, 0.9vw, 18px) + 8px);
+  animation: undo-notice 3.45s forwards; /* 3s, then the same 0.45s fade */
+}
+
+@keyframes undo-notice {
+  0%, 86.96% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* UI.38: an eval's depth on hover: centred over the eval, 4px above it, at once. */
+.eval-tooltip {
+  transform: translate(-50%, calc(-100% - 4px));
+}
+
+/* The three share one look (MS.02). */
+.settings-notice,
+.undo-notice,
+.eval-tooltip {
+  position: fixed;
+  z-index: 200;
+  padding: 4px 8px;
+  background: var(--lichess-panel-bg);
+  border: 1px solid var(--lichess-border);
+  border-radius: var(--settings-menu-radius, 1px);
+  color: var(--menu-text);
+  font-size: 14px;
+  line-height: 20px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+@keyframes settings-notice {
+  0%,
+  81.6% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Board and Piece set (SM.08, SM.09): a line above them, as Obsidian's menus,
+   and a chevron on the right that says they open a list. */
+.settings-menu-separator {
+  height: 1px;
+  margin: 6px -6px;
+  background: var(--lichess-border);
+}
+
+.settings-menu-item .chevron {
+  margin-left: auto;
+}
+
+/* A setting's current value, at the right edge (SM.12). Every value sits in one grid
+   cell, the others hidden, so the cell is as wide as the widest. */
+.settings-menu-value {
+  display: grid;
+  justify-items: end;
+  margin-left: auto;
+  padding-left: 16px;
+  color: var(--settings-icon);
+}
+
+.settings-menu-value > * {
+  grid-area: 1 / 1;
+}
+
+/* The lists replace the menu in the same panel, as in Lichess's own menu:
+   222px inside, Lichess's width. */
+.settings-menu.picker {
+  width: calc(222px + 2 * 6px + 2px);
+}
+
+.settings-picker {
+  display: grid;
+  max-height: calc(100vh - 150px);
+  overflow-y: auto;
+}
+
+/* Boards: three to a row, each 64 × 32, two squares. Lichess's hover and green. */
+.settings-picker.boards {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.settings-picker.boards button {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.settings-picker.boards span {
+  width: 64px;
+  height: 32px;
+  background-size: cover;
+}
+
+/* Newspaper has no thumbnail: its top two squares, from the SVG. */
+.settings-picker.boards span.svg {
+  background-size: 256px 256px;
+  background-position: 0 0;
+}
+
+.settings-picker.boards button:hover {
+  filter: brightness(1.05);
+}
+
+.settings-picker.boards button:hover span {
+  transform: scale(1.05);
+}
+
+.settings-picker.boards button.active {
+  background: #629924;
+}
+
+/* Piece sets: four to a row, the white knight. Lichess's hover and orange. */
+.settings-picker.pieces {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.settings-picker.pieces button {
+  aspect-ratio: 1;
+  background-size: cover;
+}
+
+.settings-picker.pieces button:hover {
+  background-color: rgb(250 250 250 / 0.15);
+}
+
+.settings-picker.pieces button.active {
+  background-color: rgb(191 128 29 / 0.7);
+}
