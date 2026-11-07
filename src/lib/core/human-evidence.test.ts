@@ -163,8 +163,10 @@ describe("HEG the selector in the generator", () => {
       assert.ok(recordedLines[recordedLines.length - 1].startsWith("Sweep 1"));
       assert.ok(!recordedLines.includes("[Queue] waiting 0"));
       assert.ok(recordedLines.some(line => /^Run started .*, finished$/.test(line)));
-      assert.ok(recordedLines.some(line => /^Searches +200M \d+.*; 2M \d+/.test(line)));
-      assert.ok(recordedLines.some(line => /^Balance +endings .*, too rare .*, not listed .*, tiny \d/.test(line)));
+      assert.ok(recordedLines.some(line => /^Searches +200M \d+, 2M \d+$/.test(line)));
+      // Nothing was too small to spread, so tiny is left out.
+      assert.ok(recordedLines.some(line => /^Balance +endings .*, too rare .*, not listed [\d.]+%$/.test(line)));
+      assert.ok(recordedLines.some(line => /^Black .*human evidence \d+ \([\d.]+%\)/.test(line)));
       assert.ok(recordedLines.some(line => /^Dequeue .*, cumProb [\d.]+%, waiting \d+$/.test(line)));
       // Every route is printed and counted, the hardcoded first moves too.
       const dequeues = recordedLines.filter(line => line.startsWith("Dequeue")).length;

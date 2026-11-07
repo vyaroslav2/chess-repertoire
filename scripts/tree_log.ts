@@ -76,10 +76,6 @@ const duration = (seconds: number) => {
   const whole = Math.round(seconds), hours = Math.floor(whole / 3600), minutes = Math.floor(whole % 3600 / 60);
   return `${hours > 0 ? `${hours}h ` : ""}${hours > 0 || minutes > 0 ? `${minutes}m ` : ""}${whole % 60}s`;
 };
-const searchCounts = (size: string, facts: SearchFact[]) => {
-  const cached = facts.filter(fact => fact.reused).length;
-  return `${size} ${facts.length - cached}${cached ? `, cached ${cached}` : ""}`;
-};
 const elapsedLine = (elapsed: number | null) => line("Elapsed", elapsed === null ? "—" : duration(elapsed));
 const numberedRoute = (route: string) =>
   route.split(" ").filter(Boolean).map((san, ply) => ply % 2 === 0 ? `${ply / 2 + 1}. ${san}` : san).join(" ");
@@ -288,10 +284,10 @@ function runBlocks(input: TreeLogInput): Block[] {
   return blocks;
 }
 
-function tally(labels: string[]): string {
+function tally(labels: string[], note: (label: string, total: number) => string = () => ""): string {
   const totals = new Map<string, number>();
   for (const label of labels) totals.set(label, (totals.get(label) ?? 0) + 1);
-  return [...totals].sort((a, b) => b[1] - a[1]).map(([label, total]) => `${label} ${total}`).join(", ");
+  return [...totals].sort((a, b) => b[1] - a[1]).map(([label, total]) => `${label} ${total}${note(label, total)}`).join(", ");
 }
 
 // S3.10, HEG.41: totals for the whole run.
@@ -312,17 +308,22 @@ function summaryLines(input: TreeLogInput): string[] {
   const sum = (values: number[]) => percent(values.reduce((total, value) => total + value, 0));
   const hasMoves = new Set(input.moves.map(move => move.fromNodeId));
   const tiny = input.events.flatMap(event => event.type === "end" && event.tinyDropped !== undefined ? [event.tinyDropped] : []);
+  // Unknown on a replayed run, so a dash; left out when it is exactly 0.
+  const tinyText = !tiny.length ? ", tiny —" : tiny[0] === 0 ? "" : `, tiny ${percent(tiny[0])}`;
+  const blackLabels = replies.map(reply => reply.selectionMethod?.toLowerCase() ?? "unknown");
+  // How often a human move overruled the baseline, among the replies where the selector had the choice.
+  const humanShare = (total: number) => ` (${percent(total / (total + blackLabels.filter(label => label === "baseline").length))})`;
   return [
     `[Summary]`,
     line("Positions", String(input.events.filter(event => event.type === "position").length)),
     line("White", `${whites.length}: ${tally(whiteLabels)}`),
-    line("Black", `${replies.length}: ${tally(replies.map(reply => reply.selectionMethod?.toLowerCase() ?? "unknown"))}`),
+    line("Black", `${replies.length}: ${tally(blackLabels, (label, total) => label === "human evidence" ? humanShare(total) : "")}`),
     ...(endings.length ? [line("Endings", tally(endings))] : []),
     ...(judged.length ? [line("Selector", `judged ${judged.length}, switched ${switched.length}`)] : []),
     ...(sweeps.length ? [line("Sweeps", `${sweeps.length}, reopened ${sweeps.reduce((sum, sweep) => sum + sweep.reopenedMoveIds.length, 0)}`)] : []),
-    ...(searches.length ? [line("Searches", `${searchCounts("200M", searches.filter(fact => fact.kind === "deep"))}; ${searchCounts("2M", searches.filter(fact => fact.kind === "selector"))}`)] : []),
+    ...(searches.length ? [line("Searches", `200M ${searches.filter(fact => fact.kind === "deep").length}, 2M ${searches.filter(fact => fact.kind === "selector").length}`)] : []),
     line("Balance", `endings ${sum(input.nodes.filter(node => !hasMoves.has(node.id)).map(node => node.cumProb))}, too rare ${sum(input.nodes.map(node => node.rareDropped))}, ` +
-      `not listed ${sum(input.nodes.map(node => node.unaccountedDropped))}, tiny ${tiny.length ? percent(tiny[0]) : "—"}`),
+      `not listed ${sum(input.nodes.map(node => node.unaccountedDropped))}${tinyText}`),
     ...(waiting ? [line("Waiting", `${waiting}: the run stopped early`)] : []),
     line("Elapsed", elapsed.length ? duration(Math.max(...elapsed)) : "—")
   ];
