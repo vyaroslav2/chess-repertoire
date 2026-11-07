@@ -64,7 +64,9 @@ export const defaultConfig: Config = {
   localStockfishThreads: 1,
   localStockfishHashMb: 1024,
   localStockfishMultiPv: 1,
-  hardcodedBlackResponses: ["1. e4 c6", "1. d4 d5"],
+  // 2026-11-07: d5 against every first move but 1. e4 and 1. c4, so the rare openings lead to 1. d4 d5 lines.
+  // 1. c4 d5 loses 52 cp (200M nodes); 1. c4 e6 loses 3 and reaches the 1. d4 d5 2. c4 e6 tree after 2. d4 d5.
+  hardcodedBlackResponses: ["1. e4 c6", "1. d4 d5", "1. c4 e6", "1. Nf3 d5", "1. e3 d5", "1. g3 d5", "1. f4 d5", "1. b3 d5", "1. b4 d5", "1. d3 d5", "1. Nc3 d5", "1. c3 d5", "1. a3 d5", "1. h3 d5", "1. g4 d5", "1. a4 d5", "1. h4 d5", "1. Na3 d5", "1. Nh3 d5", "1. f3 d5"],
   humanEvidence: false,
   selectorMonths: { since: "2023-06", until: "2026-05" },
   selectorConfidence: 0.9,

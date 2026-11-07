@@ -45,7 +45,9 @@ test('EW engine response', async (t) => {
   await t.test('EW.13 the route, not the position, matches a hardcoded line', () => {
     assert.equal(findHardcodedResponse(['e4'], defaultConfig.hardcodedBlackResponses), 'c6');
     assert.equal(findHardcodedResponse(['d4'], defaultConfig.hardcodedBlackResponses), 'd5');
-    assert.equal(findHardcodedResponse(['Nf3'], defaultConfig.hardcodedBlackResponses), null);
+    assert.equal(findHardcodedResponse(['c4'], defaultConfig.hardcodedBlackResponses), 'e6');
+    assert.equal(findHardcodedResponse(['Nf3'], defaultConfig.hardcodedBlackResponses), 'd5');
+    assert.equal(findHardcodedResponse(['Nf3', 'd5', 'c4'], defaultConfig.hardcodedBlackResponses), null, 'only the first move is hardcoded');
     assert.equal(findHardcodedResponse([], defaultConfig.hardcodedBlackResponses), null, 'White to move has no Black reply');
     const lines = ['1. d4 Nf6 2. Nf3 d5'];
     assert.equal(findHardcodedResponse(['d4', 'Nf6', 'Nf3'], lines), 'd5');

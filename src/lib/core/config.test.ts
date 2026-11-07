@@ -31,7 +31,8 @@ test('generation-config: every setting has the value in the note', () => {
     assert.strictEqual(defaultConfig.localStockfishThreads, 1);
     assert.strictEqual(defaultConfig.localStockfishHashMb, 1024);
     assert.strictEqual(defaultConfig.localStockfishMultiPv, 1);
-    assert.deepStrictEqual(defaultConfig.hardcodedBlackResponses, ['1. e4 c6', '1. d4 d5']);
+    assert.equal(defaultConfig.hardcodedBlackResponses.length, 20, 'one line per legal first move');
+    assert.deepStrictEqual(defaultConfig.hardcodedBlackResponses.slice(0, 3), ['1. e4 c6', '1. d4 d5', '1. c4 e6']);
 });
 
 const AMATEUR_PROFILE = '5c0daf4323bccc0ec5670cf32ed251bcf481b49a958316be8bc3bf8c401f2307';
