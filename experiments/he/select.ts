@@ -3,7 +3,7 @@ import { open, readFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import { Chess } from "chess.js";
 import { computeExplorerCacheProfile, defaultConfig } from "../../src/lib/core/config";
-import { chances, choose, DIALS, games, judge, score, scoreDraws, type Curve, type Dials, type Judged, type Record3 } from "../../src/lib/core/selector";
+import { chances, choose, DIALS, engineCheck, games, judge, score, scoreDraws, type Curve, type Dials, type Judged, type Record3 } from "../../src/lib/core/selector";
 import { HeEngine, type Evaluation } from "./engine";
 import { assertDataDirectory, DATA_ROOT, HE_ROOT, runPath } from "./paths";
 import { explorerCounts, httpFetcher, DEFAULT_BASE, EXPLORER, type ExplorerAnswer, type Fetcher, type Months } from "./explorer";
@@ -12,7 +12,7 @@ import { explorerCounts, httpFetcher, DEFAULT_BASE, EXPLORER, type ExplorerAnswe
 // (HEG.80): in a position with Black to move, the tree's move (the champion) stays unless another
 // move's human games show, at the chosen confidence, that it scores better by more than the margin,
 // within the per-move cp limit.
-export { choose, couldPass, DIALS, judge, safeGain, scoreDraws, type Curve, type Dials, type Judged, type Record3, type Verdict } from "../../src/lib/core/selector";
+export { choose, couldPass, DIALS, engineCheck, judge, safeGain, scoreDraws, type Curve, type Dials, type Judged, type Record3, type Verdict } from "../../src/lib/core/selector";
 
 type TreeRow = { id: string; positionKey: string; fullFen: string; cumProb: number; displayPgn: string;
   san: string; uci: string; selectionMethod: string | null };
@@ -77,9 +77,10 @@ export async function selectMoves(name: string, pool: string, kChoice: "low" | "
       const seed = "select:" + node.positionKey;
       const champion = { cpWhite: championEval.cpWhite, draws: scoreDraws(curve, championEval.cpWhite, k, record, dials.draws, seed + ":" + node.uci) };
       const legal = new Set(new Chess(node.fullFen).moves({ verbose: true }).map(m => m.lan));
-      const judged = [];
+      const screened = [];
       for (const move of moves.filter(m => m.uci !== node.uci && games(m.record) && legal.has(m.uci)))
-        judged.push(await judge(move, champion, curve, k, dials, seed + ":" + move.uci, () => evaluate(move.uci)));
+        screened.push(await judge(move, champion, curve, k, dials, seed + ":" + move.uci, () => evaluate(move.uci)));
+      const judged = await engineCheck(screened, dials);
       const winner = choose(judged, dials);
       rows.push({ ...base, k, championInfo, contenders: judged, chosen: winner?.san ?? node.san, switched: !!winner });
       await output.write(JSON.stringify(rows.at(-1)) + "\n");

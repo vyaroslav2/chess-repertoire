@@ -184,10 +184,10 @@ function selectorLines(input: TreeLogInput, reply: RepertoireMove): string[] {
     ["move", "games", "score", "2M eval", "safe gain", allowed < selectorCpLimit ? `200M loss ≤${allowed}` : "200M loss", "verdict"],
     [reply.championSan ?? "?", count(stored.championGames), stored.championScore === null ? "—" : percent(stored.championScore),
       evalText(reply.championCp2M), "—", "—", stored.judged.some(move => move.san === reply.san) ? "" : "champion"],
-    // HEG.32: a safe-gain failure stops before its 200M search; its stored cp loss is the 2M evals' difference.
+    // HEG.32–33: a safe-gain failure or an outranked move has no 200M search; its stored cp loss is the 2M evals' difference.
     ...stored.judged.map(move => [move.san, count(move.games), percent(move.score), evalText(move.cpWhite, move.mateWhite),
       move.safeGain === undefined ? "—" : (move.safeGain * 100).toFixed(1),
-      move.cpLoss === undefined || move.cpLoss === null || move.verdict === "safe-gain" ? "—" : String(move.cpLoss),
+      move.cpLoss === undefined || move.cpLoss === null || move.verdict === "safe-gain" || move.verdict === "outranked" ? "—" : String(move.cpLoss),
       move.san === reply.san ? "pass" : ""])
   ];
   return table(rows, [1, 2, 3, 4, 5]);

@@ -28,7 +28,7 @@ HEG.11 **The steps for one position**, as [[HES]] HES.11–18:
 3. For each other legal move with games: the best-case filter (HES.13). A move that couldn't pass even with the champion's eval as its prior is not searched.
 4. Search the rest at 2M nodes. Prior centre: the curve at the move's eval, capped at the champion's eval (HES.14). Prior strength: k for this move number (HEG.23).
 5. Safe gain at `selectorConfidence` (HES.16). It must exceed `selectorMargin`.
-6. cp loss against the champion, measured at 200M (HEG.32), must be within `selectorCpLimit`, and within what the line budget has left (HEG.31).
+6. cp loss against the champion, measured at 200M (HEG.32), must be within `selectorCpLimit`, and within what the line budget has left (HEG.31). Moves are checked in safe-gain order, and only while they could still win (HEG.33).
 7. Of the moves that pass, the highest safe gain wins; a near-tie goes to the better eval (HES.18).
 
 HEG.12 **What follows a switch is built like any other line.** The position after the chosen move goes on the queue as usual ([[S3]]). Transpositions, `minCumProb`, `depthCap` and the probability cascade are unchanged. A position is judged once, by the route that owns it ([[TR.excalidraw|TR]]).
@@ -70,7 +70,12 @@ HEG.31 **The line budget** ([[HES]] HES.19). The cp losses of the switches along
 * Why: in a deep line, many small losses could add up to a bad position. The per-move limit can't see that.
 * Decided 2026-10-31: 50 cp for a line, with 30 cp for one move. Today's switches lose 0–15 cp each, so a line can take three or four typical ones. The report could never put two on one line (HES.19), so how they add up is still to be seen.
 
-HEG.32 **cp loss at 200M.** Decided 2026-10-31. The prior needs 2M evals, because the curve was measured on them. The cp limit and the line budget are about soundness, and there the generator's deeper search is better. So a contender that passes the safe gain gets a 200M search, and its cp loss is measured against EW.09's eval. The winner needs that search anyway (EW.11), so only the other passing contenders cost extra, a few minutes each.
+HEG.32 **cp loss at 200M.** Decided 2026-10-31. The prior needs 2M evals, because the curve was measured on them. The cp limit and the line budget are about soundness, and there the generator's deeper search is better. So a contender that passes the safe gain gets a 200M search, and its cp loss is measured against EW.09's eval. The winner needs that search anyway (EW.11), so only the other contenders checked cost extra, about 8 minutes each ([[SC]] SC.01).
+
+HEG.33 **Only moves that could still win get a 200M search.** Decided 2026-11-07. The first move to pass, in safe-gain order, has the highest safe gain of all the moves that pass. A move more than the near-tie (0.5 points) below it can never be chosen (HES.18), so it is not searched.
+* How: sort the moves past the safe gain by safe gain, highest first. Check each in turn. Once one passes, check only the moves within 0.5 points of it. The rest are `outranked`: no 200M search, and no cp loss shown in the log.
+* A move that fails the check does not set the floor, so the next one is checked as before. The choice is always the same as checking every move.
+* Why: one position on 2026-11-07 (#105, 1. e4 c6 2. Nf3 d5 3. d3) had ten moves past the safe gain, so ten 200M searches, about 80 minutes. Bg4 (10.3) passed first, so only g6 (10.1) was within 0.5 points. Two searches would have given the same choice.
 
 ## What it records
 
@@ -125,9 +130,10 @@ HEG.96 **Choices made in building.**
 * `lineCpSpent` is stored on every Black move the selector judged. Where it did not run (a hardcoded move, or `humanEvidence` off), it is null and counts as 0.
 * A contender may lose no more than the cp limit or what the budget has left, whichever is smaller. A switch to a move the 200M search rates better spends nothing.
 * With `humanEvidence` off, Black's choice and what is stored are exactly as before; the tests check it.
+* 2026-11-07 (HEG.33): `judge` in `selector.ts` now stops at the safe gain. A move past it is `cleared`. `engineCheck` then runs the cp checks in safe-gain order and marks the moves it skips `outranked`. `choose` is unchanged. HE's `select` uses the same two steps, so its report marks `outranked` moves too; their cp loss there is still the 2M evals' difference. Test: `experiments/he/tests/he.test.ts`, on position #105.
 
 HEG.97 **Tests.** `src/lib/core/human-evidence.test.ts`: HE's read of a 2M search, k at the trend's ends, the switch's field rules, and a whole run on a fake Explorer and engine. In that run, a switch is built on and recorded with its fields; the budget blocks a second switch on the same line; the hardcoded first move is never judged; and `off` stores nothing new. All 246 app tests pass on `test.db`; HE's 34 pass.
 
 HEG.98 **Not done yet.**
 * Done 2026-10-31: the migration is applied to `dev.db` (`prisma migrate deploy`; backup `prisma/dev.db.bak-2026-10-31`).
-* The first build (HEG.60) has not run. It needs `humanEvidence` on, a Lichess token for the Explorer (as EX already does), and time: one 2M search per judged move and one 200M search per passing contender.
+* The first build (HEG.60) has not run. It needs `humanEvidence` on, a Lichess token for the Explorer (as EX already does), and time: one 2M search per judged move and one 200M search per contender that could still win (HEG.33).

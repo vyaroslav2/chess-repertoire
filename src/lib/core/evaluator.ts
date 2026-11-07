@@ -9,7 +9,7 @@ import {
 } from "./local-engine";
 import { parseFullFen, positionKeyFromFen } from "./fen";
 import { defaultConfig, type Config } from "./config";
-import { choose, games, judge, score, scoreDraws, type Dials, type Judged, type Record3 } from "./selector";
+import { choose, engineCheck, games, judge, score, scoreDraws, type Dials, type Judged, type Record3 } from "./selector";
 import { selectorCurve, selectorK } from "./selector-evidence";
 import { fetchSelectorCounts as fetchSelectorCountsFromLichess } from "../api/lichess";
 import type { ResponseEvaluationSource, ResponseMoveOrigin, ResponseSelectionMethod } from "../db/operations";
@@ -202,18 +202,20 @@ async function runSelector(input: {
   const champion = { cpWhite: championEval.cpWhite,
     draws: scoreDraws(selectorCurve, championEval.cpWhite, k, championRecord, dials.draws, seed + ":" + baseline.uci) };
   const cpAllowed = Math.min(config.selectorCpLimit, config.selectorLineBudget - lineCpSpent);
-  const judged: Judged[] = [];
+  const screened: Judged[] = [];
   for (const move of moves) {
     if (move.uci === baseline.uci || !games(move.record)) continue;
-    judged.push(await judge(move, champion, selectorCurve, k, dials, seed + ":" + move.uci, () => eval2M(move.uci), {
-      cpAllowed,
-      // HEG.32: against EW.09's eval, from the generator's own search of the position the move reaches.
-      cpLoss: async () => {
-        const after = await evaluateBlackMoveResult(chess, move.uci, input.runner, config, input.onSearch);
-        return after.cp === null ? null : after.cp - baseline.cp!;
-      }
-    }));
+    screened.push(await judge(move, champion, selectorCurve, k, dials, seed + ":" + move.uci, () => eval2M(move.uci)));
   }
+  // HEG.33: the 200M searches only for moves that could still win.
+  const judged = await engineCheck(screened, dials, {
+    cpAllowed,
+    // HEG.32: against EW.09's eval, from the generator's own search of the position the move reaches.
+    cpLoss: async move => {
+      const after = await evaluateBlackMoveResult(chess, move.uci, input.runner, config, input.onSearch);
+      return after.cp === null ? null : after.cp - baseline.cp!;
+    }
+  });
   const winner = choose(judged, dials);
   return { ...base, championCp2M: championEval.cpWhite, judged, searches,
     chosen: winner ? { san: winner.san, cp2M: winner.cpWhite!, cpLoss: winner.cpLoss!, games: winner.games, score: winner.score,

@@ -13,7 +13,7 @@ import { basis, chances, fit, random } from "../curve";
 import { fitK, fitKTrend, logGamma, type KGroup } from "../scatter";
 import { sampledMoves } from "../dots";
 import { poolRuns } from "../pool";
-import { checkSelection, choose, couldPass, DIALS, judge, safeGain, scoreDraws, type Curve } from "../select";
+import { checkSelection, choose, couldPass, DIALS, engineCheck, judge, safeGain, scoreDraws, type Curve, type Judged } from "../select";
 import { DATA_ROOT, assertDataDirectory, runPath } from "../paths";
 import { sampleGroups, walkExplorer, type ExplorerAnswer } from "../explorer";
 import type { Observation } from "../types";
@@ -437,7 +437,9 @@ test("the selector switches only on strong evidence, within the cp limit (HES.40
     ({ cpWhite, draws: scoreDraws(curve, cpWhite, k, record(games, score), DIALS.draws, "champion") });
   // The worked example: champion at +30 with 500 games at 47%; contender at +50, k = 80.
   const a = champion(30, 500, 0.47, 80);
-  const strong = await judge({ uci: "b", san: "B", record: record(600, 0.54) }, a, curve, 80, DIALS, "b", evaluation(50));
+  // One contender through both checks: safe gain (judge), then the cp limit (engineCheck).
+  const checked = async (judged: Promise<Judged>) => (await engineCheck([await judged], DIALS))[0];
+  const strong = await checked(judge({ uci: "b", san: "B", record: record(600, 0.54) }, a, curve, 80, DIALS, "b", evaluation(50)));
   // With 200 games it can't pass even at the champion's prior, so it isn't searched.
   const weak = await judge({ uci: "b", san: "B", record: record(200, 0.54) }, a, curve, 80, DIALS, "b", never);
   assert.deepEqual([strong.verdict, weak.verdict], ["passes", "best-case"], JSON.stringify([strong, weak]));
@@ -457,16 +459,42 @@ test("the selector switches only on strong evidence, within the cp limit (HES.40
       safeGain(scoreDraws(curve, 10, 2000, move.record, DIALS.draws, "f"), big.draws, DIALS.confidence).safe <= DIALS.margin);
   }
   // A contender the 2M search rates above the champion gets no better prior than the champion's.
-  const better = await judge({ uci: "b", san: "B", record: record(600, 0.54) }, bg7, curve, 80, DIALS, "b", evaluation(-60));
+  const better = await checked(judge({ uci: "b", san: "B", record: record(600, 0.54) }, bg7, curve, 80, DIALS, "b", evaluation(-60)));
   assert.ok(better.verdict === "passes" && better.priorScore === curve(0).score && better.cpLoss === -60, JSON.stringify(better));
   // Beyond the cp limit, or a mate: no switch, whatever the games say.
-  assert.equal((await judge({ uci: "b", san: "B", record: record(3000, 0.6) }, a, curve, 80, DIALS, "b", evaluation(70))).verdict, "cp-limit");
+  assert.equal((await checked(judge({ uci: "b", san: "B", record: record(3000, 0.6) }, a, curve, 80, DIALS, "b", evaluation(70)))).verdict, "cp-limit");
   assert.equal((await judge({ uci: "b", san: "B", record: record(600, 0.54) }, a, curve, 80, DIALS, "b", evaluation(null, -3))).verdict, "mate");
   // Choice: the highest safe gain; within 0.5 points, the better eval.
   const passing = (san: string, safe: number, cpWhite: number) => ({ uci: san, san, games: 1, score: 1, verdict: "passes" as const, safeGain: safe, cpWhite });
   assert.equal(choose([passing("X", 0.03, 40), passing("Y", 0.05, 45)], DIALS)?.san, "Y");
   assert.equal(choose([passing("X", 0.048, 40), passing("Y", 0.05, 45)], DIALS)?.san, "X");
   assert.equal(choose([{ ...passing("X", 0.03, 40), verdict: "safe-gain" }], DIALS), null);
+});
+test("the engine check runs in safe-gain order and skips moves that can't win (HEG.33)", async () => {
+  const cleared = (san: string, safe: number, cpWhite: number) =>
+    ({ uci: san, san, games: 1, score: 1, verdict: "cleared" as const, safeGain: safe, cpWhite, cpLoss: 0 });
+  // Position #105 from the 2026-11-07 run: Bg4 10.3 passes, so only g6 (10.1) is within the near-tie.
+  const moves = [cleared("Bg4", 0.103, 42), cleared("e6", 0.097, 28), cleared("Nf6", 0.043, 66), cleared("g6", 0.101, 19), cleared("Qc7", 0.094, 20)];
+  const loss: Record<string, number> = { Bg4: 24, e6: 7, Nf6: 37, g6: 15, Qc7: 14 };
+  const searched: string[] = [];
+  const cpLoss = async (move: Judged) => { searched.push(move.san); return loss[move.san]; };
+  const judged = await engineCheck(moves, DIALS, { cpLoss });
+  assert.deepEqual(searched, ["Bg4", "g6"]);
+  assert.deepEqual(judged.map(move => move.verdict), ["passes", "outranked", "outranked", "passes", "outranked"]);
+  assert.equal(choose(judged, DIALS)?.san, "g6");
+  // A top move that fails moves the floor down: e6 (9.7) is then within the near-tie of g6 (10.1).
+  searched.length = 0;
+  loss.Bg4 = 40;
+  const again = await engineCheck(moves, DIALS, { cpLoss });
+  assert.deepEqual(searched, ["Bg4", "g6", "e6"]);
+  assert.deepEqual(again.map(move => move.verdict), ["cp-limit", "passes", "outranked", "passes", "outranked"]);
+  // The choice is the same as checking every move.
+  const all = await engineCheck(moves, { ...DIALS, nearTie: 1 }, { cpLoss });
+  assert.equal(choose(again, DIALS)?.san, choose(all, DIALS)?.san);
+  // Nothing passes: every cleared move is checked.
+  searched.length = 0;
+  await engineCheck(moves, DIALS, { cpLoss: async move => { searched.push(move.san); return 99; } });
+  assert.equal(searched.length, 5);
 });
 test("each game gets its group's eval, and a game without one is refused", async () => {
   const name = "test-dots-" + process.pid, run = runPath(name);

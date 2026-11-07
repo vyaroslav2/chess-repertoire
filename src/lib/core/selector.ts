@@ -92,7 +92,12 @@ export function couldPass(curve: Curve, championCp: number, champion: Float64Arr
 // --- One contender, and the choice (HES.14–18) ---
 
 export type Evaluation2M = { cpWhite: number | null; mateWhite: number | null };
-export type Verdict = "passes" | "best-case" | "safe-gain" | "cp-limit" | "mate";
+/**
+ * `cleared`: past the safe gain, waiting for the engine check (engineCheck turns it into one of
+ * the others). `outranked`: past the safe gain, but never engine-checked, because a move already
+ * passed with a safe gain more than the near-tie above it (HES.18).
+ */
+export type Verdict = "passes" | "best-case" | "safe-gain" | "cp-limit" | "mate" | "cleared" | "outranked";
 export type Judged = { uci: string; san: string; games: number; score: number; verdict: Verdict;
   cpWhite?: number | null; mateWhite?: number | null; cpLoss?: number | null; priorScore?: number; belief?: number; safeGain?: number };
 /**
@@ -100,11 +105,12 @@ export type Judged = { uci: string; san: string; games: number; score: number; v
  * measures it. The generator measures it at 200M instead (HEG.32), and allows less than the cp
  * limit when the line budget has less left (HEG.31). A null cp loss (a mate score) never passes.
  */
-export type EngineCheck = { cpAllowed?: number; cpLoss?: () => Promise<number | null> };
+export type EngineCheck = { cpAllowed?: number; cpLoss?: (move: Judged) => Promise<number | null> };
 
-// HES.14–17 for one contender. evaluate is called only when the contender could pass.
+// HES.13–16 for one contender. evaluate is called only when the contender could pass. A move past
+// the safe gain is `cleared`, with its 2M cp loss, until engineCheck runs.
 export async function judge(contender: { uci: string; san: string; record: Record3 }, champion: { cpWhite: number; draws: Float64Array },
-  curve: Curve, k: number, dials: Dials, seed: string, evaluate: () => Promise<Evaluation2M>, check: EngineCheck = {}): Promise<Judged> {
+  curve: Curve, k: number, dials: Dials, seed: string, evaluate: () => Promise<Evaluation2M>): Promise<Judged> {
   const base = { uci: contender.uci, san: contender.san, games: games(contender.record), score: score(contender.record) };
   if (!couldPass(curve, champion.cpWhite, champion.draws, k, contender.record, dials, seed)) return { ...base, verdict: "best-case" };
   const evaluation = await evaluate();
@@ -117,10 +123,26 @@ export async function judge(contender: { uci: string; san: string; record: Recor
   const gain = safeGain(draws, champion.draws, dials.confidence);
   const scored = { ...base, cpWhite: evaluation.cpWhite, mateWhite: null, priorScore: curve(priorCp).score,
     belief: draws.reduce((sum, d) => sum + d, 0) / draws.length, safeGain: gain.safe };
-  if (gain.safe <= dials.margin) return { ...scored, verdict: "safe-gain", cpLoss: evaluation.cpWhite - champion.cpWhite };
-  const cpLoss = check.cpLoss ? await check.cpLoss() : evaluation.cpWhite - champion.cpWhite;
-  const verdict = cpLoss === null ? "mate" : cpLoss > (check.cpAllowed ?? dials.cpLimit) ? "cp-limit" : "passes";
-  return { ...scored, verdict, cpLoss };
+  return { ...scored, verdict: gain.safe <= dials.margin ? "safe-gain" : "cleared", cpLoss: evaluation.cpWhite - champion.cpWhite };
+}
+
+/**
+ * HES.17–18: the engine check, in safe-gain order, highest first. Once a move passes, a move more
+ * than the near-tie below it can never be chosen, so it is not checked (HEG.33). The choice is the
+ * same as checking every move; the generator saves a 200M search per move it skips.
+ */
+export async function engineCheck(judged: Judged[], dials: Dials, check: EngineCheck = {}): Promise<Judged[]> {
+  const order = judged.filter(j => j.verdict === "cleared").sort((x, y) => y.safeGain! - x.safeGain!);
+  const done = new Map<Judged, Judged>();
+  let best: number | undefined;   // the safe gain of the first move to pass: the highest that passes
+  for (const move of order) {
+    if (best !== undefined && best - move.safeGain! > dials.nearTie) { done.set(move, { ...move, verdict: "outranked" }); continue; }
+    const cpLoss = check.cpLoss ? await check.cpLoss(move) : move.cpLoss!;
+    const verdict = cpLoss === null ? "mate" : cpLoss > (check.cpAllowed ?? dials.cpLimit) ? "cp-limit" : "passes";
+    done.set(move, { ...move, verdict, cpLoss });
+    if (verdict === "passes") best ??= move.safeGain!;
+  }
+  return judged.map(move => done.get(move) ?? move);
 }
 
 // HES.18: the highest safe gain wins; a near-tie goes to the better eval.

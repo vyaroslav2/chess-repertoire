@@ -46,6 +46,7 @@ HES.16 **Safe gain.** Draw 20,000 scores from the contender's cloud and 20,000 f
 HES.17 **Engine check.** A contender that passes must also lose no more than the per-move cp limit against the champion, both at 2M nodes.
 
 HES.18 **The choice.** Among the contenders that pass both checks, the highest safe gain wins. A near-tie (within 0.5 points of safe gain) goes to the better eval. If none pass, the champion stays.
+* 2026-11-07: the engine check runs in safe-gain order, highest first. Once a move passes, a move more than 0.5 points below it is not checked, since it can't be chosen: it is `outranked`. The choice is the same. It matters in the generator, where the check is a 200M search ([[HEG]] HEG.33).
 
 HES.19 **The line budget waits for the generator.** HE also caps the total cp given up along a whole line. In a standalone report every earlier Black move in the line is still the champion, so a line has spent nothing before the position at hand. The budget only starts to bite once switches feed back into the tree. So `select` checks the per-move limit only, and reports each switch's cp cost, so the budget can be set from real numbers.
 
@@ -69,7 +70,7 @@ HES.30 **The report.** `select` writes `selections.jsonl` and `selections-summar
   * its eval and cp loss
   * its prior, and the score its cloud centres on
   * its safe gain
-  * whether it passed, or why not: its best case fails (HES.13), safe gain, cp limit or mate
+  * whether it passed, or why not: its best case fails (HES.13), safe gain, cp limit, mate, or outranked (HES.18)
 * the move chosen, and the position's cumProb
 
 The summary gives:
