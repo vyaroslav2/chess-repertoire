@@ -10,6 +10,7 @@ if (fs.existsSync("C:\\Files\\.env")) {
 }
 
 import { generateRepertoire } from "../src/lib/core/generator";
+import { createRunExporter } from "../src/lib/core/anki-export";
 import { defaultConfig, type Config } from "../src/lib/core/config";
 import { prisma } from "../src/lib/db/operations";
 import {
@@ -88,7 +89,7 @@ export async function runTreeGenerator(
   };
   const generate =
     dependencies.generate ??
-    ((shouldStop) => generateRepertoire(START_FEN, { shouldStop, recordEvent: runEventWriter(RUN_EVENTS_PATH) }));
+    ((shouldStop) => generateRepertoire(START_FEN, { shouldStop, recordEvent: runEventWriter(RUN_EVENTS_PATH), exportCards: createRunExporter() }));
   const disconnect = dependencies.disconnect ?? (() => prisma.$disconnect());
   const takeLock = dependencies.acquire ?? (() => acquireLock("treegen"));
 

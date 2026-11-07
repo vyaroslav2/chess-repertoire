@@ -16,9 +16,10 @@ One card per whole line: 59 cards. A line runs from move 1 to a Black reply no o
 - Deck: `Chess Repertoire`. Profile: `User test New` while we test. 
 - Since 2026-10-22. Before that, 20 cards, one per reply: the 20 replies with the highest `cumProb`. That deck was deleted; a backup with its review history was kept outside the repo (`chess-repertoire-old-deck.apkg`).
 
-- Made by `scripts/anki_export.ts`. It reads the database and writes nothing to it.
-- It refuses to run unless every repertoire's `generationStatus` is `IDLE`. A tree being built is wiped and only half there; on 2026-10-14 a run during generation made a deck of 15 cards.
-- A one-off for testing during a run: `npx tsx scripts/anki_export.ts --limit 10 --while-generating`. `--limit` sets the number of cards (every line if left out); `--while-generating` skips the check above. The cards are correct, but they are the lines of the tree built so far. The 59 cards of 2026-10-22 were made this way: the repertoire still read `GENERATING`, but nothing had run since 2026-10-15. 
+- Made by the generator as it runs (AK.17), and by `scripts/anki_export.ts`. Both read the database and write nothing to it.
+- The script refuses to run unless every repertoire's `generationStatus` is `IDLE`. A tree being built is wiped and only half there; on 2026-10-14 a run during generation made a deck of 15 cards.
+- `--while-generating` skips that check, and then adds final lines only (AK.17), as the generator does. `--limit 10` sets the number of cards (every line if left out).
+- The 59 cards of 2026-10-22 were deleted on 2026-11-07, before the first run that adds cards as it goes. A backup with their review history was kept outside the repo (`.apkg`). 
 
 AK.03 **The note type.**
 `Chess Repertoire`, with four fields:
@@ -36,7 +37,7 @@ SHA-1 of the line's UCI history and the answer's UCI, joined by a space: `e2e4 c
 - It is built from the moves alone, not from database ids, so a rebuilt tree gives the same keys.
 
 AK.05 **One way.**
-After the deck is made, cards and database rows are not linked. Deleting a card in Anki changes nothing in the database. A change in the database reaches Anki only through a new run of the script, and only as new cards.
+After the deck is made, cards and database rows are not linked. Deleting a card in Anki changes nothing in the database. A change in the database reaches Anki only through a new export, as new cards, or as a longer line replacing a shorter one (AK.18).
 
 AK.06 **A new computer.**
 AnkiWeb sync carries the note type and its fields. On any device, the app finds our cards with `note:"Chess Repertoire"`, whatever the deck is called.
@@ -184,6 +185,23 @@ AK.15 **The demo.**
 The trainer without Anki moves to `/demo`, unchanged: its own queue, nothing saved.
 - #note Temporary, since 2026-10-21: on `/demo` a card is a whole line, from move 1 to its end. You play each of your moves in turn ([[GR|GR.01]]–[[GR|GR.03]] for each). A move played or revealed goes straight on to the opponent's reply. The line ends at your last move, with no opponent move after it; only then do `2`–`4` and `Enter` grade. `1` grades Again at any move ([[GR|GR.04]]). There is no cue for the end. Source: `fetchDemoLines` in `app/actions.ts`, `lineStepCard` in `components/SrsTrainer.tsx`.
 - Since 2026-10-22, `/` trains whole lines the same way, from Anki's cards (AK.02). `trainerCard` in `app/anki.ts` gives the line (`fullLine`). A grade or `Ctrl + Z` brings Anki's next card from move 1.
+
+AK.17 **Cards during a run.** Decided 2026-11-07, so you can start learning while a run takes days.
+- After each position is dealt with ([[S3|S3.08]]), the generator adds every line that has just become final. At the end of the run, after the last sweep ([[DRS]]), it adds the rest.
+- **Final** means the line can no longer grow in this run. A line ends at a Black reply. It is final when:
+  - the reply ended the route ([[RE.excalidraw|RE]]): `Game over on Black's move`, `Depth cap reached on Black's move`, or `No opponent moves found` ([[DB|DB.20]]); or
+  - the position after it has been dealt with, and each of White's moves there ended with `Game over`, `Repetition` or `Transposition`.
+- **Held back:** a line where one of White's moves there is `Too rare`. A sweep can reopen that move and the line would go on. These lines are added at the end of the run.
+- A position not yet dealt with: its line is not final.
+- **Order.** The lines that become final after one position are added together, sorted as in AK.02. Between those groups, the order is the run's: the most played lines first ([[S3|S3.09]]). The held-back lines come last.
+- **Anki not running, or another profile open:** nothing is added. The log says so once, `"[WARNING] Anki export skipped: [reason]. Retrying after the next position."`, and the next position catches up. The generator never switches Anki's profile, and never stops for Anki.
+- After adding, the log reads `"[ANKI] [n] cards added; [k] replaced."`
+- Keys (AK.04) make it safe to stop and restart a run: the rebuilt tree gives the same keys, and nothing is added twice.
+
+AK.18 **A longer line replaces a shorter one.** Decided 2026-11-07. When a line to be added starts with the whole line of a card already in Anki (its `Line` and `Answer`), that card is deleted and the new line added. This happens when a later run goes deeper, e.g. `depthCap` raised from 4 to 5. The deleted card's progress is lost; the new card starts from zero.
+- A card whose key is already in Anki is skipped, as now (AK.04), so an unchanged line keeps its progress.
+- A card for a line no longer in the tree at all is left alone (AK.05).
+- #roadmap A longer line could take over the shorter card instead (update its fields in place), keeping its review history.
 
 AK.08 **The test.**
 The integration works when:

@@ -46,6 +46,8 @@ export type GenerateRepertoireDependencies = {
   config?: Config;
   /** TGL: told what the run does, in order. */
   recordEvent?: (event: RunEvent) => void;
+  /** AK.17: adds lines to Anki, the final ones after each position and all of them at the end. Never throws. */
+  exportCards?: (lines: "final" | "all") => Promise<void>;
 };
 
 export async function attemptCanonicalNodeWikibooks(
@@ -1010,6 +1012,7 @@ export async function generateRepertoire(
       await expandWhiteMove(reconciledOpponent.edgeId, reconciledOpponent.destinationNodeId);
     }
     recordQueue();
+    await dependencies.exportCards?.("final"); // AK.17
 
     // --- TEMPORARY DETAILED SUMMARY PER NODE ---
     const runningElapsed = ((Date.now() - startTime) / 1000).toFixed(2);
@@ -1065,6 +1068,7 @@ export async function generateRepertoire(
     prisma.repertoire.update({ where: { id: repertoire.id }, data: { generationStatus: "IDLE", completedConfigHash: runtime.configHash } })
   ]);
   console.log("Generation Complete!");
+  await dependencies.exportCards?.("all"); // AK.17: the held-back lines too
   return {
     totalPositionsProcessed,
     totalPositionsExpanded,
