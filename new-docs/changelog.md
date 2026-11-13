@@ -51,3 +51,16 @@ tags:
 - HE: the 2025 check, the per-rating-group check, the dial tuning and the final 2026 test of the selector ([[HES|HES.90–116]]). Default confidence now 90%.
 - Specs: [[HEG]], the selector in the generator.
 - Generator: built the selector behind `humanEvidence` (off by default): EW.14, the 2M prior searches, month-limited counts, the line budget, the new fields on Black's move ([[HEG]], [[EW|EW.14]], [[DB|DB.14]]). Not yet run on the real tree.
+
+## 2026-11-10
+
+- Specs: [[SCR]], a Russian translation of [[SC]].
+- SC: rewrote the friend's Colab code to SC's settings and fields.
+
+## 2026-11-12
+
+- SC: reviewed the friend's Colab code and MySQL table ([[sc-colab-review]]).
+
+## 2026-11-13
+
+- SC: 10 of 10 of the friend's positions match ours in every field, so the two engines agree ([[SC|SC.60]]).
