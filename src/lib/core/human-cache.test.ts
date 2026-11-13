@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { PrismaClient } from '@prisma/client';
+import { createPrismaClient } from '../db/client';
 import { parseFullFen, positionKeyFromFen } from './fen';
 import {
   saveExplorerCache,
@@ -10,9 +10,7 @@ import {
 import { fetchExplorer } from '../api/lichess';
 import { defaultConfig, computeExplorerCacheProfile } from './config';
 
-const prisma = new PrismaClient({
-  datasourceUrl: process.env.DATABASE_URL
-});
+const prisma = createPrismaClient();
 
 const profile = () => computeExplorerCacheProfile(defaultConfig);
 const read = (positionKey: string) => readExplorerCache(positionKey, profile());

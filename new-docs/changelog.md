@@ -64,3 +64,6 @@ tags:
 ## 2026-11-13
 
 - SC: 10 of 10 of the friend's positions match ours in every field, so the two engines agree ([[SC|SC.60]]).
+- SC: export and import of the shared eval cache, with checks on every eval and all-or-nothing import ([[SC|SC.51–57]]). `scripts/sc_export.ts`, `scripts/sc_import.ts`; the friend's Python version in `scripts/sc-friend/`.
+- Tests: a test run can no longer touch dev.db. Every Prisma client comes from `src/lib/db/client.ts`, which refuses any database but `test.db` in a test. `run_db_tests.ts` with no file now runs every test file. Made after a test run directly on dev.db wiped the 200M engine cache this morning.
+- Generator: copies dev.db to `prisma/dev.db.bak-YYYY-MM-DD-HHMM` before each run (no copy, no run; newest 10 kept), and exports the engine cache to `exports/` after each run ([[SC|SC.58]]).

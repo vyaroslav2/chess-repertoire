@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Chess } from 'chess.js';
-import { PrismaClient } from '@prisma/client';
+import { createPrismaClient } from '../db/client';
 
 import { evaluateBlackMove, findHardcodedResponse } from './evaluator';
 import { computeExplorerCacheProfile, computeLocalEngineEvaluationProfile, defaultConfig } from './config';
@@ -12,7 +12,7 @@ import { parseFullFen, positionKeyFromFen } from './fen';
 import type { LocalSearchRunner, TrustedLocalEvaluation } from './local-engine';
 import { readLocalEngineBaseline, saveExplorerCache } from '../db/operations';
 
-const prisma = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+const prisma = createPrismaClient();
 const ordinaryFen = 'rn1qkb1r/ppp1pppp/5n2/3p4/3P4/5N2/PPP1PPPP/RN1QKB1R b KQkq - 0 3';
 const e4Fen = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1';
 

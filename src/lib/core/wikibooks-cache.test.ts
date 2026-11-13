@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../db/client";
 import type { WikibooksResult } from "../api/wikibooks";
 
-const prisma = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+const prisma = createPrismaClient();
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 test("history-specific RepertoireNode Wikibooks cache", async t => {

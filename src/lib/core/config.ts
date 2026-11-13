@@ -240,6 +240,9 @@ export function computeExplorerCacheProfile(config: Config): string {
     .digest("hex");
 }
 
+// SC.22: what an eval holds. 2 = it also holds nodes and pv. Written to the exchange file too (SC.50).
+export const LOCAL_ENGINE_RECORD = 2;
+
 // DB.32: the profile is the version and every search setting, so an eval from another version or setting is never reused.
 export function computeLocalEngineEvaluationProfile(config: Config): string {
   const searchShape = {
@@ -250,7 +253,7 @@ export function computeLocalEngineEvaluationProfile(config: Config): string {
     hashMb: config.localStockfishHashMb,
     multiPv: config.localStockfishMultiPv,
     // SC.22: the eval also holds nodes and pv, so evals cached before them are never read as having them.
-    record: 2,
+    record: LOCAL_ENGINE_RECORD,
   };
   return createHash("sha256")
     .update(canonicalStringify(searchShape))

@@ -1,6 +1,6 @@
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/lib/db/client";
 import { createEmptyCard } from "ts-fsrs";
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 // Every card back to a new FSRS card, as the generator creates them.
 async function main() {

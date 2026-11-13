@@ -13,6 +13,8 @@ import { generateRepertoire } from "../src/lib/core/generator";
 import { createRunExporter } from "../src/lib/core/anki-export";
 import { defaultConfig, type Config } from "../src/lib/core/config";
 import { prisma } from "../src/lib/db/operations";
+import { backupDatabase } from "../src/lib/db/backup";
+import { defaultExportPath, writeSharedEvalExport } from "../src/lib/core/shared-cache";
 import {
   acquireLock,
   LockAcquisitionError,
@@ -57,6 +59,10 @@ type LauncherDependencies = {
   now?: () => Date;
   environment?: LauncherEnvironment;
   projectRoot?: string;
+  /** SC.58: copies the database before the run; returns the line for the log. */
+  backup?: () => Promise<string>;
+  /** SC.58: exports the engine cache after the run; returns the line for the log. */
+  exportCache?: () => Promise<string>;
 };
 
 export function depthHeaderLine(config: Config = defaultConfig): string {
@@ -92,10 +98,22 @@ export async function runTreeGenerator(
     ((shouldStop) => generateRepertoire(START_FEN, { shouldStop, recordEvent: runEventWriter(RUN_EVENTS_PATH), exportCards: createRunExporter() }));
   const disconnect = dependencies.disconnect ?? (() => prisma.$disconnect());
   const takeLock = dependencies.acquire ?? (() => acquireLock("treegen"));
+  const projectRoot = dependencies.projectRoot ?? TREE_GENERATOR_PROJECT_ROOT;
+  const backup = dependencies.backup ?? (async () => {
+    const result = await backupDatabase(prisma);
+    const removed = result.removed.length > 0 ? `; removed the ${result.removed.length} oldest` : "";
+    return `Backup: ${result.path}${removed}`;
+  });
+  const exportCache = dependencies.exportCache ?? (async () => {
+    const outPath = defaultExportPath(projectRoot);
+    const count = await writeSharedEvalExport(prisma, outPath);
+    return `Engine cache export: ${count} evals written to ${outPath}`;
+  });
 
   let lock: LockHandle | null = null;
   let runError: unknown = null;
   let logOpened = false;
+  let backedUp = false;
   const originalLog = console.log;
   const originalError = console.error;
 
@@ -118,11 +136,23 @@ export async function runTreeGenerator(
       fs.appendFileSync(logPath, `[ERROR] ${format(...args)}\n`);
     };
 
+    // SC.58: no backup, no run.
+    console.log(await backup());
+    backedUp = true;
+
     await generate(() => stopRequested);
   } catch (error) {
     runError = error;
   } finally {
     if (lock) {
+      // SC.58: after every run that started, finished or not. A failed export never changes the run's result.
+      if (backedUp) {
+        try {
+          console.log(await exportCache());
+        } catch (error) {
+          console.log(`[WARNING] Engine cache export failed; the run itself is not affected. ${errorReason(error)}`);
+        }
+      }
       try {
         if (logOpened) {
           const finishedAt = now();
