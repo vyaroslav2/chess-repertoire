@@ -111,12 +111,41 @@ SC.50 **The exchange file** is JSON, UTF-8. The settings are written out in plai
 
 (The eval above is made up, to show the shape.) `cp` and `mate` are both present: one is a number, the other `null`. No other fields. Evals are sorted by `fullFen`, so two exports of the same cache are byte-for-byte equal.
 
-SC.51 **Export.** A script writes every eval searched with the SC.10 settings to the file. Here: every row of the current deep profile (SC.22).
+SC.51 **Export.** A script writes every eval searched with the SC.10 settings to the file. Here: every row of the current deep profile (SC.22). It stops with an error, and writes no file, if any eval breaks SC.55. In particular:
+* Each position has exactly one eval, with `rank` 1. None, or more than one, is an error: with MultiPV 1 there is only one.
+* `depth`, `nodes` and `pv` are all set. After SC.40 none should be empty, so an empty one is a fault to find, not a row to skip.
+* `cp` is a whole number. This project's column is a `Float` ([[DB|DB.32]]); the file holds whole numbers only.
 
 SC.52 **Import.** A script reads the other person's file:
 * `format`, `formatVersion` and every field of `settings` must equal this side's own. Any difference: the whole file is refused, naming the field.
+* Every eval must pass SC.55. Any that fails: the whole file is refused, naming the position and the rule.
 * Evals are matched on `fullFen`. A position not yet cached is added, under this side's own key (here: the SC.22 profile, new ids, `rank` = 1, `fetchedAt` = now).
 * A position already cached is a check: `uci`, `san`, `cp`, `mate`, `depth`, `nodes` and `pv` must all be equal. Equal: skip it. Any difference: hard error, naming the position and the fields that differ, and nothing from that file is written. Two engines that disagree must not be mixed.
+
+SC.53 **All or nothing.** Import checks the whole file first: the settings, every eval (SC.55), and every eval already cached (SC.52). Only then does it write, in one transaction. So a file is either imported whole or not at all.
+
+SC.54 **The whole cache, every time.** Export always writes every eval, not only the new ones. The file stays small for a long while (under 1 KB per eval), and import skips evals it already has (SC.52), so sending one twice does no harm. Nobody has to remember what was sent before.
+
+SC.55 **Rules for each eval.** Export checks these before writing; import checks them before writing anything:
+* It has exactly the SC.50 fields: no more, no fewer.
+* `fullFen` is canonical (SC.21) and a legal position.
+* No `fullFen` appears twice in the file.
+* Exactly one of `cp` and `mate` is a whole number; the other is `null`. `mate` is never 0.
+* `uci` is legal in that position, and `san` is the same move in SAN.
+* `depth` is a whole number, 1 or more. `nodes` is a whole number, 1 or more, and below the node limit (SC.10): the line at or above it is never kept (SC.11).
+* `pv` is UCI moves, single spaces, starting with `uci`, and each move is legal in turn. This also catches a PV cut short, such as one cut at 255 characters ([[sc-colab-review]]).
+
+SC.56 **Where the file goes.** Export writes `exports/evals-YYYY-MM-DD.json`, with today's date. `exports/` is not committed. The two people send the file to each other by hand. Import takes the file's path.
+
+SC.57 **The friend's side.** Two Python scripts, in `scripts/sc-friend/`, for the friend's MySQL table `calculations`. They follow SC.51–56, with three changes for that table:
+* The table keeps 0 for "no value" in `cp` and `mate` (decided 2026-11-10). Export turns them into `null`: `mate` 0 means no mate; when `mate` is set, `cp` is 0 and becomes `null`. Import turns `null` back into 0.
+* Rows not yet searched (`uci` empty) are not exported. If an imported position has such a row, import fills it in, rather than adding a second row.
+* Import also fills the table's own columns: `hash` (MD5 of the `fen`, as the Colab code makes it) and `ponder` (the second move of `pv`, if any).
+
+SC.58 **A copy before each run, an export after** (decided 2026-11-13, after a test wiped the 200M cache in `dev.db`). The generator, `npm run generate`:
+* Before the run, once it holds the lock: copies the database to `prisma/dev.db.bak-YYYY-MM-DD-HHMM` (SQLite's `VACUUM INTO`, so the copy is whole even while the file is open). If the copy fails, the run does not start. The newest 10 such copies are kept; copies named by hand, with no time (`dev.db.bak-2026-11-07`), are never removed.
+* After the run, whether it finished, stopped or failed: exports the engine cache (SC.51) to `exports/evals-YYYY-MM-DD.json`. A failed export is a `[WARNING]` in the run log and changes nothing else; the run's own result stands.
+* Both write one line to the run log: the copy's path, and the number of evals exported.
 
 ## The test
 
@@ -125,6 +154,7 @@ SC.60 **Before sharing anything:**
 2. Both use the SC.10 settings and store the SC.21 fields.
 3. Pick 10 positions neither person has cached. Both search them.
 4. One exports; the other imports. Import checks the settings, then compares every field (SC.52). All 10 must be equal.
+5. Then the other way round, so that both scripts are tried on both sides.
 
 ## Out of scope
 

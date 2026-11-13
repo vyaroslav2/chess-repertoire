@@ -18,6 +18,9 @@ function tempLog(label: string): string {
   return path.join(os.tmpdir(), `treegen-${label}-${process.pid}-${Date.now()}.md`);
 }
 
+// SC.58: the real backup and export would touch prisma/ and exports/; tests use these instead.
+const noCopies = { backup: async () => "Backup: (test)", exportCache: async () => "Engine cache export: (test)" };
+
 function mockLock(): LockHandle {
   return {
     path: "mock.lock",
@@ -49,6 +52,7 @@ test("S1.03: default log is project-relative from another cwd and creates new-do
     await runTreeGenerator({
       environment: {},
       projectRoot: fixtureRoot,
+      ...noCopies,
       acquire: mockLock,
       generate: async () => undefined,
       disconnect: async () => undefined
@@ -80,6 +84,7 @@ test("S1.03: each run writes its own log and earlier run logs are never touched"
     await runTreeGenerator({
       environment: {},
       projectRoot: fixtureRoot,
+      ...noCopies,
       acquire: mockLock,
       generate: async () => undefined,
       disconnect: async () => undefined,
@@ -101,6 +106,7 @@ test("TGL: log file is named treegen-[timestamp].md and its header shows the con
     await runTreeGenerator({
       environment: {},
       projectRoot: fixtureRoot,
+      ...noCopies,
       acquire: mockLock,
       generate: async () => undefined,
       disconnect: async () => undefined,
@@ -121,6 +127,7 @@ test("TREE_GEN_LOG_PATH override wins exactly", async () => {
     await runTreeGenerator({
       environment: { TREE_GEN_LOG_PATH: override },
       projectRoot: unrelatedRoot,
+      ...noCopies,
       acquire: mockLock,
       generate: async () => undefined,
       disconnect: async () => undefined
@@ -173,6 +180,7 @@ test("user-requested stop is logged as stopped, disconnects, and does not strand
   await assert.rejects(
     runTreeGenerator({
       logPath,
+      ...noCopies,
       acquire: () => trackedLock,
       generate: async () => { throw new UserRequestedStopError(); },
       disconnect: async () => { events.push("disconnect"); }
@@ -198,6 +206,7 @@ test("S0.03 S0.07: each Ctrl+C sets the flag and prints to the raw console, neve
   try {
     await runTreeGenerator({
       logPath,
+      ...noCopies,
       acquire: mockLock,
       generate: async (shouldStop) => {
         assert.equal(shouldStop(), false);
@@ -230,6 +239,7 @@ test("successful cleanup finalises the log, disconnects, then releases the lock"
   };
   await runTreeGenerator({
     logPath,
+    ...noCopies,
     acquire: () => lock,
     generate: async () => {
       console.log("generated");
@@ -259,6 +269,7 @@ test("ordinary generator failure receives a failed ending with its reason", asyn
   };
   await assert.rejects(runTreeGenerator({
     logPath,
+    ...noCopies,
     acquire: () => lock,
     generate: async () => { throw failure; },
     disconnect: async () => undefined
@@ -281,6 +292,7 @@ test("log finalisation failure still disconnects and releases without hiding the
   await assert.rejects(
     runTreeGenerator({
       logPath,
+      ...noCopies,
       acquire: () => lock,
       generate: async () => {
         fs.unlinkSync(logPath);
@@ -291,4 +303,69 @@ test("log finalisation failure still disconnects and releases without hiding the
     error => error === original
   );
   assert.deepStrictEqual(events, ["disconnect", "release"]);
+});
+
+
+test("SC.58: backup, then the run, then the export, then disconnect; both lines go to the run log", async () => {
+  const logPath = tempLog("copies");
+  const events: string[] = [];
+  await runTreeGenerator({
+    logPath,
+    acquire: () => { events.push("lock"); return mockLock(); },
+    backup: async () => { events.push("backup"); return "Backup: prisma/dev.db.bak-2026-11-13-0930"; },
+    generate: async () => { events.push("generate"); },
+    exportCache: async () => { events.push("export"); return "Engine cache export: 3 evals written to exports/evals-2026-11-13.json"; },
+    disconnect: async () => { events.push("disconnect"); }
+  });
+  assert.deepStrictEqual(events, ["lock", "backup", "generate", "export", "disconnect"]);
+  const log = fs.readFileSync(logPath, "utf8");
+  assert.match(log, /^Backup: prisma\/dev\.db\.bak-2026-11-13-0930$/m);
+  assert.match(log, /^Engine cache export: 3 evals written/m);
+  assert.ok(log.indexOf("Engine cache export") < log.indexOf("[FINISHED]"));
+  fs.unlinkSync(logPath);
+});
+
+test("SC.58: a failed backup stops the run before it starts, with no export", async () => {
+  const logPath = tempLog("no-backup");
+  const events: string[] = [];
+  await assert.rejects(runTreeGenerator({
+    logPath,
+    acquire: mockLock,
+    backup: async () => { throw new Error("disk full"); },
+    generate: async () => { events.push("generate"); },
+    exportCache: async () => { events.push("export"); return ""; },
+    disconnect: async () => undefined
+  }), /disk full/);
+  assert.deepStrictEqual(events, []);
+  assert.match(fs.readFileSync(logPath, "utf8"), /\[FAILED\] disk full/);
+  fs.unlinkSync(logPath);
+});
+
+test("SC.58: the export runs after a failed or stopped run too, and a failed export only warns", async () => {
+  const logPath = tempLog("export-after-failure");
+  const events: string[] = [];
+  await assert.rejects(runTreeGenerator({
+    logPath,
+    ...noCopies,
+    acquire: mockLock,
+    generate: async () => { throw new UserRequestedStopError(); },
+    exportCache: async () => { events.push("export"); return "Engine cache export: 1 evals"; },
+    disconnect: async () => undefined
+  }), UserRequestedStopError);
+  assert.deepStrictEqual(events, ["export"]);
+  fs.unlinkSync(logPath);
+
+  const warnPath = tempLog("export-fails");
+  await runTreeGenerator({
+    logPath: warnPath,
+    ...noCopies,
+    acquire: mockLock,
+    generate: async () => undefined,
+    exportCache: async () => { throw new Error("Export refused, no file written: x: nodes empty"); },
+    disconnect: async () => undefined
+  });
+  const log = fs.readFileSync(warnPath, "utf8");
+  assert.match(log, /\[WARNING\] Engine cache export failed; the run itself is not affected\. Export refused/);
+  assert.match(log, /\[FINISHED\] Generation finished successfully/);
+  fs.unlinkSync(warnPath);
 });

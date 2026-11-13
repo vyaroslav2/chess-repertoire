@@ -1,6 +1,6 @@
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/lib/db/client";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 type TargetMove = { toNodeId: string | null; stopReason: string | null; uci: string | null };
 

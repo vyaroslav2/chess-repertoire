@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PrismaClient } from '@prisma/client';
+import { createPrismaClient } from '../db/client';
 import * as path from 'path';
 
 import { defaultConfig, computeLocalEngineEvaluationProfile, type Config } from './config';
@@ -19,7 +19,7 @@ import {
 } from './local-engine';
 import { readLocalEngineBaseline, readLocalEngineCandidate, saveLocalEngineBaseline, saveLocalEngineCandidate } from '../db/operations';
 
-const prisma = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+const prisma = createPrismaClient();
 const blackFen = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1';
 const blackFenCounters = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 7 9';
 const profile = computeLocalEngineEvaluationProfile(defaultConfig);

@@ -1,12 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { PrismaClient } from '@prisma/client';
+import { createPrismaClient } from '../db/client';
 import { parseFullFen, positionKeyFromFen } from './fen';
 
 // Test DB path is expected to be managed externally via scripts/run_db_tests.ts
-const prisma = new PrismaClient({
-    datasourceUrl: process.env.DATABASE_URL
-});
+const prisma = createPrismaClient();
 
 const START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 const AFTER_E4 = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";

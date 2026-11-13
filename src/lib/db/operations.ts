@@ -3,8 +3,9 @@ import { Chess } from "chess.js";
 import { fetchWikibooksSnippet, type WikibooksResult } from "../api/wikibooks";
 import { parseFullFen, positionKeyFromFen } from "../core/fen";
 import { isValidUciMove } from "../core/uci";
+import { createPrismaClient } from "./client";
 
-export const prisma = new PrismaClient();
+export const prisma = createPrismaClient();
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 

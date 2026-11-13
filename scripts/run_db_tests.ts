@@ -24,21 +24,35 @@ function main() {
     execSync('npx prisma db push --accept-data-loss', { env: testEnv, stdio: 'inherit' });
 
     console.log(`[TEST SETUP] Schema created. Running DB tests...`);
+    // No file named: every test file, so a new test can't be left out and run by hand on dev.db.
     const args = process.argv.slice(2);
-    if (args.length > 0) {
-        for (const arg of args) {
-            execSync(`npx tsx --test ${arg}`, { env: testEnv, stdio: 'inherit' });
+    const files = args.length > 0 ? args : TEST_ROOTS.flatMap(root => findTestFiles(path.resolve(process.cwd(), root)));
+    const failed: string[] = [];
+    for (const file of files) {
+        try {
+            execSync(`npx tsx --test "${file}"`, { env: testEnv, stdio: 'inherit' });
+        } catch {
+            failed.push(path.relative(process.cwd(), file));
         }
-    } else {
-        execSync('npx tsx --test src/lib/core/db.test.ts', { env: testEnv, stdio: 'inherit' });
-        execSync('npx tsx --test src/lib/core/wikibooks-cache.test.ts', { env: testEnv, stdio: 'inherit' });
-        execSync('npx tsx --test src/lib/core/human-cache.test.ts', { env: testEnv, stdio: 'inherit' });
-        execSync('npx tsx --test src/lib/api/retry.test.ts', { env: testEnv, stdio: 'inherit' });
-        execSync('npx tsx --test src/lib/core/local-engine.test.ts', { env: testEnv, stdio: 'inherit' });
-        execSync('npx tsx --test src/lib/core/evaluator.test.ts', { env: testEnv, stdio: 'inherit' });
     }
 
-    console.log(`[TEST SETUP] DB tests complete.`);
+    if (failed.length > 0) {
+        console.log(`[TEST SETUP] ${failed.length} of ${files.length} test files failed:\n  ${failed.join('\n  ')}`);
+        process.exitCode = 1;
+    } else {
+        console.log(`[TEST SETUP] All ${files.length} test files passed.`);
+    }
+}
+
+const TEST_ROOTS = ['src', 'scripts', 'lib'];
+
+function findTestFiles(dir: string): string[] {
+    if (!fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) return entry.name === 'node_modules' ? [] : findTestFiles(full);
+        return /\.test\.ts$/.test(entry.name) ? [full] : [];
+    }).sort();
 }
 
 main();
