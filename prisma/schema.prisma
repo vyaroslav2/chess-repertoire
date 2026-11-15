@@ -81,16 +81,17 @@ model EngineCache {
 }
 
 model EngineCacheEvaluation {
-  id      String  @id @default(uuid())
-  cacheId String
-  uci     String
-  san     String?
-  cp      Float?
-  mate    Int?
-  rank    Int? // 1 for Stockfish's best move, otherwise null
-  depth   Int? // DB.32: the deepest completed depth; null for evals cached before it was stored
-  nodes   Int? // SC.20: the node count on the line kept; null for evals cached before it was stored
-  pv      String? // SC.20: that line's moves, UCI, single spaces; null for evals cached before it was stored
+  id         String    @id @default(uuid())
+  cacheId    String
+  uci        String
+  san        String?
+  cp         Float?
+  mate       Int?
+  rank       Int? // 1 for Stockfish's best move, otherwise null
+  depth      Int? // DB.32: the deepest completed depth; null for evals cached before it was stored
+  nodes      Int? // SC.20: the node count on the line kept; null for evals cached before it was stored
+  pv         String? // SC.20: that line's moves, UCI, single spaces; null for evals cached before it was stored
+  importedAt DateTime? // SC.52: when import added it; null for an eval our own engine wrote
 
   cache EngineCache @relation(fields: [cacheId], references: [id], onDelete: Cascade)
 
@@ -172,9 +173,9 @@ model RepertoireNode {
   // DB.16 ordering
   siblingIndex Int?
 
-  repertoire Repertoire       @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
-  owner      RepertoireNode?  @relation("Transposition", fields: [transposesTo], references: [id], onDelete: SetNull)
-  pointers   RepertoireNode[] @relation("Transposition")
+  repertoire    Repertoire       @relation(fields: [repertoireId], references: [id], onDelete: Cascade)
+  owner         RepertoireNode?  @relation("Transposition", fields: [transposesTo], references: [id], onDelete: SetNull)
+  pointers      RepertoireNode[] @relation("Transposition")
   ownedPosition Position?
 
   incomingMoves RepertoireMove[]         @relation("IncomingMoves")
@@ -201,10 +202,10 @@ model RepertoireMove {
   stopReason String?
 
   // DB.11 the eval: every Black move, and every White move Black replies to
-  cp              Float?
-  mate            Int?
-  depth           Int? // the depth of the search that gave the eval; null for checkmate, stalemate or an old cached eval
-  source          String?
+  cp     Float?
+  mate   Int?
+  depth  Int? // the depth of the search that gave the eval; null for checkmate, stalemate or an old cached eval
+  source String?
 
   // DB.14 Black move fields: the engine evidence
   selectionMethod String?

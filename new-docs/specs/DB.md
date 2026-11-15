@@ -104,6 +104,7 @@ DB.31 **Explorer data** — one row per position, per [[cache-profile|cache prof
 DB.32 **Engine evaluations** — held in `EngineCache`, stored against the local Stockfish profile and against the exact `fullFen`, not against `positionKey`. Only local Stockfish 19 writes it. The profile is `localStockfishVersion`, `localStockfishNodes`, `localStockfishThreads`, `localStockfishHashMb` and `localStockfishMultiPv` ([[generation-config]]). A change to any of them makes a new profile, so an eval from another version or setting is never reused.
 * Each eval also stores `depth`: the deepest depth its search completed before the node limit stopped it ([[EW|EW.09]]). The unfinished depth never counts.
 * Evals cached before this (2026-10-24) have no depth, and nothing searches them again until the profile changes. Their depth reads back as unknown (`null`), and so does that of the moves that use them.
+* Import from the shared cache also adds evals here ([[SC|SC.52]]). Each eval's `importedAt` says which: empty for ours, the import's time for one imported.
 * #question Where the UI shows the depth: next to the eval (e.g. `+0.15 · d35`), or only on hover.
 
 DB.33 **Opening metadata** — the result of [[DB|DB.06]], stored per route: repertoire + `history`. A rebuilt tree gets its names back without asking Explorer again.

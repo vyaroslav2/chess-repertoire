@@ -2,6 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createPrismaClient } from "../db/client";
+import { prisma as operationsPrisma, saveLocalEngineBaseline } from "../db/operations";
 
 import { computeLocalEngineEvaluationProfile, defaultConfig } from "./config";
 import {
@@ -46,7 +47,10 @@ async function cache(e: SharedEval, extra: Partial<{ rank: number | null; nodes:
   });
 }
 
-test.after(() => prisma.$disconnect());
+test.after(async () => {
+  await prisma.$disconnect();
+  await operationsPrisma.$disconnect();
+});
 
 test("SC.50: the file is sorted by fullFen and equal byte for byte whatever the order", () => {
   const a = buildExchangeFile([sicilian, backRank, indian]);
@@ -146,9 +150,28 @@ test("SC.52: import adds new positions under our profile and skips equal ones", 
     assert.equal(row.evaluations.length, 1);
     assert.equal(row.evaluations[0].rank, 1);
   }
+  const importedAt = new Map(rows.map(row => [row.fullFen, row.evaluations[0].importedAt]));
+  assert.equal(importedAt.get(sicilian.fullFen), null, "an eval already ours stays ours");
+  assert.ok(importedAt.get(backRank.fullFen) instanceof Date);
+  assert.ok(importedAt.get(indian.fullFen) instanceof Date);
 
   const again = await importSharedEvals(prisma, parseExchangeFile(buildExchangeFile([sicilian, backRank, indian])));
   assert.deepEqual(again, { added: 0, alreadyCached: 3 });
+  const stamps = await prisma.engineCacheEvaluation.findMany({ where: { importedAt: { not: null } } });
+  assert.equal(stamps.length, 2, "a second import changes no stamp");
+});
+
+test("SC.52: an eval imported into an empty cache row is stamped; our engine's write makes it ours", async () => {
+  await wipeEngineCache();
+  await prisma.engineCache.create({ data: { fullFen: sicilian.fullFen, engineProfile: profile, engine: "LOCAL" } });
+  assert.deepEqual(await importSharedEvals(prisma, [sicilian]), { added: 1, alreadyCached: 0 });
+  const imported = await prisma.engineCacheEvaluation.findFirstOrThrow();
+  assert.ok(imported.importedAt instanceof Date);
+
+  await saveLocalEngineBaseline(sicilian.fullFen, profile, { uci: sicilian.uci, san: sicilian.san, cp: sicilian.cp, mate: sicilian.mate, depth: sicilian.depth, nodes: sicilian.nodes, pv: sicilian.pv });
+  const ours = await prisma.engineCacheEvaluation.findFirstOrThrow();
+  assert.equal(ours.id, imported.id);
+  assert.equal(ours.importedAt, null);
 });
 
 test("SC.53: one differing position refuses the whole file, and nothing is written", async () => {

@@ -266,9 +266,10 @@ export async function importSharedEvals(client: PrismaClient, evals: SharedEval[
   }
   if (problems.length > 0) fail("File refused, nothing written: these positions differ from our cache", problems);
 
+  const importedAt = new Date();
   await client.$transaction(async tx => {
     for (const { eval: e, cacheId } of toAdd) {
-      const evaluation = { uci: e.uci, san: e.san, cp: e.cp, mate: e.mate, depth: e.depth, nodes: e.nodes, pv: e.pv, rank: 1 };
+      const evaluation = { uci: e.uci, san: e.san, cp: e.cp, mate: e.mate, depth: e.depth, nodes: e.nodes, pv: e.pv, rank: 1, importedAt };
       if (cacheId) {
         await tx.engineCacheEvaluation.create({ data: { cacheId, ...evaluation } });
       } else {

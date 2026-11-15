@@ -301,7 +301,8 @@ export async function saveLocalEngineBaseline(
     await tx.engineCacheEvaluation.updateMany({ where: { cacheId: cache.id, rank: 1, uci: { not: validated.uci } }, data: { rank: null } });
     const saved = await tx.engineCacheEvaluation.upsert({
       where: { cacheId_uci: { cacheId: cache.id, uci: validated.uci } },
-      update: { san: validated.san, cp: validated.cp, mate: validated.mate, depth: validated.depth, nodes: validated.nodes, pv: validated.pv, rank: 1 },
+      // SC.52: our engine wrote these values, so the eval is ours now, even if it was imported.
+      update: { san: validated.san, cp: validated.cp, mate: validated.mate, depth: validated.depth, nodes: validated.nodes, pv: validated.pv, rank: 1, importedAt: null },
       create: { cacheId: cache.id, uci: validated.uci, san: validated.san, cp: validated.cp, mate: validated.mate, depth: validated.depth, nodes: validated.nodes, pv: validated.pv, rank: 1 }
     });
     return { fullFen, evaluationProfile, bestUci: saved.uci, san: saved.san, cp: saved.cp, mate: saved.mate, depth: saved.depth, nodes: saved.nodes, pv: saved.pv };
@@ -342,7 +343,7 @@ export async function saveLocalEngineCandidate(
     const cache = await upsertEngineCache(tx, fullFen, "LOCAL", evaluationProfile);
     const saved = await tx.engineCacheEvaluation.upsert({
       where: { cacheId_uci: { cacheId: cache.id, uci: candidateUci } },
-      update: { san: validated.san, cp: validated.cp, mate: validated.mate },
+      update: { san: validated.san, cp: validated.cp, mate: validated.mate, importedAt: null },
       create: { cacheId: cache.id, uci: candidateUci, san: validated.san, cp: validated.cp, mate: validated.mate, rank: null }
     });
     return { fullFen, evaluationProfile, candidateUci: saved.uci, san: saved.san, cp: saved.cp, mate: saved.mate };

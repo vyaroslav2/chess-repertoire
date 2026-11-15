@@ -72,3 +72,7 @@ tags:
 
 - Config: only 1. e4 c6 and 1. d4 d5 stay hardcoded. Every other first move gets Stockfish's baseline (EW.09); from move 2, human evidence as before (EW.14).
 - SC: the friend's scripts connect through his own `db_config.py` or `.env`, and `sc_import.py` / `sc_export.py` run with no arguments, for his Access buttons.
+
+## 2026-11-15
+
+- SC: each eval in the engine cache has `importedAt`: empty for ours, the time of import for one imported from the friend ([[SC|SC.52]]).
