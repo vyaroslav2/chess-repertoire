@@ -1,6 +1,10 @@
 // Lichess's board glyphs, as in its chessground (src/glyph.ts: composeGlyph, glyphToSvg,
 // endgameGlyphs), GPL-3.0-or-later. Drawn over the board by us, not as a chessground shape:
 // chessground 8 draws shapes only once a piece has slid in, so a sign came after its move.
+// That would not match Lichess: its analysis sets the board, then the shapes apart
+// (lila ui/analyse/src/ctrl.ts: showGround, then setAutoShapes), which redraws them on the
+// next frame, mid-slide. So on Lichess a badge shows as its move starts to slide, and so
+// does ours (UI.41).
 // Its origin is the square's top-left; 100 is a square. At the top-right corner, as the
 // first glyph on a square.
 const compose = (fill: string, path: string) =>
