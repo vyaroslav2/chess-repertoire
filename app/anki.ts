@@ -2,7 +2,7 @@
 
 // AK.07: Anki's reviewer runs the session, through AnkiConnect; the web app is its screen.
 import { PrismaClient } from "@prisma/client";
-import { lineEvals, lineOpenings } from "../lib/line-details";
+import { answerEval as answerEvalOf, lineEvals, lineOpenings } from "../lib/line-details";
 
 const prisma = new PrismaClient();
 
@@ -94,7 +94,9 @@ async function trainerCard(card: ReviewerCard) {
     evalByPly = Array(lineMoves.length).fill(null);
   }
 
-  const answerEval = { cp: targetMove?.cp ?? null, mate: targetMove?.mate ?? null, depth: targetMove?.depth ?? null };
+  const answerEval = node && targetMove
+    ? await answerEvalOf(node.fullFen, targetMove)
+    : { cp: null, mate: null, depth: null, glyph: null, best: null };
   return {
     id: `anki-${card.cardId}`,
     ankiCardId: card.cardId,

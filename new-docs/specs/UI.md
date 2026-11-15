@@ -119,6 +119,7 @@ With the pointer on a move's eval (UI.26), a tooltip shows the depth of the sear
 - The border: the fill is the panel's own colour, so without it the tooltip's edge would vanish into the move grid. Obsidian has no border, but its tooltip fill is lighter than the page. Either works; this one matches the app's other messages.
 - Not the browser's tooltip (`title`), tried first on `/depth`, 2026-10-25. It shows only after the pointer rests still for about half a second, often not again until the pointer leaves and comes back, and in the browser's own font, colours, border and corners, none of which can be styled.
 - Not on the eval gauge (UI.31): it has no number to point at.
+- A second line, on a move that isn't Stockfish's top move: its move and the loss, `SF Nf6 · loss 12 cp` (UI.41).
 - Source: `evalAt` in `components/LichessMoveList.tsx`; `.eval-tooltip` in `app/globals.css`, sharing its look with `.settings-notice` and `.undo-notice`.
 - In the trainer since 2026-11-15, on every page: each move's depth comes with its eval (`lineEvals` in `lib/line-details.ts`), the answer's from its own move. `/depth` keeps its mock evals (UI.29).
 
@@ -128,6 +129,17 @@ Every letter hotkey is read by position (`e.code`, e.g. `KeyF`), not by the lett
 - Was: `S`, `F`, `E` and `X` read `e.key`, so they did nothing on a Russian layout.
 - Cost: on layouts that move the Latin letters (French AZERTY, Dvorak), a key may not be labelled with its letter. Russian ЙЦУКЕН sits on the same keys as English QWERTY.
 - Digits and Enter stay `e.key`: they are the same on both layouts.
+
+UI.41 **Engine marks.**
+What Stockfish thought of each move, beside the evals (UI.26). All of it hides with them (`E`, UI.34). Since 2026-11-15.
+- `!?` after a human-evidence switch (`selectionMethod = Human evidence`, [[EW|EW.14]]): "a practical try, not the engine's best", Lichess's "interesting move". In the move list, right after the move, as on Lichess: 0.82em, 0.08em after it (lila `ui/lib/css/tree/_tree.scss`). In the move's own colour, not Lichess's magenta: no tint, so it stays plain. It shows on the current move too, white with the move.
+- On the board, while the move is current, Lichess's own `!?` badge: a white `!?` on magenta `#ea45d8`, at the top-right corner of the move's square. Copied from Lichess's chessground (`src/glyph.ts`, GPL-3.0-or-later), as the mate sign is.
+- A star on the board, the same way, when White plays Stockfish's top move: the move the search after Black's move named ([[EW|EW.11]]), before White played. By name only: each position has one search, and it scores only its top move (MultiPV 1), so no other move can be "as good". A white star on Lichess's green `#22ac38`, drawn by us in Lichess's badge style. Chess.com uses a star for "best move". Board only, no glyph in the list. Not on White's first move: nothing searches the start position.
+- No mark on a hardcoded move ([[EW|EW.13]]) or on Black's baseline. The hardcoded move's eval already shows what it costs.
+- Hover (UI.38): under the depth, on any move that isn't Stockfish's top move, its move and the loss: `SF Nf6 · loss 12 cp`. The loss is the difference of the two evals in the list, the move's and the one before it, from the mover's side, in whole cp. So it adds up with what you see. Just `SF Nf6` if either eval is a mate.
+- A gain shows as one: `SF gxf3 · gain 5 cp`. The two evals are two searches of two positions, each exact but at its own depth, so they needn't agree. In dev.db, 9 of 23 White moves that were Stockfish's own top move came out ahead, by up to 49 cp; 1 of 11 switches came out 1 cp ahead. Measuring from before the move would need a search per move, and still not rule gains out.
+- Data: `glyph` and `best` on each move's eval, from `lineEvals` and `answerEval` in `lib/line-details.ts`. `best` is the engine cache's top move for the position before the move, under today's profile ([[DB|DB.32]]). `moveBadge` in `components/LichessMoveList.tsx` picks the badge; `components/BoardGlyph.tsx` draws it and the mate sign.
+- Tried first on `/glyph` (UI.29).
 
 ## Layout
 
@@ -145,8 +157,9 @@ The share of games that reach the position on the board ([[cumulative-probabilit
 - Why no decimals: cumProb is an estimate, so rough is fine early on. Only 67% and up shows `1 in 1`, which reads as "certain"; in this repertoire no position after the start is that high (1.e4 is 64%: `1 in 2`). One decimal below 10 was tried on 2026-10-27 and dropped.
 - None at the start position, as for the name. None after a repetition that ends a line: its last position is not a node, so it has no cumProb.
 
-UI.29 **Test pages.** Temporary: `/fonts`, `/coords`, `/moves`, `/grid`, `/gauge`, `/depth`, `/settings` and `/status`. Delete them before deploying.
+UI.29 **Test pages.** Temporary: `/fonts`, `/coords`, `/moves`, `/grid`, `/gauge`, `/depth`, `/glyph`, `/settings` and `/status`. Delete them before deploying.
 - `/depth` shows the real move list with mock evals and depths (UI.38): the Blackburne Shilling trap, which ends in a checkmate on the board, so one eval has no tooltip.
+- `/glyph` shows a board and the real move list with every UI.41 case: the Caro-Kann Advance, with `!?` switches, starred White moves, a hardcoded move, White's other moves and a gain. Mock evals and best moves.
 - `/status` shows Anki's counts (UI.22, [[AK|AK.12]]) left of a real board, always visible. Sliders set the size, the labels' weight and the numbers' weight (Anki's overview: 700), line height, column gap, the gap to the board and the offset from its top; letter spacing follows the size, by UI.20's formula. Colours: the app's muted grey, or Anki's own for New, Learning and To Review (blue, red, green; night or day). Zeros can be faint, as in Anki's deck list (its overview never fades them). The counts can be typed, or set to 9999 each, 54 · 5 · 0, or 0 · 0 · 0. Above the board, the opening name (UI.20, UI.28), with sliders for its size, weight and gap to the board, and for its grey: the lightness of `#979490`'s warm grey. Its colour can also be picked or typed as hex, with its contrast shown. Weights step by 25; letter spacing and line height follow the size. Three real names to try, from the repertoire's longest (90 characters) to "A40 Queen's Pawn Game". At the name's right edge, the probability (UI.40), in either format, with a slider for the gap before it: real cumProbs from 1.e4 (`1 in 2`) down to the repertoire's lowest (`1 in 2,963`), and a made-up 0.004% for `<0.01%`. Lines at the bottom sum up the choice, for UI.20 and UI.22.
 - `/settings` shows the settings button (SM.01) at up to 12× and the menu (SM.06) at up to 6×, each with its hover box forced on. Sliders set the rounding of the button, the menu panel and the items' hover box, each on its own. The real button, in its corner, opens the menu.
 - `/gauge` shows the eval gauge (UI.31) at chosen evals, without the database: one gauge you set by typing (`-0.25`, `#-3`) or with buttons, which slides as in the trainer, and every preset side by side, from `#-1` to `#1`, each with White's share.

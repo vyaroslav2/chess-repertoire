@@ -6,8 +6,9 @@ import type { Config } from "chessground/config";
 import type { Key } from "chessground/types";
 import "chessground/assets/chessground.base.css";
 import { Chess } from "chess.js";
-import LichessMoveList from "./LichessMoveList";
+import LichessMoveList, { moveBadge } from "./LichessMoveList";
 import EvalGauge from "./EvalGauge";
+import BoardGlyph from "./BoardGlyph";
 import SettingsMenu from "./SettingsMenu";
 import { toggleStatusLine } from "./status-line";
 import { formatProbability, probabilityFormatKey, type ProbabilityFormat } from "../lib/probability";
@@ -35,24 +36,6 @@ type MoveMark = "wrong" | "revealed";
 // A moving piece slides over 250ms, Lichess's default (UI.35).
 const slideMs = 250;
 
-// Lichess's mate sign, as it is in Lichess's chessground (glyph.ts: endgameGlyphs.mate,
-// composeGlyph), GPL-3.0-or-later. Its origin is the square's top-left; 100 is a square.
-// Drawn over the board by us, not as a chessground shape: chessground 8 draws
-// shapes only once a piece has slid in, so the sign came after the red king.
-const mateSign =
-  '<defs><filter id="a"><feDropShadow dx="4" dy="7" flood-opacity=".5" stdDeviation="5"/></filter></defs>' +
-  '<g transform="matrix(.4 0 0 .4 71 -12)"><circle cx="50" cy="50" r="50" fill="#df5353" filter="url(#a)"/>' +
-  '<path fill="none" stroke="#fff" stroke-width="8" d="M38 18 33 82M62 18l-5 64M20 40h60M18 62h60"/></g>';
-
-// A square's place on the board, from its top-left, in eighths.
-function squareOffset(square: string, orientation: "white" | "black") {
-  const file = square.charCodeAt(0) - 97;
-  const rank = Number(square[1]) - 1;
-  const column = orientation === "white" ? file : 7 - file;
-  const row = orientation === "white" ? 7 - rank : rank;
-  return { left: `${column * 12.5}%`, top: `${row * 12.5}%` };
-}
-
 // Anki's counts (AK.12, UI.22): lighter than their labels, units lined up.
 const ankiCountStyle = { fontWeight: 350, textAlign: "right" } as const;
 
@@ -70,7 +53,7 @@ function lineStepCard(card: any, step: number) {
   return {
     ...card,
     lineMoves: card.fullLine.slice(0, ply),
-    targetMove: { ...card.targetMove, san: card.fullLine[ply], cp: answerEval?.cp ?? null, mate: answerEval?.mate ?? null, depth: answerEval?.depth ?? null },
+    targetMove: { ...card.targetMove, san: card.fullLine[ply], cp: answerEval?.cp ?? null, mate: answerEval?.mate ?? null, depth: answerEval?.depth ?? null, glyph: answerEval?.glyph ?? null, best: answerEval?.best ?? null },
     evalByPly: card.lineEvalByPly.slice(0, ply),
   };
 }
@@ -653,6 +636,14 @@ export default function SrsTrainer({
       : [],
   );
 
+  // UI.41: the current move's badge on its square: "!?" on a switch, a star on White's
+  // top move. Hidden with the evals (UI.34). None while a wrong move is on the board.
+  const currentPly = currentPlyIndex - 1;
+  const badge =
+    evalsShown && lastMove && currentPly >= 0 && currentPly < line.length
+      ? moveBadge(line[currentPly], moveEvals[currentPly], currentPly)
+      : null;
+
   const calcMovable = (): NonNullable<Config["movable"]> => {
     // Only allow moves if we are idle or wrong (let them try again)
     // Completely lock the board during browsing or initialization
@@ -992,21 +983,8 @@ export default function SrsTrainer({
               },
             }}
           />
-          {mateSquare && (
-            <svg
-              viewBox="0 0 100 100"
-              style={{
-                position: "absolute",
-                ...squareOffset(mateSquare, orientation),
-                width: "12.5%",
-                height: "12.5%",
-                overflow: "visible",
-                pointerEvents: "none",
-                zIndex: 10,
-              }}
-              dangerouslySetInnerHTML={{ __html: mateSign }}
-            />
-          )}
+          {mateSquare && <BoardGlyph glyph="mate" square={mateSquare} orientation={orientation} />}
+          {badge && lastMove && <BoardGlyph glyph={badge} square={lastMove[1]} orientation={orientation} />}
         </div>
 
         {/* Eval gauge between the board and the move list, 4px from each (UI.31); hidden until 'e' (UI.34) */}

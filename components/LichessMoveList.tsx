@@ -1,9 +1,32 @@
 "use client";
 
 import React, { useEffect, useRef, useCallback, useState } from 'react';
+import type { BoardGlyphName } from './BoardGlyph';
 
 // depth: the search behind the eval (DB.11), shown on hover (UI.38); none for a move that ends the game.
-export type MoveEval = { cp: number | null; mate: number | null; depth?: number | null };
+// glyph: "!?" after a human-evidence switch (UI.41). With the eval, so it hides with it (UI.34).
+// best: Stockfish's top move in the position before this one (UI.41), as SAN; null where that
+// position has no search (White's first move).
+export type MoveEval = { cp: number | null; mate: number | null; depth?: number | null; glyph?: "!?" | null; best?: string | null };
+
+// UI.41: the board's badge for a move, while it is the current move. "!?" on a switch;
+// a star on White's move when it is Stockfish's top move, as named before it was played.
+export function moveBadge(san: string, moveEval: MoveEval | null | undefined, ply: number): BoardGlyphName | null {
+  if (!moveEval) return null;
+  if (moveEval.glyph) return moveEval.glyph;
+  if (ply % 2 === 0 && moveEval.best != null && moveEval.best === san) return "star";
+  return null;
+}
+
+// UI.41: what the move costs against Stockfish's top move, from the mover's side, in whole cp:
+// the eval before it (the previous move's) less its own, as the grid shows them. A gain shows
+// as one: two searches of two positions needn't agree. None if either eval is a mate.
+function lossLine(before: MoveEval | null | undefined, after: MoveEval, ply: number) {
+  if (!before || before.cp === null || after.cp === null || before.mate !== null || after.mate !== null) return "";
+  const loss = Math.round(ply % 2 === 0 ? before.cp - after.cp : after.cp - before.cp);
+  return loss < 0 ? ` · gain ${-loss} cp` : ` · loss ${loss} cp`;
+}
+
 
 interface LichessMoveListProps {
   moves: string[]; // e.g. ['d4', 'd5', 'c4', 'dxc4']
@@ -79,7 +102,17 @@ export default function LichessMoveList({ moves, evals, marks = {}, mistakes = {
   // not `title`: the browser's shows late, only on a still pointer, and can't be styled.
   // Fixed to the window, so the list's scrolling doesn't clip it above the first row.
   const [hovered, setHovered] = useState<{ ply: number; x: number; y: number } | null>(null);
-  const hoveredDepth = hovered ? evals?.[hovered.ply]?.depth : null;
+  // UI.41: under the depth, Stockfish's move and the loss, on a move that isn't Stockfish's.
+  const tooltipLines = (() => {
+    const moveEval = hovered ? evals?.[hovered.ply] : null;
+    if (!hovered || !moveEval) return [];
+    const lines: string[] = [];
+    if (moveEval.depth != null) lines.push(`Depth ${moveEval.depth}`);
+    if (moveEval.best != null && moveEval.best !== moves[hovered.ply]) {
+      lines.push(`SF ${moveEval.best}${lossLine(evals?.[hovered.ply - 1], moveEval, hovered.ply)}`);
+    }
+    return lines;
+  })();
 
   const evalAt = (index: number) => {
     const moveEval = evals?.[index];
@@ -96,6 +129,12 @@ export default function LichessMoveList({ moves, evals, marks = {}, mistakes = {
         {formatEval(moveEval)}
       </span>
     );
+  };
+
+  // UI.41: the glyph right after the move, as on Lichess.
+  const glyphAt = (index: number) => {
+    const glyph = evals?.[index]?.glyph;
+    return glyph ? <span className="move-glyph">{glyph}</span> : null;
   };
 
   // A marked move not yet listed (a wrong White move, back at once) still shows its number (GR.07).
@@ -152,6 +191,7 @@ export default function LichessMoveList({ moves, evals, marks = {}, mistakes = {
                 onClick={() => onMoveClick(turn.whiteIndex)}
               >
                 {turn.whiteMove}
+                {glyphAt(turn.whiteIndex)}
                 {evalAt(turn.whiteIndex)}
               </div>
             )}
@@ -164,6 +204,7 @@ export default function LichessMoveList({ moves, evals, marks = {}, mistakes = {
                 onClick={() => onMoveClick(turn.blackIndex)}
               >
                 {turn.blackMove}
+                {glyphAt(turn.blackIndex)}
                 {evalAt(turn.blackIndex)}
               </div>
             )}
@@ -173,8 +214,10 @@ export default function LichessMoveList({ moves, evals, marks = {}, mistakes = {
         ))}
       </div>
     </div>
-    {hovered && hoveredDepth != null && (
-      <div className="eval-tooltip" style={{ left: hovered.x, top: hovered.y }}>Depth {hoveredDepth}</div>
+    {hovered && tooltipLines.length > 0 && (
+      <div className="eval-tooltip" style={{ left: hovered.x, top: hovered.y }}>
+        {tooltipLines.map((line) => <div key={line}>{line}</div>)}
+      </div>
     )}
     </>
   );

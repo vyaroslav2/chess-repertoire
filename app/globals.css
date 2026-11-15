@@ -489,6 +489,13 @@ html.coords-large .cg-wrap coords coord {
   color: inherit;
 }
 
+/* UI.41: a glyph after the move, as on Lichess (lila ui/lib/css/tree/_tree.scss:
+   .tview2-column > move glyph), but in the move's own colour: no tint. */
+.move-glyph {
+  margin-left: 0.08em;
+  font-size: 0.82em;
+}
+
 /* ======================================================== */
 /* Eval gauge (UI.31)                                       */
 /* ======================================================== */

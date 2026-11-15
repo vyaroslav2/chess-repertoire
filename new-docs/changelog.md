@@ -77,3 +77,4 @@ tags:
 
 - SC: each eval in the engine cache has `importedAt`: empty for ours, the time of import for one imported from the friend ([[SC|SC.52]]).
 - Trainer: hover an eval to see its depth, now with real depths from the database ([[UI|UI.38]]).
+- Trainer: engine marks. `!?` after a human-evidence switch, in the list and on the board; a star on the board when White plays Stockfish's top move; hover shows Stockfish's move and the loss, `SF Nf6 · loss 12 cp`. All hide with E. Tried on /glyph ([[UI|UI.41]]).

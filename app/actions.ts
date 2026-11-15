@@ -3,7 +3,7 @@
 import { PrismaClient } from "@prisma/client";
 import { Chess } from "chess.js";
 import { fsrs, createEmptyCard, Rating, Card, State, type Grade } from "ts-fsrs";
-import { lineEvals, lineOpenings } from "../lib/line-details";
+import { answerEval, lineEvals, lineOpenings } from "../lib/line-details";
 
 const prisma = new PrismaClient();
 const f = fsrs(); // Initialize FSRS algorithm
@@ -134,17 +134,16 @@ export async function fetchDemoLines(repertoireId: string) {
   const positions = await fetchDemoPositions(repertoireId);
   const fullLine = (card: (typeof positions)[number]) => [...card.lineMoves, card.targetMove.san];
   const routes = positions.map(card => card.lineMoves.join(" "));
-  return positions
-    .filter(card => {
-      const route = fullLine(card).join(" ");
-      return !routes.some(other => other.startsWith(`${route} `));
-    })
-    .map(card => ({
-      ...card,
-      fullLine: fullLine(card),
-      // By ply, the answer's eval last.
-      lineEvalByPly: [...card.evalByPly, { cp: card.targetMove.cp, mate: card.targetMove.mate, depth: card.targetMove.depth }],
-    }));
+  const lines = positions.filter(card => {
+    const route = fullLine(card).join(" ");
+    return !routes.some(other => other.startsWith(`${route} `));
+  });
+  return Promise.all(lines.map(async card => ({
+    ...card,
+    fullLine: fullLine(card),
+    // By ply, the answer's eval last.
+    lineEvalByPly: [...card.evalByPly, await answerEval(card.node.fullFen, card.targetMove)],
+  })));
 }
 
 export async function updateSrsStats(statId: string, quality: number) {
