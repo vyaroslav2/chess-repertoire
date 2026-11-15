@@ -143,7 +143,7 @@ export async function fetchDemoLines(repertoireId: string) {
       ...card,
       fullLine: fullLine(card),
       // By ply, the answer's eval last.
-      lineEvalByPly: [...card.evalByPly, { cp: card.targetMove.cp, mate: card.targetMove.mate }],
+      lineEvalByPly: [...card.evalByPly, { cp: card.targetMove.cp, mate: card.targetMove.mate, depth: card.targetMove.depth }],
     }));
 }
 

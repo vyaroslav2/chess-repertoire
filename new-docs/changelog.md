@@ -76,3 +76,4 @@ tags:
 ## 2026-11-15
 
 - SC: each eval in the engine cache has `importedAt`: empty for ours, the time of import for one imported from the friend ([[SC|SC.52]]).
+- Trainer: hover an eval to see its depth, now with real depths from the database ([[UI|UI.38]]).

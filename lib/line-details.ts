@@ -4,15 +4,15 @@ const prisma = createPrismaClient();
 
 type TargetMove = { toNodeId: string | null; stopReason: string | null; uci: string | null };
 
-// The eval of each move in a line (DB.11), by ply: the move out of the node at
+// The eval of each move in a line (DB.11), with its depth (UI.38), by ply: the move out of the node at
 // each history prefix. Null where a move carries none.
 export async function lineEvals(repertoireId: string, historyUcis: string[]) {
   const histories = historyUcis.map((_, index) => historyUcis.slice(0, index).join(" "));
   const moves = await prisma.repertoireMove.findMany({
     where: { repertoireId, uci: { in: historyUcis }, fromNode: { history: { in: histories } } },
-    select: { uci: true, cp: true, mate: true, fromNode: { select: { history: true } } }
+    select: { uci: true, cp: true, mate: true, depth: true, fromNode: { select: { history: true } } }
   });
-  const byRoute = new Map(moves.map(move => [`${move.fromNode.history}|${move.uci}`, { cp: move.cp, mate: move.mate }]));
+  const byRoute = new Map(moves.map(move => [`${move.fromNode.history}|${move.uci}`, { cp: move.cp, mate: move.mate, depth: move.depth }]));
   return historyUcis.map((uci, index) => byRoute.get(`${histories[index]}|${uci}`) ?? null);
 }
 

@@ -70,7 +70,7 @@ function lineStepCard(card: any, step: number) {
   return {
     ...card,
     lineMoves: card.fullLine.slice(0, ply),
-    targetMove: { ...card.targetMove, san: card.fullLine[ply], cp: answerEval?.cp ?? null, mate: answerEval?.mate ?? null },
+    targetMove: { ...card.targetMove, san: card.fullLine[ply], cp: answerEval?.cp ?? null, mate: answerEval?.mate ?? null, depth: answerEval?.depth ?? null },
     evalByPly: card.lineEvalByPly.slice(0, ply),
   };
 }
