@@ -23,7 +23,7 @@ tags:
 | `localStockfishThreads`       | 1; one search at a time                          | related to local Stockfish  cache profile                   |
 | `localStockfishHashMb`        | 1024                                             | related to local Stockfish  cache profile                   |
 | `localStockfishMultiPv`       | 1                                                | related to local Stockfish  cache profile                   |
-| `hardcodedBlackResponses`[^4] | 1. e4 c6, 1. d4 d5, 1. c4 e6; d5 against the other 17 first moves | so rare openings lead to 1. d4 d5 lines; decided 2026-11-07 |
+| `hardcodedBlackResponses`[^4] | 1. e4 c6, 1. d4 d5 | every other first move gets the baseline (EW.09); from move 2, human evidence (EW.14); decided 2026-11-14, replacing 1. c4 e6 and d5 against the other 17 (2026-11-07) |
 | `humanEvidence`               | off                                              | the selector in EW.14; [[HEG]] HEG.50                       |
 | `selectorMonths`              | 2023-06 to 2026-05                               | its own Explorer cache profile; [[HEG]] HEG.20              |
 | `selectorConfidence`          | 90%                                              | [[HES]] HES.104                                             |
