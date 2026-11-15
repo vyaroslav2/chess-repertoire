@@ -51,7 +51,7 @@ _next_request_at = 0.0
 def explorer_url(fen):
     # quote(safe="") matches encodeURIComponent in the project's lichess.ts:
     # spaces become %20, not "+". urlencode would produce "+".
-    return "https://explorer.lichess.ovh/%s?fen=%s&speeds=%s&ratings=%s" % (
+    return "https://explorer.lichess.org/%s?fen=%s&speeds=%s&ratings=%s" % (
         SOURCE,
         urllib.parse.quote(fen, safe=""),
         ",".join(SPEEDS),
