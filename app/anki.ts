@@ -94,7 +94,7 @@ async function trainerCard(card: ReviewerCard) {
     evalByPly = Array(lineMoves.length).fill(null);
   }
 
-  const answerEval = { cp: targetMove?.cp ?? null, mate: targetMove?.mate ?? null };
+  const answerEval = { cp: targetMove?.cp ?? null, mate: targetMove?.mate ?? null, depth: targetMove?.depth ?? null };
   return {
     id: `anki-${card.cardId}`,
     ankiCardId: card.cardId,

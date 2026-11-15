@@ -105,7 +105,7 @@ DB.32 **Engine evaluations** — held in `EngineCache`, stored against the local
 * Each eval also stores `depth`: the deepest depth its search completed before the node limit stopped it ([[EW|EW.09]]). The unfinished depth never counts.
 * Evals cached before this (2026-10-24) have no depth, and nothing searches them again until the profile changes. Their depth reads back as unknown (`null`), and so does that of the moves that use them.
 * Import from the shared cache also adds evals here ([[SC|SC.52]]). Each eval's `importedAt` says which: empty for ours, the import's time for one imported.
-* #question Where the UI shows the depth: next to the eval (e.g. `+0.15 · d35`), or only on hover.
+* The UI shows the depth only on hover, not next to the eval ([[UI|UI.38]]).
 
 DB.33 **Opening metadata** — the result of [[DB|DB.06]], stored per route: repertoire + `history`. A rebuilt tree gets its names back without asking Explorer again.
 

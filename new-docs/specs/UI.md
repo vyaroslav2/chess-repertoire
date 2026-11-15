@@ -120,7 +120,7 @@ With the pointer on a move's eval (UI.26), a tooltip shows the depth of the sear
 - Not the browser's tooltip (`title`), tried first on `/depth`, 2026-10-25. It shows only after the pointer rests still for about half a second, often not again until the pointer leaves and comes back, and in the browser's own font, colours, border and corners, none of which can be styled.
 - Not on the eval gauge (UI.31): it has no number to point at.
 - Source: `evalAt` in `components/LichessMoveList.tsx`; `.eval-tooltip` in `app/globals.css`, sharing its look with `.settings-notice` and `.undo-notice`.
-- On `/depth` only, with mock evals (UI.29). The trainer doesn't pass depths to the move list yet.
+- In the trainer since 2026-11-15, on every page: each move's depth comes with its eval (`lineEvals` in `lib/line-details.ts`), the answer's from its own move. `/depth` keeps its mock evals (UI.29).
 
 UI.39 **Letter keys by position.**
 Every letter hotkey is read by position (`e.code`, e.g. `KeyF`), not by the letter typed (`e.key`). So it works on a Russian layout too: the F key types "а" there, but its code is still `KeyF`. Since 2026-10-26.
