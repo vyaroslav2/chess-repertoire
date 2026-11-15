@@ -100,7 +100,7 @@ async function fetchExplorerShape(fen: string, cacheProfile: string, query: stri
     };
   }
 
-  const url = `https://explorer.lichess.ovh/lichess?fen=${encodeURIComponent(fullFen)}&${query}`;
+  const url = `https://explorer.lichess.org/lichess?fen=${encodeURIComponent(fullFen)}&${query}`;
   // AR.11: Explorer throws on give-up, so any result here is an answer.
   const result = await requestApi("Explorer", url, { body: "json", headers: lichessHeaders(true) });
   if (result.kind !== "answer") {

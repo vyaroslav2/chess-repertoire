@@ -56,8 +56,8 @@ test('AR.01: requests on one lane go one at a time, with the gap after each answ
   }) as typeof fetch;
 
   await Promise.all([
-    requestApi('Explorer', 'https://explorer.lichess.ovh/lichess?fen=one', { body: 'json' }),
-    requestApi('Explorer', 'https://explorer.lichess.ovh/lichess?fen=two', { body: 'json' })
+    requestApi('Explorer', 'https://explorer.lichess.org/lichess?fen=one', { body: 'json' }),
+    requestApi('Explorer', 'https://explorer.lichess.org/lichess?fen=two', { body: 'json' })
   ]);
 
   assert.strictEqual(starts.length, 2);
@@ -70,11 +70,11 @@ test('AR.01: Explorer and Wikibooks each have their own lane', async () => {
   const wait = async (ms: number) => { waits.push(ms); };
   const { send } = answers(ok());
 
-  await requestApi('Explorer', 'https://explorer.lichess.ovh/lichess', { body: 'json', fetch: send, wait });
+  await requestApi('Explorer', 'https://explorer.lichess.org/lichess', { body: 'json', fetch: send, wait });
   await requestApi('Wikibooks', 'https://en.wikibooks.org/w/api.php', { body: 'json', fetch: send, wait });
   assert.deepStrictEqual(waits, [], 'Wikibooks did not wait for the Lichess gap');
 
-  await requestApi('Explorer', 'https://explorer.lichess.ovh/lichess', { body: 'json', fetch: send, wait });
+  await requestApi('Explorer', 'https://explorer.lichess.org/lichess', { body: 'json', fetch: send, wait });
   assert.strictEqual(waits.length, 1);
   assert.ok(waits[0] > 4_900, `Explorer waited ${waits[0]}ms after Explorer`);
 });
@@ -90,7 +90,7 @@ test('AR.03: a request with no answer after apiRequestTimeoutMs counts as a netw
     });
   }) as typeof fetch;
 
-  const result = await requestApi('Explorer', 'https://explorer.lichess.ovh/lichess', { body: 'json' });
+  const result = await requestApi('Explorer', 'https://explorer.lichess.org/lichess', { body: 'json' });
   assert.deepStrictEqual(result, { kind: 'answer', body: { moves: [] } });
   assert.strictEqual(attempts, 2);
   assert.deepStrictEqual(logs, ['[WARNING] Explorer returned a timeout. Pausing the Lichess lane for 0 s, then retrying once.']);
@@ -103,7 +103,7 @@ test('AR.04: requests never prompt the user', () => {
 
 test('AR.05: a readable HTTP 200 is returned as the answer', async () => {
   const { send, calls } = answers(ok({ moves: [{ san: 'e4' }] }));
-  const result = await requestApi('Explorer', 'https://explorer.lichess.ovh/lichess', { body: 'json', fetch: send });
+  const result = await requestApi('Explorer', 'https://explorer.lichess.org/lichess', { body: 'json', fetch: send });
   assert.deepStrictEqual(result, { kind: 'answer', body: { moves: [{ san: 'e4' }] } });
   assert.strictEqual(calls.length, 1);
 });
@@ -163,7 +163,7 @@ test('AR.08, AR.11, AR.13: Wikibooks failing again after retry is turned off for
 test('AR.08, AR.11: Explorer failing again after retry throws', async () => {
   const { send, calls } = answers(status(502));
   await assert.rejects(
-    requestApi('Explorer', 'https://explorer.lichess.ovh/lichess', { body: 'json', fetch: send }),
+    requestApi('Explorer', 'https://explorer.lichess.org/lichess', { body: 'json', fetch: send }),
     /Explorer failed again after retry: HTTP 502\./
   );
   assert.strictEqual(calls.length, 2);
@@ -183,7 +183,7 @@ test('AR.09: any other 4xx gives up at once without a retry', async () => {
 
   const { send, calls } = answers(status(404));
   await assert.rejects(
-    requestApi('Explorer', 'https://explorer.lichess.ovh/lichess', { body: 'json', fetch: send }),
+    requestApi('Explorer', 'https://explorer.lichess.org/lichess', { body: 'json', fetch: send }),
     /Explorer returned HTTP 404\./
   );
   assert.strictEqual(calls.length, 1);
