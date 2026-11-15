@@ -67,3 +67,8 @@ tags:
 - SC: export and import of the shared eval cache, with checks on every eval and all-or-nothing import ([[SC|SC.51–57]]). `scripts/sc_export.ts`, `scripts/sc_import.ts`; the friend's Python version in `scripts/sc-friend/`.
 - Tests: a test run can no longer touch dev.db. Every Prisma client comes from `src/lib/db/client.ts`, which refuses any database but `test.db` in a test. `run_db_tests.ts` with no file now runs every test file. Made after a test run directly on dev.db wiped the 200M engine cache this morning.
 - Generator: copies dev.db to `prisma/dev.db.bak-YYYY-MM-DD-HHMM` before each run (no copy, no run; newest 10 kept), and exports the engine cache to `exports/` after each run ([[SC|SC.58]]).
+
+## 2026-11-14
+
+- Config: only 1. e4 c6 and 1. d4 d5 stay hardcoded. Every other first move gets Stockfish's baseline (EW.09); from move 2, human evidence as before (EW.14).
+- SC: the friend's scripts connect through his own `db_config.py` or `.env`, and `sc_import.py` / `sc_export.py` run with no arguments, for his Access buttons.
