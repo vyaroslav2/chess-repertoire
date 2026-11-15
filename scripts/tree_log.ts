@@ -180,12 +180,14 @@ function selectorLines(input: TreeLogInput, reply: RepertoireMove): string[] {
   // The limits are in the config block; only a line budget running low changes one here.
   const allowed = selectorLineBudget - spentBefore;
   // One verdict per table, on the move played: `pass` if it replaced the baseline, `champion` if the baseline stays.
+  // The champion on top, then the other moves by games, most first; ties by SAN.
+  const judged = [...stored.judged].sort((a, b) => b.games - a.games || a.san.localeCompare(b.san));
   const rows = [
     ["move", "games", "score", "2M eval", "safe gain", allowed < selectorCpLimit ? `200M loss ≤${allowed}` : "200M loss", "verdict"],
     [reply.championSan ?? "?", count(stored.championGames), stored.championScore === null ? "—" : percent(stored.championScore),
       evalText(reply.championCp2M), "—", "—", stored.judged.some(move => move.san === reply.san) ? "" : "champion"],
     // HEG.32–33: a safe-gain failure or an outranked move has no 200M search; its stored cp loss is the 2M evals' difference.
-    ...stored.judged.map(move => [move.san, count(move.games), percent(move.score), evalText(move.cpWhite, move.mateWhite),
+    ...judged.map(move => [move.san, count(move.games), percent(move.score), evalText(move.cpWhite, move.mateWhite),
       move.safeGain === undefined ? "—" : (move.safeGain * 100).toFixed(1),
       move.cpLoss === undefined || move.cpLoss === null || move.verdict === "safe-gain" || move.verdict === "outranked" ? "—" : String(move.cpLoss),
       move.san === reply.san ? "pass" : ""])
