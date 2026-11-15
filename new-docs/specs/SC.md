@@ -121,6 +121,7 @@ SC.52 **Import.** A script reads the other person's file:
 * Every eval must pass SC.55. Any that fails: the whole file is refused, naming the position and the rule.
 * Evals are matched on `fullFen`. A position not yet cached is added, under this side's own key (here: the SC.22 profile, new ids, `rank` = 1, `fetchedAt` = now).
 * A position already cached is a check: `uci`, `san`, `cp`, `mate`, `depth`, `nodes` and `pv` must all be equal. Equal: skip it. Any difference: hard error, naming the position and the fields that differ, and nothing from that file is written. Two engines that disagree must not be mixed.
+* Each added eval gets `importedAt` = now (decided 2026-11-15), so ours and imported evals can be told apart later. Ours have `importedAt` empty: every eval our own engine writes, and every eval cached before this column. A skipped eval keeps what it had. If our engine later writes an imported eval again, it is ours: `importedAt` goes back to empty. Export does not look at `importedAt`, and the file does not carry it (SC.04).
 
 SC.53 **All or nothing.** Import checks the whole file first: the settings, every eval (SC.55), and every eval already cached (SC.52). Only then does it write, in one transaction. So a file is either imported whole or not at all.
 
