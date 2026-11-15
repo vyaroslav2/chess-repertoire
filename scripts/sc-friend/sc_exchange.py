@@ -1,12 +1,13 @@
 # Общий кэш оценок (SCR.50–57): экспорт и импорт файла обмена для таблицы `calculations` в MySQL.
 #
-#   python sc_exchange.py export              -> exports/evals-ГГГГ-ММ-ДД.json
+#   python sc_exchange.py export              -> exports/evals-ГГГГ-ММ-ДД.json рядом со скриптом
 #   python sc_exchange.py export --out f.json
 #   python sc_exchange.py import f.json
 #
 # Нужно: Python 3.8+, python-chess, mysql-connector-python
 #   python -m pip install chess mysql-connector-python
-# Пароль MySQL: переменная окружения SC_MYSQL_PASSWORD, иначе скрипт спросит его.
+# Подключение — как в твоих скриптах: mysql_config("gambits") из db_config.py рядом с этим файлом.
+# Если db_config.py нет, берутся DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, DB_PORT из .env.
 from __future__ import annotations
 
 import argparse
@@ -21,13 +22,8 @@ from pathlib import Path
 
 import chess
 
-# --- MySQL: поменять под себя ---
-DB_CONFIG = {
-    "host": "127.0.0.1",
-    "port": 3306,
-    "user": os.environ.get("SC_MYSQL_USER", "root"),
-    "database": "gambits",
-}
+# --- MySQL ---
+DATABASE = "gambits"
 TABLE_NAME = "calculations"
 
 # SCR.10, SCR.12, SCR.22: ровно эти настройки, у обоих одинаковые. Не менять.
@@ -324,27 +320,54 @@ def import_evals(conn, evals):
 
 # --- Запуск ---
 
+def config_from_env():
+    """Как db_config в твоих скриптах: DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, DB_PORT из .env."""
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass  # без python-dotenv — только переменные окружения
+    config = {
+        "host": os.getenv("DB_HOST", "127.0.0.1"),
+        "user": os.getenv("DB_USER"),
+        "password": os.getenv("DB_PASSWORD"),
+        "database": os.getenv("DB_NAME", DATABASE),
+        "port": int(os.getenv("DB_PORT", 3306)),
+    }
+    if not config["user"]:
+        raise Refused("Нет DB_USER: ни db_config.py, ни .env не найдены")
+    if config["password"] is None:
+        config["password"] = getpass.getpass(f"Пароль MySQL для {config['user']}: ")
+    return config
+
+
 def connect():
     import mysql.connector  # здесь, чтобы проверки работали и без MySQL
 
-    password = os.environ.get("SC_MYSQL_PASSWORD")
-    if password is None:
-        password = getpass.getpass(f"Пароль MySQL для {DB_CONFIG['user']}: ")
-    return mysql.connector.connect(**DB_CONFIG, password=password, autocommit=False)
+    try:
+        from db_config import mysql_config  # твой файл, рядом с этим скриптом
+        config = mysql_config(DATABASE)
+    except ImportError:
+        config = config_from_env()
+    return mysql.connector.connect(**{**config, "autocommit": False})
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Общий кэш оценок (SCR.50–57)")
     sub = parser.add_subparsers(dest="command", required=True)
     export_parser = sub.add_parser("export", help="записать все оценки в файл")
-    export_parser.add_argument("--out", help="куда писать; по умолчанию exports/evals-ГГГГ-ММ-ДД.json")
+    export_parser.add_argument("--out", help="куда писать; по умолчанию exports/evals-ГГГГ-ММ-ДД.json рядом со скриптом")
     import_parser = sub.add_parser("import", help="добавить оценки из файла друга")
     import_parser.add_argument("file")
     args = parser.parse_args(argv)
 
     try:
         if args.command == "import":
-            evals = parse_file(Path(args.file).read_text(encoding="utf-8"))
+            try:
+                text = Path(args.file).read_text(encoding="utf-8")
+            except OSError as error:
+                raise Refused(f"Не удалось прочитать файл {args.file}: {error.strerror}")
+            evals = parse_file(text)
             conn = connect()
             try:
                 added, filled, already = import_evals(conn, evals)
@@ -358,7 +381,8 @@ def main(argv=None):
                 text, count = export_evals(conn)
             finally:
                 conn.close()
-            out = Path(args.out) if args.out else Path("exports") / f"evals-{date.today().isoformat()}.json"
+            # По умолчанию — рядом со скриптом, откуда бы его ни запустили (Access, двойной щелчок).
+            out = Path(args.out) if args.out else Path(__file__).resolve().parent / "exports" / f"evals-{date.today().isoformat()}.json"
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text(text, encoding="utf-8", newline="\n")
             print(f"[ГОТОВО] {count} оценок записано в {out.resolve()}")
