@@ -53,7 +53,7 @@ export const defaultConfig: Config = {
   tinyThreshold: 0.0000001,
   nodeTouchCountCap: 500,
   minCumProb: 0.001,
-  depthCap: 5,
+  depthCap: 4,
   explorerSpeeds: ["classical", "rapid"],
   explorerRatings: [1600, 1800],
   apiRetryDelayMs: 120_000,
@@ -67,7 +67,7 @@ export const defaultConfig: Config = {
   // 2026-11-07: d5 against every first move but 1. e4 and 1. c4, so the rare openings lead to 1. d4 d5 lines.
   // 1. c4 d5 loses 52 cp (200M nodes); 1. c4 e6 loses 3 and reaches the 1. d4 d5 2. c4 e6 tree after 2. d4 d5.
   hardcodedBlackResponses: ["1. e4 c6", "1. d4 d5"],
-  humanEvidence: true,
+  humanEvidence: false,
   selectorMonths: { since: "2023-06", until: "2026-05" },
   selectorConfidence: 0.9,
   selectorMargin: 0.01,

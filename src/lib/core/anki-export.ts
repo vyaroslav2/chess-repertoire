@@ -7,7 +7,7 @@ import { prisma } from "../db/operations";
 
 export const ankiConfig = {
   ankiConnectUrl: "http://localhost:8765",
-  profile: "User test New",
+  profile: "Baseline",
   deckName: "Chess Repertoire",
   modelName: "Chess Repertoire",
 };
