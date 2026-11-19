@@ -20,7 +20,7 @@ test('generation-config: every setting has the value in the note', () => {
     assert.strictEqual(defaultConfig.tinyThreshold, 0.0000001);
     assert.strictEqual(defaultConfig.nodeTouchCountCap, 500);
     assert.strictEqual(defaultConfig.minCumProb, 0.001);
-    assert.strictEqual(defaultConfig.depthCap, 4);
+    assert.strictEqual(defaultConfig.depthCap, 5);
     assert.deepStrictEqual(defaultConfig.explorerSpeeds, ['classical', 'rapid']);
     assert.deepStrictEqual(defaultConfig.explorerRatings, [1600, 1800]);
     assert.strictEqual(defaultConfig.apiRetryDelayMs, 120_000);
