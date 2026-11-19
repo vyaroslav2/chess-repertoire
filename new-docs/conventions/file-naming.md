@@ -23,6 +23,7 @@ tags:
 19. Glossary notes link to other glossary notes and to config, never to block IDs (S3.11, TR.41). Where a term is used is shown by Obsidian's backlinks.
 20. sessions/    one note per coding session: what was done, the decisions made and why, what is next (`#in-progress` marks items already started), and the commits. Named by the date the session started, even if it runs past midnight: `session-2026-10-09.md`; a second session that day is `session-2026-10-09-2.md`. Start times and end times go in the frontmatter. Made from [[templates/session|the session template]]. Committed, unlike logs/.
 21. `changelog.md` sits at the top of the vault, outside the folders. Short, plain list of what changed, newest date first: one `## YYYY-MM-DD` heading per day, no categories. Committed, like sessions/. It summarises; the commits hold the detail.
+22. `commands.md` sits at the top of the vault, next to `changelog.md`: the commands to run the app, the generator, the log and the cache export and import.
 
 
 
