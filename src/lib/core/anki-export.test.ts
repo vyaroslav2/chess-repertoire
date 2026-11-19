@@ -94,10 +94,10 @@ test('AK.17 the run exporter never switches profile, never throws, and warns onc
   running = true;
   await exportCards('final');
   assert.equal(logs.length, 2);
-  assert.match(logs[1], /profile Yaroslav is open, not User test New/);
+  assert.match(logs[1], /profile Yaroslav is open, not Baseline/);
   assert.ok(!calls.includes('loadProfile'), 'never switches profile');
 
-  profile = 'User test New';
+  profile = 'Baseline';
   calls.length = 0;
   await exportCards('final');
   assert.deepEqual(calls, ['getActiveProfile', 'createDeck', 'modelNames', 'findNotes', 'notesInfo'], 'nothing to add in an empty tree');

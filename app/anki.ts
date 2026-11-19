@@ -38,7 +38,7 @@ async function findDeck() {
   const cardIds = await anki<number[]>("findCards", { query: `note:"${modelName}"` });
   if (cardIds.length === 0) {
     const profile = await anki<string>("getActiveProfile");
-    throw new AnkiError(`No ${modelName} cards in profile ${profile}. Open profile User test New in Anki, then reload.`);
+    throw new AnkiError(`No ${modelName} cards in profile ${profile}. Open profile Baseline in Anki, then reload.`);
   }
   const [card] = await anki<{ deckName: string }[]>("cardsInfo", { cards: [cardIds[0]] });
   return card.deckName;
