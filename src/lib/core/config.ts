@@ -53,7 +53,7 @@ export const defaultConfig: Config = {
   tinyThreshold: 0.0000001,
   nodeTouchCountCap: 500,
   minCumProb: 0.001,
-  depthCap: 4,
+  depthCap: 5,
   explorerSpeeds: ["classical", "rapid"],
   explorerRatings: [1600, 1800],
   apiRetryDelayMs: 120_000,

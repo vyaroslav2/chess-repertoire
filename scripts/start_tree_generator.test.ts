@@ -12,6 +12,7 @@ import {
   type GeneratorQueueItem,
   type PendingCanonicalContinuations
 } from "../src/lib/core/generator";
+import { defaultConfig } from "../src/lib/core/config";
 import { runTreeGenerator } from "./start_tree_generator";
 
 function tempLog(label: string): string {
@@ -113,7 +114,7 @@ test("TGL: log file is named treegen-[timestamp].md and its header shows the con
       now: () => new Date("2026-08-30T11:15:23.456Z")
     });
     const log = fs.readFileSync(path.join(fixtureRoot, "new-docs", "logs", "treegen-2026-08-30T111523Z.md"), "utf8");
-    assert.match(log, /^Depth: minCumProb=0\.1%; depthCap=6 \(full moves\)$/m);
+    assert.match(log, new RegExp(`^Depth: minCumProb=0\\.1%; depthCap=${defaultConfig.depthCap} \\(full moves\\)$`, "m"));
     assert.doesNotMatch(log, /3 full moves/);
   } finally {
     fs.rmSync(fixtureRoot, { recursive: true, force: true });

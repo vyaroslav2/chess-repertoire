@@ -12,7 +12,7 @@ tags:
 | `tinyThreshold`               | 0.00001% (0.0000001 as a fraction)               | [[tiny-threshold]]                                          |
 | `nodeTouchCountCap`[^2]       | 500                                              | [[node-touch-count-cap]]                                    |
 | `minCumProb`[^3]              | 0.1% (0.001 as a fraction)                       | [[min-cum-prob]]                                            |
-| `depthCap`                    | 4                                                | full moves counted from the root; a ceiling for every route. Lowered from 15 on 2026-11-07: at 200M nodes a deeper tree would take weeks. Set to 4 on 2026-11-13; it goes back up to 15 one move at a time |
+| `depthCap`                    | 5                                                | full moves counted from the root; a ceiling for every route. Lowered from 15 on 2026-11-07: at 200M nodes a deeper tree would take weeks. Set to 4 on 2026-11-13 and to 5 on 2026-11-18; it goes back up to 15 one move at a time |
 | `explorerSpeeds`              | classical, rapid                                 | related to amateur cache profile                            |
 | `explorerRatings`             | 1600, 1800                                       | related to amateur cache profile                            |
 | `apiRetryDelayMs`             | 120 000                                          |                                                             |

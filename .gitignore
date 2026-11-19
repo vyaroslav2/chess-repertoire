@@ -68,3 +68,7 @@ scripts/temp/depth_drift_results.json
 
 # SC.56: exchange files for the shared eval cache
 /exports/
+
+# Python bytecode from the friend's scripts
+__pycache__/
+*.pyc
