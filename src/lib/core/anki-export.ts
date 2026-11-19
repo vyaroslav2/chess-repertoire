@@ -5,10 +5,13 @@ import { createHash } from "crypto";
 
 import { prisma } from "../db/operations";
 
+// Each profile has one deck, named after it: Baseline (engine moves only), Switches (human evidence).
+const profile = "Baseline";
+
 export const ankiConfig = {
   ankiConnectUrl: "http://localhost:8765",
-  profile: "Baseline",
-  deckName: "Chess Repertoire",
+  profile,
+  deckName: profile,
   modelName: "Chess Repertoire",
 };
 
